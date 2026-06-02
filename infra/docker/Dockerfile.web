@@ -1,0 +1,18 @@
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json ./
+COPY packages/shared-types ./packages/shared-types
+COPY packages/shared-prompts ./packages/shared-prompts
+COPY packages/sdk ./packages/sdk
+COPY apps/web ./apps/web
+
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+RUN pnpm install --frozen-lockfile
+RUN pnpm turbo build --filter=@agentforge/web
+
+FROM nginx:alpine
+COPY --from=builder /app/apps/web/dist /usr/share/nginx/html
+EXPOSE 80
+CMD ["nginx", "-g", "daemon off;"]
