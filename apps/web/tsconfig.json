@@ -1,0 +1,35 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "target": "ES2022",
+        "lib": [
+            "ES2022",
+            "DOM",
+            "DOM.Iterable"
+        ],
+        "jsx": "react-jsx",
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "paths": {
+            "@/*": [
+                "./src/*"
+            ]
+        },
+        "outDir": "./dist",
+        "noEmit": true
+    },
+    "include": [
+        "src"
+    ],
+    "references": [
+        {
+            "path": "../../packages/shared-types"
+        },
+        {
+            "path": "../../packages/shared-prompts"
+        },
+        {
+            "path": "../../packages/sdk"
+        }
+    ]
+}

@@ -1,0 +1,22 @@
+{
+  "name": "agentforge",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "turbo dev",
+    "build": "turbo build",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "clean": "turbo clean",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\""
+  },
+  "devDependencies": {
+    "turbo": "^2.4.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.0"
+  }
+}
