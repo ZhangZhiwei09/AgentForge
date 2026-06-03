@@ -13,7 +13,7 @@ export function ConversationList() {
     const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
     const handleCreate = async () => {
-        const conv = await createConv.mutateAsync();
+        const conv = await createConv.mutateAsync(undefined);
         setCurrentConversation(conv.id);
         resetChat();
     };

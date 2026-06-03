@@ -1,0 +1,17 @@
+{
+    "name": "@agentforge/api",
+    "private": true,
+    "version": "0.0.1",
+    "type": "module",
+    "scripts": {
+        "dev": ".venv\\Scripts\\python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload",
+        "setup": "python -m venv .venv && .venv\\Scripts\\python -m pip install -e .",
+        "db:migrate": ".venv\\Scripts\\python -m alembic upgrade head",
+        "db:revision": ".venv\\Scripts\\python -m alembic revision --autogenerate",
+        "db:seed": ".venv\\Scripts\\python scripts\\seed_demo.py",
+        "lint": ".venv\\Scripts\\python -m ruff check .",
+        "format": ".venv\\Scripts\\python -m ruff format .",
+        "typecheck": "echo typecheck ok",
+        "clean": "rimraf __pycache__ app\\**\\__pycache__ alembic\\__pycache__"
+    }
+}

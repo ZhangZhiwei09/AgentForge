@@ -38,7 +38,7 @@ export function ChatArea() {
                     </p>
                     <button
                         onClick={async () => {
-                            const conv = await createConv.mutateAsync();
+                            const conv = await createConv.mutateAsync(undefined);
                         }}
                         className="mt-4 rounded-lg border border-[hsl(var(--border))] px-4 py-2 text-sm transition-colors hover:bg-[hsl(var(--accent))]"
                     >

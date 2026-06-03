@@ -7,13 +7,21 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "start": "powershell -ExecutionPolicy Bypass -File start.ps1",
-    "dev": "turbo dev",
+    "dev": "turbo dev --filter=@agentforge/api --filter=@agentforge/web",
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "clean": "turbo clean",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\""
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
+    "infra:up": "docker compose -f infra/docker/docker-compose.yml up -d",
+    "infra:down": "docker compose -f infra/docker/docker-compose.yml down",
+    "infra:restart": "docker compose -f infra/docker/docker-compose.yml down && docker compose -f infra/docker/docker-compose.yml up -d",
+    "api:setup": "cd apps/api && python -m venv .venv && .venv\\Scripts\\pip install -e .",
+    "api:dev": "cd apps/api && .venv\\Scripts\\python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload",
+    "api:db:migrate": "cd apps/api && .venv\\Scripts\\python -m alembic upgrade head",
+    "api:db:seed": "cd apps/api && .venv\\Scripts\\python scripts\\seed_demo.py",
+    "web:dev": "pnpm --filter @agentforge/web dev",
+    "start": "powershell -ExecutionPolicy Bypass -File start.ps1"
   },
   "devDependencies": {
     "turbo": "^2.4.0",
