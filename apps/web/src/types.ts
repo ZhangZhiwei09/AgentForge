@@ -1,3 +1,3 @@
-import type { Conversation, DebugInfo, Message, ModelInfo, ProviderType } from "@agentforge/shared-types";
+import type { Conversation, DebugInfo, Memory, MemoryInfo, MemorySearchResult, Message, ModelInfo, ProviderType } from "@agentforge/shared-types";
 
-export type { Conversation, DebugInfo, Message, ModelInfo, ProviderType };
+export type { Conversation, DebugInfo, Memory, MemoryInfo, MemorySearchResult, Message, ModelInfo, ProviderType };

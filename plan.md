@@ -509,23 +509,229 @@ LLM
 
 ---
 
-# 十二、V2 预留能力
+# 十二、V2 Memory System
 
-V1 必须提前预留以下扩展点：
+## 1. 核心目标
+
+在 V1 Chat 之上叠加长期记忆系统，让 AI 能够跨会话记住用户信息。
+
+关键能力：
+
+* 自动提取：每轮对话后 LLM 自动判断并提取关键信息
+* 语义检索：对话前根据用户问题检索相关记忆，注入上下文
+* 向量存储：Milvus 存储文本 Embedding，支持语义相似搜索
+* 元数据管理：PostgreSQL 存储记忆元数据（类型、重要性、时间）
+* 记忆面板：前端可视化查看、搜索、删除记忆
+
+---
+
+## 2. 系统架构
 
 ```text
-Memory Engine
-RAG Engine
-Tool Registry
-Voice Engine
-Workflow Engine
-Browser Agent
+┌─────────────────────────────────────┐
+│             React Web               │
+│  ┌──────────┬──────────┬──────────┐ │
+│  │ 会话列表  │  聊天区域  │ 记忆面板  │ │
+│  └──────────┴──────────┴──────────┘ │
+└──────────────────┬──────────────────┘
+                   │
+                   ▼
+┌─────────────────────────────────────┐
+│              FastAPI                 │
+│  ┌──────────┬──────────┬──────────┐ │
+│  │ Chat API │ Mem API  │Provider  │ │
+│  │          │          │  Layer   │ │
+│  └────┬─────┴────┬─────┴────┬─────┘ │
+│       │          │          │       │
+│  ┌────▼────┐ ┌───▼────┐     │       │
+│  │Memory   │ │Memory  │     │       │
+│  │Retriever│ │Extract │     │       │
+│  └────┬────┘ └───┬────┘     │       │
+│       │          │          │       │
+└───────┼──────────┼──────────┼───────┘
+        │          │          │
+        ▼          ▼          ▼
+   ┌────────┐ ┌────────┐ ┌────────┐
+   │Milvus  │ │Postgre │ │DeepSeek│
+   │Vector  │ │  SQL   │ │OpenAI  │
+   └────────┘ └────────┘ └────────┘
 ```
 
-V2 开始接入：
+---
+
+## 3. 技术选型
+
+| 组件 | 技术 | 用途 |
+|------|------|------|
+| 向量数据库 | Milvus Standalone (Docker) | 存储文本 Embedding，语义搜索 |
+| 元数据存储 | PostgreSQL（已有） | 记忆 ID、类型、重要性等 |
+| Embedding | DeepSeek / OpenAI API | 文本 → 向量 |
+| 记忆提取 | LLM Prompt 工程 | 对话后自动提取关键事实 |
+
+---
+
+## 4. 数据模型
+
+### memories (PostgreSQL)
+
+```sql
+id              UUID PRIMARY KEY
+user_id         UUID → users(id)
+type            ENUM('episodic', 'semantic', 'preference')
+content         TEXT                    -- 记忆内容
+importance      FLOAT DEFAULT 0.5      -- 重要性 0~1
+embedding_id    BIGINT                 -- Milvus 向量 ID
+metadata        JSONB DEFAULT '{}'     -- 扩展字段
+conversation_id UUID → conversations(id) -- 来源会话
+created_at      TIMESTAMP
+updated_at      TIMESTAMP
+```
+
+### memory_embeddings (Milvus Collection)
 
 ```text
-PostgreSQL + Milvus
+id              Int64 (Primary, Auto)
+memory_id       VarChar
+user_id         VarChar
+embedding       FloatVector(1536)     -- 向量维度
+content         VarChar               -- 冗余存储便于调试
 ```
 
-构建长期记忆系统。
+---
+
+## 5. Memory Engine 抽象
+
+```python
+class MemoryEngine:
+    async def store(memory: MemoryCreate) -> Memory
+        """存储记忆到 PG + Milvus"""
+
+    async def search(query: str, user_id: str, top_k: int) -> list[Memory]
+        """语义搜索相关记忆"""
+
+    async def extract_and_store(messages: list, user_id: str,
+                                 conversation_id: str) -> list[Memory]
+        """LLM 提取关键信息并存储"""
+
+    async def list(user_id: str, type: str | None) -> list[Memory]
+        """列出用户记忆"""
+
+    async def delete(memory_id: str) -> None
+        """删除记忆"""
+```
+
+---
+
+## 6. API 设计
+
+### 语义搜索记忆
+
+```http
+GET /api/memories/search?q=用户名字&top_k=5
+```
+
+### 列出记忆
+
+```http
+GET /api/memories?type=preference
+```
+
+### 删除记忆
+
+```http
+DELETE /api/memories/{id}
+```
+
+---
+
+## 7. Chat 集成流程
+
+### 对话前 - 记忆注入
+
+```text
+用户发消息
+    ↓
+语义搜索相关记忆 (Milvus)
+    ↓
+将记忆拼接进 System Prompt: "关于用户你知道：..."
+    ↓
+LLM 生成回复（带有上下文）
+```
+
+### 对话后 - 记忆提取
+
+```text
+LLM 回复完成
+    ↓
+调用 MemoryEngine.extract_and_store()
+    ↓
+LLM 分析对话内容，判断是否有新信息
+    ↓
+有 → 提取结构化事实 → Embedding → 存入 Milvus + PostgreSQL
+无 → 跳过（闲聊等无意义对话）
+```
+
+---
+
+## 8. 前端设计
+
+### 记忆面板
+
+```text
+┌──────────────────────────────┐
+│  🔍 搜索记忆...              │
+├──────────────────────────────┤
+│  ┌─────────────────────────┐ │
+│  │ 偏好: 用户喜欢 Python   │ │
+│  │ 2024-01-15 · 重要性 0.8 │ │
+│  │ [删除]                  │ │
+│  └─────────────────────────┘ │
+│  ┌─────────────────────────┐ │
+│  │ 事实: 用户在创业         │ │
+│  │ 2024-01-14 · 重要性 0.9 │ │
+│  │ [删除]                  │ │
+│  └─────────────────────────┘ │
+└──────────────────────────────┘
+```
+
+模式切换：Debug Panel ↔ Memory Panel
+
+---
+
+## 9. V2 验收标准
+
+完成以下能力即视为 V2 完成：
+
+☐ Milvus 容器化部署完成
+
+☐ Memory 数据模型 + 迁移完成
+
+☐ Memory Engine 抽象层完成
+
+☐ 语义搜索 API 完成
+
+☐ 对话后自动记忆提取完成
+
+☐ 对话前记忆注入上下文完成
+
+☐ 前端记忆管理面板完成
+
+☐ 记忆 Debug 信息展示完成
+
+---
+
+# 十三、V3 预留能力
+
+V2 必须提前预留以下扩展点：
+
+```text
+RAG Engine（复用 Memory Engine 的向量检索能力）
+Tool Registry（Tool 定义可视为特殊记忆）
+Knowledge Base（文档记忆 → RAG 自然过渡）
+```
+
+V3 开始接入：
+
+```text
+RAG System（文档上传 → 切片 → Embedding → 检索增强生成）
+```

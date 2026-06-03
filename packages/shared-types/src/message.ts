@@ -22,13 +22,19 @@ export interface ChatRequest {
 }
 
 export interface ChatStreamChunk {
-  type: "token" | "done" | "error";
+  type: "meta" | "token" | "done" | "error";
   content?: string;
   message_id?: string;
   model?: string;
+  provider?: string;
+  memory_count?: number;
   usage?: {
     prompt_tokens: number;
     completion_tokens: number;
     total_tokens: number;
+  };
+  memory?: {
+    injected: number;
+    extracted: number;
   };
 }

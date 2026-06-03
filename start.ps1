@@ -1,18 +1,21 @@
-# AgentForge V1 - One-click startup script
+# AgentForge V2 - One-click startup script
 # Usage: .\start.ps1
 
 $ErrorActionPreference = "Stop"
 $RootDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "  AgentForge V1 - Starting All Services" -ForegroundColor Cyan
+Write-Host "  AgentForge V2 - Starting All Services" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
 # ── 0. Docker Network ───────────────────────────────────────
-docker network create agentforge-net 2>$null
+$netExists = docker network ls -q -f "name=agentforge-net"
+if (-not $netExists) {
+    docker network create agentforge-net 2>$null
+}
 
 # ── 1. Docker PostgreSQL ──────────────────────────────────────
-Write-Host "`n[1/4] Checking PostgreSQL (Docker)..." -ForegroundColor Yellow
+Write-Host "`n[1/6] Checking PostgreSQL (Docker)..." -ForegroundColor Yellow
 
 $container = docker ps -q -f "name=agentforge-pg"
 if (-not $container) {
@@ -42,7 +45,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Host "  PostgreSQL ready on port 5434" -ForegroundColor Green
 
 # ── 2. pgAdmin (GUI) ─────────────────────────────────────────
-Write-Host "`n[2/4] Checking pgAdmin (Docker)..." -ForegroundColor Yellow
+Write-Host "`n[2/6] Checking pgAdmin (Docker)..." -ForegroundColor Yellow
 
 $pgadmin = docker ps -q -f "name=agentforge-pgadmin"
 if (-not $pgadmin) {
@@ -53,6 +56,7 @@ if (-not $pgadmin) {
     } else {
         Write-Host "  Creating pgAdmin container..." -ForegroundColor Gray
         docker run -d --name agentforge-pgadmin `
+            --network agentforge-net `
             -p 5050:80 `
             -e PGADMIN_DEFAULT_EMAIL=admin@agentforge.io `
             -e PGADMIN_DEFAULT_PASSWORD=admin `
@@ -64,22 +68,120 @@ if (-not $pgadmin) {
 Write-Host "  pgAdmin ready on http://localhost:5050" -ForegroundColor Green
 Write-Host "    Login: admin@agentforge.io / admin" -ForegroundColor Gray
 
-# ── 3. Backend (uvicorn) ──────────────────────────────────────
-Write-Host "`n[3/4] Starting backend (FastAPI)..." -ForegroundColor Yellow
+# ── 3. Milvus Vector DB ──────────────────────────────────────
+Write-Host "`n[3/6] Checking Milvus (Docker)..." -ForegroundColor Yellow
+
+# etcd
+$etcd = docker ps -q -f "name=agentforge-etcd"
+if (-not $etcd) {
+    $exists = docker ps -a -q -f "name=agentforge-etcd"
+    if ($exists) {
+        docker start agentforge-etcd | Out-Null
+    } else {
+        docker run -d --name agentforge-etcd `
+            --network agentforge-net `
+            -e ETCD_AUTO_COMPACTION_MODE=revision `
+            -e ETCD_AUTO_COMPACTION_RETENTION=1000 `
+            -e ETCD_QUOTA_BACKEND_BYTES=4294967296 `
+            -e ETCD_SNAPSHOT_COUNT=50000 `
+            -v etcd_data:/etcd `
+            quay.io/coreos/etcd:v3.5.5 `
+            etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd | Out-Null
+    }
+}
+
+# MinIO
+$minio = docker ps -q -f "name=agentforge-minio"
+if (-not $minio) {
+    $exists = docker ps -a -q -f "name=agentforge-minio"
+    if ($exists) {
+        docker start agentforge-minio | Out-Null
+    } else {
+        docker run -d --name agentforge-minio `
+            --network agentforge-net `
+            -e MINIO_ACCESS_KEY=minioadmin `
+            -e MINIO_SECRET_KEY=minioadmin `
+            -v minio_data:/minio_data `
+            minio/minio:RELEASE.2023-03-20T20-16-18Z `
+            server /minio_data --console-address ":9001" | Out-Null
+    }
+}
+
+Start-Sleep -Seconds 5
+
+# Milvus Standalone
+$milvus = docker ps -q -f "name=agentforge-milvus"
+if (-not $milvus) {
+    $exists = docker ps -a -q -f "name=agentforge-milvus"
+    if ($exists) {
+        docker start agentforge-milvus | Out-Null
+    } else {
+        docker run -d --name agentforge-milvus `
+            --network agentforge-net `
+            -e ETCD_ENDPOINTS=agentforge-etcd:2379 `
+            -e MINIO_ADDRESS=agentforge-minio:9000 `
+            -e MINIO_ACCESS_KEY_ID=minioadmin `
+            -e MINIO_SECRET_ACCESS_KEY=minioadmin `
+            -p 19530:19530 `
+            -p 9091:9091 `
+            -v milvus_data:/var/lib/milvus `
+            milvusdb/milvus:v2.3.3 `
+            milvus run standalone | Out-Null
+    }
+    Start-Sleep -Seconds 10
+}
+Write-Host "  Milvus ready on port 19530" -ForegroundColor Green
+
+# ── 4. Backend (uvicorn) ──────────────────────────────────────
+Write-Host "`n[4/6] Starting backend (FastAPI)..." -ForegroundColor Yellow
 
 $ApiDir = Join-Path $RootDir "apps\api"
 $VenvPython = Join-Path $ApiDir ".venv\Scripts\python.exe"
 
-if (-not (Test-Path $VenvPython)) {
+$Py312 = "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python312\python.exe"
+if (-not (Test-Path $Py312)) {
+    Write-Host "  ERROR: Python 3.12 not found at $Py312" -ForegroundColor Red
+    exit 1
+}
+
+$VenvPip = Join-Path $ApiDir ".venv\Scripts\pip.exe"
+
+# Recreate venv if python.exe or pip.exe is missing
+if (-not (Test-Path $VenvPython) -or -not (Test-Path $VenvPip)) {
+    if (Test-Path (Join-Path $ApiDir ".venv")) {
+        Write-Host "  Removing broken virtual environment..." -ForegroundColor Gray
+        Remove-Item -Recurse -Force (Join-Path $ApiDir ".venv")
+    }
     Write-Host "  Creating Python virtual environment..." -ForegroundColor Gray
-    $Py312 = "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python312\python.exe"
-    if (-not (Test-Path $Py312)) {
-        Write-Host "  ERROR: Python 3.12 not found at $Py312" -ForegroundColor Red
+    & $Py312 -m venv (Join-Path $ApiDir ".venv")
+    if (-not (Test-Path $VenvPip)) {
+        # Fallback: try ensurepip if venv didn't include pip
+        & $VenvPython -m ensurepip --upgrade 2>&1 | Out-Null
+    }
+    if (-not (Test-Path $VenvPip)) {
+        Write-Host "  ERROR: Failed to create venv with pip." -ForegroundColor Red
+        Write-Host "  Your Python 3.12 installation may be missing ensurepip." -ForegroundColor Red
+        Write-Host "  Try reinstalling Python 3.12 from https://python.org" -ForegroundColor Red
         exit 1
     }
-    & $Py312 -m venv (Join-Path $ApiDir ".venv")
-    & $VenvPython -m pip install -e $ApiDir | Out-Null
 }
+
+# Always sync dependencies (handles first install + subsequent updates)
+Write-Host "  Syncing Python dependencies..." -ForegroundColor Gray
+& $VenvPython -m pip install -e $ApiDir
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  ERROR: Failed to install Python dependencies" -ForegroundColor Red
+    exit 1
+}
+
+# Run DB migrations
+Write-Host "  Running database migrations..." -ForegroundColor Gray
+Push-Location $ApiDir
+& $VenvPython -m alembic upgrade head
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  WARNING: Database migration failed, continuing anyway..." -ForegroundColor Yellow
+}
+Pop-Location
 
 Write-Host "  Starting uvicorn on http://localhost:8000" -ForegroundColor Gray
 Start-Process -FilePath $VenvPython `
@@ -87,8 +189,28 @@ Start-Process -FilePath $VenvPython `
     -WorkingDirectory $ApiDir `
     -WindowStyle Minimized
 
-# ── 4. Frontend (Vite) ────────────────────────────────────────
-Write-Host "`n[4/4] Starting frontend (Vite)..." -ForegroundColor Yellow
+Start-Sleep -Seconds 3
+
+# Seed demo memories
+$seedScript = Join-Path $ApiDir "scripts\seed_demo.py"
+if (Test-Path $seedScript) {
+    Write-Host "  Seeding demo memories..." -ForegroundColor Gray
+    $prevErrorAction = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+        $seedOutput = & $VenvPython $seedScript 2>&1
+        $seedExit = $LASTEXITCODE
+        if ($seedOutput -match "Embedding failed") {
+            Write-Host "  Note: OpenAI API key not set, memories stored without vector embeddings" -ForegroundColor Yellow
+        }
+    } finally {
+        $ErrorActionPreference = $prevErrorAction
+    }
+    Write-Host "  Demo memories seeded (customer service scenario)" -ForegroundColor Green
+}
+
+# ── 5. Frontend (Vite) ────────────────────────────────────────
+Write-Host "`n[5/6] Starting frontend (Vite)..." -ForegroundColor Yellow
 
 $WebDir = Join-Path $RootDir "apps\web"
 

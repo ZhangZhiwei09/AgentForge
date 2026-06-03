@@ -1,4 +1,4 @@
-import type { ChatRequest, ChatStreamChunk, Conversation, CreateConversationDTO, LLMProviderInfo, Message } from "@agentforge/shared-types";
+import type { ChatRequest, ChatStreamChunk, Conversation, CreateConversationDTO, LLMProviderInfo, Message, Memory, MemorySearchResult } from "@agentforge/shared-types";
 
 export interface AgentForgeConfig {
     baseUrl: string;
@@ -90,5 +90,22 @@ export class AgentForgeClient {
 
     async listProviders(): Promise<LLMProviderInfo[]> {
         return this.request<LLMProviderInfo[]>("/api/providers");
+    }
+
+    async listMemories(type?: string): Promise<Memory[]> {
+        const path = type ? `/api/memories?type=${encodeURIComponent(type)}` : "/api/memories";
+        return this.request<Memory[]>(path);
+    }
+
+    async searchMemories(query: string, topK: number = 5): Promise<MemorySearchResult[]> {
+        return this.request<MemorySearchResult[]>(
+            `/api/memories/search?q=${encodeURIComponent(query)}&top_k=${topK}`
+        );
+    }
+
+    async deleteMemory(id: string): Promise<void> {
+        await this.request<void>(`/api/memories/${id}`, {
+            method: "DELETE",
+        });
     }
 }

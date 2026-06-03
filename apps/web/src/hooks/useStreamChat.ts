@@ -12,6 +12,7 @@ export function useStreamChat() {
         appendMessage,
         appendStreamToken,
         setDebugInfo,
+        setMemoryInfo,
         setIsStreaming,
     } = useChatStore();
 
@@ -66,6 +67,9 @@ export function useStreamChat() {
                             temperature: 0.7,
                             max_tokens: 4096,
                         });
+                        if ((chunk as any).memory) {
+                            setMemoryInfo((chunk as any).memory);
+                        }
                     } else if (chunk.type === "error") {
                         console.error("Stream error:", chunk.content);
                     }

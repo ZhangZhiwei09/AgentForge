@@ -1,8 +1,9 @@
 import { useChatStore } from "@/stores/chat";
-import { PanelRightClose, PanelRightOpen, Cpu, Braces, Timer, Gauge } from "lucide-react";
+import { PanelRightClose, Cpu, Braces, Timer, Gauge, Brain } from "lucide-react";
 
 export function DebugPanel() {
     const debugInfo = useChatStore((s) => s.debugInfo);
+    const memoryInfo = useChatStore((s) => s.memoryInfo);
     const isStreaming = useChatStore((s) => s.isStreaming);
     const toggleDebugPanel = useChatStore((s) => s.toggleDebugPanel);
     const selectedModel = useChatStore((s) => s.selectedModel);
@@ -46,6 +47,13 @@ export function DebugPanel() {
                             value={debugInfo?.latency_ms != null ? `${debugInfo.latency_ms}ms` : "-"}
                         />
                     </Section>
+
+                    {memoryInfo && (
+                        <Section label="Memory" icon={<Brain className="h-3.5 w-3.5" />}>
+                            <InfoRow label="Injected" value={String(memoryInfo.injected)} />
+                            <InfoRow label="Extracted" value={String(memoryInfo.extracted)} />
+                        </Section>
+                    )}
 
                     <Section label="Parameters" icon={<Braces className="h-3.5 w-3.5" />}>
                         <InfoRow label="Temperature" value={debugInfo ? String(debugInfo.temperature) : "-"} />

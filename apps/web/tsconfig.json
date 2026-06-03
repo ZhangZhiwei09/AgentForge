@@ -20,16 +20,5 @@
     },
     "include": [
         "src"
-    ],
-    "references": [
-        {
-            "path": "../../packages/shared-types"
-        },
-        {
-            "path": "../../packages/shared-prompts"
-        },
-        {
-            "path": "../../packages/sdk"
-        }
     ]
 }
