@@ -8,8 +8,11 @@ Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "  AgentForge V1 - Starting All Services" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
+# ── 0. Docker Network ───────────────────────────────────────
+docker network create agentforge-net 2>$null
+
 # ── 1. Docker PostgreSQL ──────────────────────────────────────
-Write-Host "`n[1/3] Checking PostgreSQL (Docker)..." -ForegroundColor Yellow
+Write-Host "`n[1/4] Checking PostgreSQL (Docker)..." -ForegroundColor Yellow
 
 $container = docker ps -q -f "name=agentforge-pg"
 if (-not $container) {
@@ -20,10 +23,12 @@ if (-not $container) {
     } else {
         Write-Host "  Creating PostgreSQL container..." -ForegroundColor Gray
         docker run -d --name agentforge-pg `
+            --network agentforge-net `
             -e POSTGRES_USER=postgres `
             -e POSTGRES_PASSWORD=postgres `
             -e POSTGRES_DB=agentforge `
             -p 5434:5432 `
+            -v pgdata:/var/lib/postgresql/data `
             postgres:16-alpine | Out-Null
     }
     Start-Sleep -Seconds 3
@@ -36,8 +41,31 @@ if ($LASTEXITCODE -ne 0) {
 }
 Write-Host "  PostgreSQL ready on port 5434" -ForegroundColor Green
 
-# ── 2. Backend (uvicorn) ──────────────────────────────────────
-Write-Host "`n[2/3] Starting backend (FastAPI)..." -ForegroundColor Yellow
+# ── 2. pgAdmin (GUI) ─────────────────────────────────────────
+Write-Host "`n[2/4] Checking pgAdmin (Docker)..." -ForegroundColor Yellow
+
+$pgadmin = docker ps -q -f "name=agentforge-pgadmin"
+if (-not $pgadmin) {
+    $exists = docker ps -a -q -f "name=agentforge-pgadmin"
+    if ($exists) {
+        Write-Host "  Starting existing pgAdmin container..." -ForegroundColor Gray
+        docker start agentforge-pgadmin | Out-Null
+    } else {
+        Write-Host "  Creating pgAdmin container..." -ForegroundColor Gray
+        docker run -d --name agentforge-pgadmin `
+            -p 5050:80 `
+            -e PGADMIN_DEFAULT_EMAIL=admin@agentforge.io `
+            -e PGADMIN_DEFAULT_PASSWORD=admin `
+            -v pgadmin_data:/var/lib/pgadmin `
+            dpage/pgadmin4:latest | Out-Null
+    }
+    Start-Sleep -Seconds 3
+}
+Write-Host "  pgAdmin ready on http://localhost:5050" -ForegroundColor Green
+Write-Host "    Login: admin@agentforge.io / admin" -ForegroundColor Gray
+
+# ── 3. Backend (uvicorn) ──────────────────────────────────────
+Write-Host "`n[3/4] Starting backend (FastAPI)..." -ForegroundColor Yellow
 
 $ApiDir = Join-Path $RootDir "apps\api"
 $VenvPython = Join-Path $ApiDir ".venv\Scripts\python.exe"
@@ -59,8 +87,8 @@ Start-Process -FilePath $VenvPython `
     -WorkingDirectory $ApiDir `
     -WindowStyle Minimized
 
-# ── 3. Frontend (Vite) ────────────────────────────────────────
-Write-Host "`n[3/3] Starting frontend (Vite)..." -ForegroundColor Yellow
+# ── 4. Frontend (Vite) ────────────────────────────────────────
+Write-Host "`n[4/4] Starting frontend (Vite)..." -ForegroundColor Yellow
 
 $WebDir = Join-Path $RootDir "apps\web"
 
@@ -76,6 +104,7 @@ Write-Host "  All services starting!" -ForegroundColor Green
 Write-Host "  Frontend : http://localhost:5173" -ForegroundColor White
 Write-Host "  Backend  : http://localhost:8000" -ForegroundColor White
 Write-Host "  API Docs : http://localhost:8000/docs" -ForegroundColor White
+Write-Host "  pgAdmin  : http://localhost:5050" -ForegroundColor White
 Write-Host "  DB Port  : 5434" -ForegroundColor White
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "`nClose the minimized windows to stop services." -ForegroundColor Gray
