@@ -38,6 +38,15 @@ def list_providers() -> list[dict]:
     return result
 
 
+def _first_provider() -> str:
+    """Return the first configured provider name."""
+    if not _providers:
+        _init_providers()
+    if not _providers:
+        raise ValueError("No LLM providers configured")
+    return next(iter(_providers.keys()))
+
+
 def resolve_model(model_id: str | None = None) -> tuple[str, str]:
     """Return (provider_name, resolved_model_id)."""
     if not _providers:
@@ -48,6 +57,7 @@ def resolve_model(model_id: str | None = None) -> tuple[str, str]:
             for m in p.list_models():
                 if m["id"] == model_id:
                     return name, model_id
-        return "openai", model_id
+        # If model not found in any configured provider, use first available
+        return _first_provider(), model_id
 
-    return "openai", settings.default_model
+    return _first_provider(), settings.default_model

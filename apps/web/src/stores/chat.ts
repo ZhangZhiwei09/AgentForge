@@ -30,8 +30,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     messages: [],
     isStreaming: false,
     debugInfo: null,
-    selectedModel: "gpt-4o-mini",
-    selectedProvider: "openai",
+    selectedModel: "deepseek-chat",
+    selectedProvider: "deepseek",
     isDebugOpen: true,
 
     setConversations: (convs) => set({ conversations: convs }),
