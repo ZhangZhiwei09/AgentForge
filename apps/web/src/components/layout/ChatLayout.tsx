@@ -2,6 +2,7 @@ import { ConversationList } from "../sidebar/ConversationList";
 import { ChatArea } from "../chat/ChatArea";
 import { DebugPanel } from "../debug/DebugPanel";
 import { MemoryPanel } from "../memory/MemoryPanel";
+import { CustomerChat } from "../customer-chat/CustomerChat";
 import { useChatStore } from "@/stores/chat";
 import { Braces, Brain } from "lucide-react";
 
@@ -44,6 +45,7 @@ export function ChatLayout() {
                     {panelMode === "debug" ? <DebugPanel /> : <MemoryPanel />}
                 </div>
             )}
+            <CustomerChat />
         </div>
     );
 }
