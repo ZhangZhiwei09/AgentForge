@@ -17,23 +17,23 @@ MILVUS_COLLECTION = "agentforge_memories"
 EMBEDDING_DIM = 1536
 EMBEDDING_MODEL = "text-embedding-ada-002"
 
-SYSTEM_PROMPT_EXTRACT = """You are a memory extraction assistant. Analyze the conversation below and extract any new facts, preferences, or important information about the user.
+SYSTEM_PROMPT_EXTRACT = """你是一个记忆提取助手。分析以下对话，提取出关于用户的新事实、偏好或重要信息。
 
-Return a JSON array of memories. Each memory should have:
-- "type": one of "semantic" (factual knowledge), "preference" (likes/dislikes), "episodic" (past event)
-- "content": a concise statement of the fact
-- "importance": a float 0.0-1.0 indicating how important this memory is (1.0 = critical, 0.0 = trivial)
+返回一个 JSON 数组格式的记忆列表。每条记忆包含以下字段：
+- "type": 记忆类型，可选值："semantic"（事实性知识）、"preference"（喜好/厌恶）、"episodic"（过往事件）
+- "content": 对事实的简洁陈述
+- "importance": 0.0 到 1.0 之间的浮点数，表示这条记忆的重要程度（1.0 = 极其重要，0.0 = 无关紧要）
 
-If the conversation is just casual small talk with no substantive new information, return an empty array [].
+如果对话只是普通的寒暄闲聊，没有实质性的新信息，返回空数组 []。
 
-Example:
-User: "I work at Google and love Python"
-Assistant: "That's great!"
-Output: [{"type": "semantic", "content": "User works at Google", "importance": 0.8}, {"type": "preference", "content": "User likes Python", "importance": 0.7}]"""
+示例：
+User: "我在谷歌工作，非常喜欢 Python"
+Assistant: "太棒了！"
+Output: [{"type": "semantic", "content": "用户在谷歌工作", "importance": 0.8}, {"type": "preference", "content": "用户喜欢 Python", "importance": 0.7}]"""
 
 
 class MemoryEngine:
-    """Memory Engine for storing and retrieving user memories using Milvus + PostgreSQL."""
+    """记忆引擎：使用 Milvus + PostgreSQL 存储和检索用户记忆。"""
 
     def __init__(self, db: AsyncSession):
         self._db = db
@@ -42,7 +42,7 @@ class MemoryEngine:
         self._openai_client = None
 
     def _get_collection(self):
-        """Lazy-init Milvus connection and collection."""
+        """懒初始化 Milvus 连接和集合。"""
         if self._collection is not None:
             return self._collection
 
@@ -79,11 +79,11 @@ class MemoryEngine:
         return self._collection
 
     async def _embed(self, text: str) -> list[float] | None:
-        """Get embedding vector for text. Returns None if no embedding API is available."""
+        """获取文本的向量嵌入。如果没有可用的嵌入 API 则返回 None。"""
         import openai
 
         if self._openai_client is None:
-            # Use OpenAI for embeddings if key is configured, otherwise skip silently
+            # 如果配置了 OpenAI Key 则用于向量嵌入，否则静默跳过
             if settings.openai_api_key:
                 self._openai_client = openai.AsyncOpenAI(
                     api_key=settings.openai_api_key,
@@ -99,17 +99,17 @@ class MemoryEngine:
         return response.data[0].embedding
 
     async def store(self, memory: MemoryCreate, user_id: str) -> MemoryOut:
-        """Store a memory: embed content, save to Milvus, persist metadata to PG."""
+        """存储一条记忆：向量化内容 → 存入 Milvus → 元数据持久化到 PostgreSQL。"""
         memory_id = str(uuid.uuid4())
 
-        # Get embedding
+        # 获取向量嵌入
         try:
             vector = await self._embed(memory.content)
         except Exception as e:
-            logger.warning(f"Embedding failed: {e}, storing without vector")
+            logger.warning(f"向量嵌入失败: {e}，将不携带向量存储")
             vector = None
 
-        # Insert into Milvus
+        # 插入 Milvus
         embedding_id = None
         if vector is not None:
             try:
@@ -123,9 +123,9 @@ class MemoryEngine:
                 collection.flush()
                 embedding_id = mr.primary_keys[0]
             except Exception as e:
-                logger.warning(f"Milvus insert failed: {e}")
+                logger.warning(f"Milvus 插入失败: {e}")
 
-        # Save to PostgreSQL
+        # 保存到 PostgreSQL
         db_memory = MemoryModel(
             id=memory_id,
             user_id=user_id,
@@ -145,8 +145,8 @@ class MemoryEngine:
     async def search(
         self, query: str, user_id: str, top_k: int = 5
     ) -> list[MemorySearchResult]:
-        """Semantic search for memories relevant to the query."""
-        # Get memories from PG first (fallback if no vector search)
+        """语义搜索与查询相关的记忆。"""
+        # 先从 PostgreSQL 获取记忆（向量搜索不可用时的降级方案）
         result = await self._db.execute(
             select(MemoryModel)
             .where(MemoryModel.user_id == user_id)
@@ -155,7 +155,7 @@ class MemoryEngine:
         )
         memories = result.scalars().all()
 
-        # Try vector search
+        # 尝试向量搜索
         try:
             vector = await self._embed(query)
             if vector is not None:
@@ -196,7 +196,7 @@ class MemoryEngine:
                                 )
                             )
 
-                    # Add remaining without scores
+                    # 把没有向量匹配分数的也加上
                     scored_ids = set(scored.keys())
                     for m in memories:
                         if m.id not in scored_ids:
@@ -219,7 +219,7 @@ class MemoryEngine:
                     return scored_memories[:top_k]
 
         except Exception as e:
-            logger.warning(f"Vector search failed, falling back to PG: {e}")
+            logger.warning(f"向量搜索失败，降级到 PostgreSQL: {e}")
 
         return [
             MemorySearchResult(
@@ -244,13 +244,13 @@ class MemoryEngine:
         conversation_id: str,
         provider_name: str = "",
     ) -> list[MemoryOut]:
-        """Use LLM to extract key facts from a conversation and store them."""
+        """用 LLM 从对话中提取关键信息并存储为记忆。"""
         if not messages or len(messages) < 2:
             return []
 
         from openai import AsyncOpenAI
 
-        # Use provider's API for extraction
+        # 优先用 OpenAI 做提取，否则用 DeepSeek
         if provider_name == "openai" and settings.openai_api_key:
             client = AsyncOpenAI(
                 api_key=settings.openai_api_key,
@@ -266,7 +266,7 @@ class MemoryEngine:
 
         conv_text = "\n".join(
             f"{'User' if m['role'] == 'user' else 'Assistant'}: {m['content']}"
-            for m in messages[-6:]  # Last 3 turns
+            for m in messages[-6:]  # 取最近 3 轮对话
         )
 
         try:
@@ -281,7 +281,7 @@ class MemoryEngine:
             )
 
             content = response.choices[0].message.content.strip()
-            # Handle potential markdown code blocks
+            # 处理可能的 markdown 代码块包裹
             if content.startswith("```"):
                 content = content.split("```")[1]
                 if content.startswith("json"):
@@ -306,17 +306,17 @@ class MemoryEngine:
                 results.append(result)
 
             if results:
-                logger.info(f"Extracted {len(results)} memories from conversation")
+                logger.info(f"从对话中提取了 {len(results)} 条记忆")
             return results
 
         except Exception as e:
-            logger.warning(f"Memory extraction failed: {e}")
+            logger.warning(f"记忆提取失败: {e}")
             return []
 
     async def list(
         self, user_id: str, type: str | None = None
     ) -> list[MemoryOut]:
-        """List all memories for a user, optionally filtered by type."""
+        """列出用户的所有记忆，可按类型筛选。"""
         query = select(MemoryModel).where(MemoryModel.user_id == user_id)
         if type:
             query = query.where(MemoryModel.type == MemoryType(type))
@@ -327,18 +327,18 @@ class MemoryEngine:
         return [MemoryOut.model_validate(m) for m in memories]
 
     async def delete(self, memory_id: str) -> bool:
-        """Delete a memory from both PG and Milvus."""
+        """删除一条记忆，同时从 PostgreSQL 和 Milvus 中移除。"""
         db_memory = await self._db.get(MemoryModel, memory_id)
         if not db_memory:
             return False
 
-        # Remove from Milvus
+        # 从 Milvus 中删除
         if db_memory.embedding_id is not None:
             try:
                 collection = self._get_collection()
                 collection.delete(f"id in [{db_memory.embedding_id}]")
             except Exception as e:
-                logger.warning(f"Milvus delete failed: {e}")
+                logger.warning(f"Milvus 删除失败: {e}")
 
         await self._db.delete(db_memory)
         await self._db.commit()
