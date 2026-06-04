@@ -16,6 +16,8 @@ router = APIRouter(prefix="/api", tags=["chat"])
 async def stream_chat(request: ChatRequest, db: AsyncSession = Depends(get_db)):
     service = ChatService(db)
 
+    print(f"[chat] request={request.model_dump_json()}")
+
     async def event_generator():
         try:
             async for chunk in service.stream_chat(
