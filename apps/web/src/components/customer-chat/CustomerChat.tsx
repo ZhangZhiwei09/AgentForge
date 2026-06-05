@@ -8,18 +8,6 @@ interface ChatMessage {
     timestamp: number;
 }
 
-// 模拟客服自动回复
-function simulateReply(userMessage: string): string {
-    const replies = [
-        "感谢您的咨询，我们的客服团队会尽快回复您。",
-        "您好！请问有什么可以帮助您的？",
-        "感谢您的反馈，我们会认真考虑您的建议。",
-        "这个问题我来帮您查一下，请稍等。",
-        "很高兴为您服务，请详细描述您遇到的问题。",
-    ];
-    return replies[Math.floor(Math.random() * replies.length)];
-}
-
 export function CustomerChat() {
     const [isOpen, setIsOpen] = useState(false);
     const [messages, setMessages] = useState<ChatMessage[]>([
@@ -34,6 +22,7 @@ export function CustomerChat() {
     const [isTyping, setIsTyping] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const abortRef = useRef<AbortController | null>(null);
 
     // 新消息时自动滚动到底部
     useEffect(() => {
@@ -47,7 +36,12 @@ export function CustomerChat() {
         }
     }, [isOpen]);
 
-    function handleSend() {
+    // 组件卸载时取消请求
+    useEffect(() => {
+        return () => abortRef.current?.abort();
+    }, []);
+
+    async function handleSend() {
         const trimmed = input.trim();
         if (!trimmed) return;
 
@@ -62,17 +56,89 @@ export function CustomerChat() {
         setInput("");
         setIsTyping(true);
 
-        // 模拟客服回复延迟
-        setTimeout(() => {
-            const reply: ChatMessage = {
-                id: `msg-${Date.now()}`,
-                role: "assistant",
-                content: simulateReply(trimmed),
-                timestamp: Date.now(),
-            };
-            setMessages((prev) => [...prev, reply]);
+        try {
+            abortRef.current?.abort();
+            abortRef.current = new AbortController();
+
+            const res = await fetch("/api/customer-chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ message: trimmed }),
+                signal: abortRef.current.signal,
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ detail: res.statusText }));
+                throw new Error(err.detail ?? `HTTP ${res.status}`);
+            }
+
+            const reader = res.body?.getReader();
+            if (!reader) throw new Error("No response body");
+
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let streamContent = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() ?? "";
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed || !trimmed.startsWith("data: ")) continue;
+
+                    const data = trimmed.slice(6);
+                    if (data === "[DONE]") continue;
+
+                    try {
+                        const chunk = JSON.parse(data);
+                        if (chunk.type === "token" && chunk.content) {
+                            streamContent += chunk.content;
+                            setMessages((prev) => {
+                                const last = prev[prev.length - 1];
+                                if (last?.id === "__stream__") {
+                                    return [
+                                        ...prev.slice(0, -1),
+                                        { ...last, content: streamContent },
+                                    ];
+                                }
+                                return [
+                                    ...prev,
+                                    {
+                                        id: "__stream__",
+                                        role: "assistant" as const,
+                                        content: streamContent,
+                                        timestamp: Date.now(),
+                                    },
+                                ];
+                            });
+                        } else if (chunk.type === "error") {
+                            console.error("Stream error:", chunk.content);
+                        }
+                    } catch {
+                        continue;
+                    }
+                }
+            }
+        } catch (err: unknown) {
+            if (err instanceof DOMException && err.name === "AbortError") return;
+            console.error("Customer chat failed:", err);
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: `msg-${Date.now()}`,
+                    role: "assistant",
+                    content: "抱歉，暂时无法连接客服，请稍后再试。",
+                    timestamp: Date.now(),
+                },
+            ]);
+        } finally {
             setIsTyping(false);
-        }, 800 + Math.random() * 1200);
+        }
     }
 
     function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {

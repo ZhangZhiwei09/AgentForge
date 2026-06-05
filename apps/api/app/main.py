@@ -4,7 +4,7 @@ from sqlalchemy import text
 from app.database.base import Base
 from app.database.session import engine
 from app.middleware.cors import setup_cors
-from app.routers import conversations_router, chat_router, providers_router, memories_router
+from app.routers import conversations_router, chat_router, providers_router, memories_router, customer_chat_router
 
 
 DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
@@ -45,6 +45,8 @@ app.include_router(conversations_router)
 app.include_router(chat_router)
 app.include_router(providers_router)
 app.include_router(memories_router)
+app.include_router(customer_chat_router)
+
 
 
 @app.get("/api/health")
