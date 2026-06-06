@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import String, DateTime, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.base import Base
+from typing import Optional
 
 
 class ConversationModel(Base):
@@ -21,3 +22,7 @@ class ConversationModel(Base):
     )
 
     messages = relationship("MessageModel", back_populates="conversation", order_by="MessageModel.created_at")
+
+    type: Mapped[str] = mapped_column(String(32), nullable=False, default="chat")
+
+    session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True, index=True)

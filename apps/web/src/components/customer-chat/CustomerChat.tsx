@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from "react";
-import { MessageCircle, X, Send } from "lucide-react";
+import { MessageCircle, X, Send, Trash2 } from "lucide-react";
 
 interface ChatMessage {
     id: string;
@@ -20,9 +20,26 @@ export function CustomerChat() {
     ]);
     const [input, setInput] = useState("");
     const [isTyping, setIsTyping] = useState(false);
+    const [sessionId, setSessionId] = useState<string>(() => {
+        return localStorage.getItem("customer_chat_session_id") || crypto.randomUUID();
+    });
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
     const abortRef = useRef<AbortController | null>(null);
+
+    function clearSession() {
+        const newId = crypto.randomUUID();
+        setSessionId(newId);
+        localStorage.setItem("customer_chat_session_id", newId);
+        setMessages([
+            {
+                id: "welcome",
+                role: "assistant",
+                content: "您好！欢迎来到 AgentForge，有什么可以帮助您的吗？",
+                timestamp: Date.now(),
+            },
+        ]);
+    }
 
     // 新消息时自动滚动到底部
     useEffect(() => {
@@ -63,7 +80,7 @@ export function CustomerChat() {
             const res = await fetch("/api/customer-chat", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ message: trimmed }),
+                body: JSON.stringify({ session_id: sessionId, message: trimmed }),
                 signal: abortRef.current.signal,
             });
 
@@ -96,6 +113,11 @@ export function CustomerChat() {
 
                     try {
                         const chunk = JSON.parse(data);
+                        if (chunk.type === "meta" && chunk.session_id) {
+                            localStorage.setItem("customer_chat_session_id", chunk.session_id);
+                            setSessionId(chunk.session_id);
+                            continue;
+                        }
                         if (chunk.type === "token" && chunk.content) {
                             streamContent += chunk.content;
                             setMessages((prev) => {
@@ -177,13 +199,23 @@ export function CustomerChat() {
                                 <p className="text-xs opacity-80">我们随时为您服务</p>
                             </div>
                         </div>
-                        <button
-                            onClick={() => setIsOpen(false)}
-                            className="rounded-full p-1.5 transition-colors hover:bg-white/20"
-                            aria-label="关闭客服聊天"
-                        >
-                            <X className="h-5 w-5" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={clearSession}
+                                className="rounded-full p-1.5 transition-colors hover:bg-white/20"
+                                aria-label="清空对话"
+                                title="清空对话"
+                            >
+                                <Trash2 className="h-4 w-4" />
+                            </button>
+                            <button
+                                onClick={() => setIsOpen(false)}
+                                className="rounded-full p-1.5 transition-colors hover:bg-white/20"
+                                aria-label="关闭客服聊天"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
                     </div>
 
                     {/* 消息列表 */}
@@ -194,11 +226,10 @@ export function CustomerChat() {
                                 className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-fade-in`}
                             >
                                 <div
-                                    className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                                        msg.role === "user"
-                                            ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-br-md"
-                                            : "bg-white border border-[hsl(var(--border))] text-[hsl(var(--foreground))] rounded-bl-md"
-                                    }`}
+                                    className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${msg.role === "user"
+                                        ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-br-md"
+                                        : "bg-white border border-[hsl(var(--border))] text-[hsl(var(--foreground))] rounded-bl-md"
+                                        }`}
                                 >
                                     {msg.content}
                                 </div>
