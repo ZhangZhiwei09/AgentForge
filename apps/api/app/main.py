@@ -4,7 +4,7 @@ from sqlalchemy import text
 from app.database.base import Base
 from app.database.session import engine
 from app.middleware.cors import setup_cors
-from app.routers import conversations_router, chat_router, providers_router, memories_router, customer_chat_router
+from app.routers import conversations_router, chat_router, providers_router, memories_router, customer_chat_router, knowledge_router
 
 
 DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001"
@@ -45,8 +45,18 @@ async def seed_default_user():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await seed_default_user()
+    await _seed_knowledge()
     yield
     await engine.dispose()
+
+
+async def _seed_knowledge():
+    """创建默认知识库种子数据。"""
+    from app.database.session import async_session_factory
+    from app.services.seed_data.knowledge_seed import seed_knowledge_base
+
+    async with async_session_factory() as db:
+        await seed_knowledge_base(db)
 
 
 app = FastAPI(
@@ -62,6 +72,7 @@ app.include_router(chat_router)
 app.include_router(providers_router)
 app.include_router(memories_router)
 app.include_router(customer_chat_router)
+app.include_router(knowledge_router)
 
 
 

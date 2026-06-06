@@ -1,17 +1,25 @@
 import uuid
-import time
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from app.models.conversation import ConversationModel
 from app.models.message import MessageModel
 from app.providers.registry import get_provider, resolve_model
 
+logger = logging.getLogger(__name__)
+
 CUSTOMER_USER_ID = "00000000-0000-0000-0000-000000000002"
 MAX_HISTORY_MESSAGES = 20
 
-CUSTOMER_SERVICE_PROMPT = """
-你是一个专业的客户服务代表，负责回答客户的问题和提供帮助。
-"""
+CUSTOMER_SERVICE_PROMPT = """你是一个专业的客户服务代表，负责回答客户的问题和提供帮助。
+
+## 回答规则
+1. 如果下方提供了【知识库参考资料】，请优先基于参考资料回答问题，确保信息准确。
+2. 如果参考资料中找不到答案，请诚实告知客户你暂时无法回答，并建议其联系人工客服。
+3. 保持礼貌、专业和耐心的态度。
+4. 回答要简洁明了，直接回应客户问题，不要添加无关信息。
+
+{knowledge_context}"""
 
 
 class CustomerChatService:
@@ -45,6 +53,25 @@ class CustomerChatService:
         await self.db.refresh(conversation)
         return conversation
 
+    async def _fetch_knowledge(self, user_message: str) -> str:
+        """搜索知识库，返回格式化的知识上下文。"""
+        try:
+            from app.services.knowledge_service import KnowledgeService
+
+            service = KnowledgeService(self.db)
+            results = await service.search(query=user_message, top_k=3)
+
+            if not results:
+                return ""
+
+            lines = ["【知识库参考资料】"]
+            for i, r in enumerate(results, 1):
+                lines.append(f"{i}. {r.content}")
+            return "\n\n".join(lines)
+        except Exception as e:
+            logger.warning(f"知识库搜索失败: {e}")
+            return ""
+
     async def stream_chat(self, session_id: str | None, user_message: str):
         conversation = await self._get_or_create_conversation(session_id)
 
@@ -71,6 +98,9 @@ class CustomerChatService:
         self.db.add(user_msg)
         await self.db.commit()
 
+        # 搜索知识库
+        knowledge_context = await self._fetch_knowledge(user_message)
+
         # 构建 LLM 消息列表（历史 + 当前）
         chat_messages = [
             {"role": msg.role, "content": msg.content} for msg in history
@@ -89,11 +119,16 @@ class CustomerChatService:
             "provider": provider_name,
         }
 
+        # 构建带知识上下文的 system prompt
+        system_prompt = CUSTOMER_SERVICE_PROMPT.format(
+            knowledge_context=knowledge_context
+        )
+
         # 流式调用 LLM
         async for chunk in provider.stream_chat(
             messages=chat_messages,
             model=resolved_model,
-            system_prompt=CUSTOMER_SERVICE_PROMPT,
+            system_prompt=system_prompt,
         ):
             if chunk["type"] == "token":
                 full_content += chunk["content"]

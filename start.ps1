@@ -85,7 +85,7 @@ if (-not $etcd) {
             -e ETCD_QUOTA_BACKEND_BYTES=4294967296 `
             -e ETCD_SNAPSHOT_COUNT=50000 `
             -v etcd_data:/etcd `
-            quay.io/coreos/etcd:v3.5.5 `
+            quay.io/coreos/etcd:v3.5.16 `
             etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd | Out-Null
     }
 }
@@ -102,7 +102,7 @@ if (-not $minio) {
             -e MINIO_ACCESS_KEY=minioadmin `
             -e MINIO_SECRET_KEY=minioadmin `
             -v minio_data:/minio_data `
-            minio/minio:RELEASE.2023-03-20T20-16-18Z `
+            minio/minio:RELEASE.2024-12-18T05-42-27Z `
             server /minio_data --console-address ":9001" | Out-Null
     }
 }
@@ -125,7 +125,7 @@ if (-not $milvus) {
             -p 19530:19530 `
             -p 9091:9091 `
             -v milvus_data:/var/lib/milvus `
-            milvusdb/milvus:v2.3.3 `
+            milvusdb/milvus:v2.4.15 `
             milvus run standalone | Out-Null
     }
     Start-Sleep -Seconds 10

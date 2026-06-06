@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     debug: bool = False
     milvus_host: str = "localhost"
     milvus_port: str = "19530"
+    embedding_model: str = "text-embedding-v2"
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
