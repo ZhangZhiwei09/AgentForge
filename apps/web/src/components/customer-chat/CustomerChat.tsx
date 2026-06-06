@@ -1,23 +1,11 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from "react";
-import { MessageCircle, X, Send } from "lucide-react";
+import { MessageCircle, X, Send, Trash2 } from "lucide-react";
 
 interface ChatMessage {
     id: string;
     role: "user" | "assistant";
     content: string;
     timestamp: number;
-}
-
-// 模拟客服自动回复
-function simulateReply(userMessage: string): string {
-    const replies = [
-        "感谢您的咨询，我们的客服团队会尽快回复您。",
-        "您好！请问有什么可以帮助您的？",
-        "感谢您的反馈，我们会认真考虑您的建议。",
-        "这个问题我来帮您查一下，请稍等。",
-        "很高兴为您服务，请详细描述您遇到的问题。",
-    ];
-    return replies[Math.floor(Math.random() * replies.length)];
 }
 
 export function CustomerChat() {
@@ -32,8 +20,26 @@ export function CustomerChat() {
     ]);
     const [input, setInput] = useState("");
     const [isTyping, setIsTyping] = useState(false);
+    const [sessionId, setSessionId] = useState<string>(() => {
+        return localStorage.getItem("customer_chat_session_id") || crypto.randomUUID();
+    });
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const inputRef = useRef<HTMLInputElement>(null);
+    const abortRef = useRef<AbortController | null>(null);
+
+    function clearSession() {
+        const newId = crypto.randomUUID();
+        setSessionId(newId);
+        localStorage.setItem("customer_chat_session_id", newId);
+        setMessages([
+            {
+                id: "welcome",
+                role: "assistant",
+                content: "您好！欢迎来到 AgentForge，有什么可以帮助您的吗？",
+                timestamp: Date.now(),
+            },
+        ]);
+    }
 
     // 新消息时自动滚动到底部
     useEffect(() => {
@@ -47,7 +53,12 @@ export function CustomerChat() {
         }
     }, [isOpen]);
 
-    function handleSend() {
+    // 组件卸载时取消请求
+    useEffect(() => {
+        return () => abortRef.current?.abort();
+    }, []);
+
+    async function handleSend() {
         const trimmed = input.trim();
         if (!trimmed) return;
 
@@ -62,17 +73,94 @@ export function CustomerChat() {
         setInput("");
         setIsTyping(true);
 
-        // 模拟客服回复延迟
-        setTimeout(() => {
-            const reply: ChatMessage = {
-                id: `msg-${Date.now()}`,
-                role: "assistant",
-                content: simulateReply(trimmed),
-                timestamp: Date.now(),
-            };
-            setMessages((prev) => [...prev, reply]);
+        try {
+            abortRef.current?.abort();
+            abortRef.current = new AbortController();
+
+            const res = await fetch("/api/customer-chat", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ session_id: sessionId, message: trimmed }),
+                signal: abortRef.current.signal,
+            });
+
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({ detail: res.statusText }));
+                throw new Error(err.detail ?? `HTTP ${res.status}`);
+            }
+
+            const reader = res.body?.getReader();
+            if (!reader) throw new Error("No response body");
+
+            const decoder = new TextDecoder();
+            let buffer = "";
+            let streamContent = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split("\n");
+                buffer = lines.pop() ?? "";
+
+                for (const line of lines) {
+                    const trimmed = line.trim();
+                    if (!trimmed || !trimmed.startsWith("data: ")) continue;
+
+                    const data = trimmed.slice(6);
+                    if (data === "[DONE]") continue;
+
+                    try {
+                        const chunk = JSON.parse(data);
+                        if (chunk.type === "meta" && chunk.session_id) {
+                            localStorage.setItem("customer_chat_session_id", chunk.session_id);
+                            setSessionId(chunk.session_id);
+                            continue;
+                        }
+                        if (chunk.type === "token" && chunk.content) {
+                            streamContent += chunk.content;
+                            setMessages((prev) => {
+                                const last = prev[prev.length - 1];
+                                if (last?.id === "__stream__") {
+                                    return [
+                                        ...prev.slice(0, -1),
+                                        { ...last, content: streamContent },
+                                    ];
+                                }
+                                return [
+                                    ...prev,
+                                    {
+                                        id: "__stream__",
+                                        role: "assistant" as const,
+                                        content: streamContent,
+                                        timestamp: Date.now(),
+                                    },
+                                ];
+                            });
+                        } else if (chunk.type === "error") {
+                            console.error("Stream error:", chunk.content);
+                        }
+                    } catch {
+                        continue;
+                    }
+                }
+            }
+        } catch (err: unknown) {
+            if (err instanceof DOMException && err.name === "AbortError") return;
+            console.error("Customer chat failed:", err);
+            setMessages((prev) => [
+                ...prev,
+                {
+                    id: `msg-${Date.now()}`,
+                    role: "assistant",
+                    content: "抱歉，暂时无法连接客服，请稍后再试。",
+                    timestamp: Date.now(),
+                },
+            ]);
+        } finally {
             setIsTyping(false);
-        }, 800 + Math.random() * 1200);
+        }
     }
 
     function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
@@ -111,13 +199,23 @@ export function CustomerChat() {
                                 <p className="text-xs opacity-80">我们随时为您服务</p>
                             </div>
                         </div>
-                        <button
-                            onClick={() => setIsOpen(false)}
-                            className="rounded-full p-1.5 transition-colors hover:bg-white/20"
-                            aria-label="关闭客服聊天"
-                        >
-                            <X className="h-5 w-5" />
-                        </button>
+                        <div className="flex items-center gap-1">
+                            <button
+                                onClick={clearSession}
+                                className="rounded-full p-1.5 transition-colors hover:bg-white/20"
+                                aria-label="清空对话"
+                                title="清空对话"
+                            >
+                                <Trash2 className="h-4 w-4" />
+                            </button>
+                            <button
+                                onClick={() => setIsOpen(false)}
+                                className="rounded-full p-1.5 transition-colors hover:bg-white/20"
+                                aria-label="关闭客服聊天"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
                     </div>
 
                     {/* 消息列表 */}
@@ -128,11 +226,10 @@ export function CustomerChat() {
                                 className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"} animate-fade-in`}
                             >
                                 <div
-                                    className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                                        msg.role === "user"
-                                            ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-br-md"
-                                            : "bg-white border border-[hsl(var(--border))] text-[hsl(var(--foreground))] rounded-bl-md"
-                                    }`}
+                                    className={`max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${msg.role === "user"
+                                        ? "bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-br-md"
+                                        : "bg-white border border-[hsl(var(--border))] text-[hsl(var(--foreground))] rounded-bl-md"
+                                        }`}
                                 >
                                     {msg.content}
                                 </div>
