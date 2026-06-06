@@ -15,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 MILVUS_COLLECTION = "agentforge_memories"
 EMBEDDING_DIM = 1536
-EMBEDDING_MODEL = "text-embedding-ada-002"
 
 SYSTEM_PROMPT_EXTRACT = """你是一个记忆提取助手。分析以下对话，提取出关于用户的新事实、偏好或重要信息。
 
@@ -39,7 +38,6 @@ class MemoryEngine:
         self._db = db
         self._milvus_conn = None
         self._collection = None
-        self._openai_client = None
 
     def _get_collection(self):
         """懒初始化 Milvus 连接和集合。"""
@@ -79,24 +77,17 @@ class MemoryEngine:
         return self._collection
 
     async def _embed(self, text: str) -> list[float] | None:
-        """获取文本的向量嵌入。如果没有可用的嵌入 API 则返回 None。"""
-        import openai
+        """获取文本的向量嵌入。如未配置 Embedding Provider 则返回 None。"""
+        from app.services.embeddings.registry import get_default_embedding_provider
 
-        if self._openai_client is None:
-            # 如果配置了 OpenAI Key 则用于向量嵌入，否则静默跳过
-            if settings.openai_api_key:
-                self._openai_client = openai.AsyncOpenAI(
-                    api_key=settings.openai_api_key,
-                    base_url=settings.openai_base_url,
-                )
-            else:
+        try:
+            provider = get_default_embedding_provider()
+            if provider is None:
                 return None
-
-        response = await self._openai_client.embeddings.create(
-            model=EMBEDDING_MODEL,
-            input=text,
-        )
-        return response.data[0].embedding
+            return await provider.embed_single(text)
+        except Exception as e:
+            logger.warning(f"向量嵌入失败: {e}")
+            return None
 
     async def store(self, memory: MemoryCreate, user_id: str) -> MemoryOut:
         """存储一条记忆：向量化内容 → 存入 Milvus → 元数据持久化到 PostgreSQL。"""

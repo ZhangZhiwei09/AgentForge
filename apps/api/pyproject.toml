@@ -15,7 +15,8 @@ dependencies = [
     "openai>=1.60.0",
     "python-dotenv>=1.0.0",
     "sse-starlette>=2.1.0",
-    "pymilvus>=2.3.0",
+    "pymilvus>=2.4.0",
+    "cachetools>=5.3",
 ]
 
 [build-system]

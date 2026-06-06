@@ -4,7 +4,7 @@ from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 from app.database.base import Base
-from app.models import UserModel, ConversationModel, MessageModel, MemoryModel
+from app.models import UserModel, ConversationModel, MessageModel, MemoryModel, KnowledgeBaseModel, KnowledgeDocumentModel, KnowledgeChunkModel
 
 config = context.config
 if config.config_file_name is not None:
