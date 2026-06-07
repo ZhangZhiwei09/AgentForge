@@ -51,17 +51,19 @@ export function firstProvider(): string {
 export function resolveModel(modelId?: string | null): [string, string] {
   initProviders();
 
-  if (modelId) {
-    for (const [name, p] of Object.entries(providers)) {
-      for (const m of p.listModels()) {
-        if (m.id === modelId) {
-          return [name, modelId];
-        }
+  const targetModel = modelId || settings.defaultModel;
+
+  // Search all providers for the target model
+  for (const [name, p] of Object.entries(providers)) {
+    for (const m of p.listModels()) {
+      if (m.id === targetModel) {
+        return [name, targetModel];
       }
     }
-    // Model not found in any provider, use first available
-    return [firstProvider(), modelId];
   }
 
-  return [firstProvider(), settings.defaultModel];
+  // Model not found — fallback: use first provider's first model
+  const first = firstProvider();
+  const firstModel = providers[first]?.listModels()[0]?.id || targetModel;
+  return [first, firstModel];
 }
