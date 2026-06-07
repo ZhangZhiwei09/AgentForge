@@ -1,0 +1,30 @@
+FROM node:20-alpine AS base
+
+WORKDIR /app
+
+# Install pnpm
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+
+# Prune stage
+FROM base AS pruner
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json ./
+COPY packages/database ./packages/database
+COPY packages/shared-types ./packages/shared-types
+COPY packages/shared-prompts ./packages/shared-prompts
+COPY apps/server ./apps/server
+
+RUN pnpm install --frozen-lockfile
+RUN pnpm turbo build --filter=@agentforge/server
+
+# Production
+FROM node:20-alpine AS runner
+WORKDIR /app
+
+COPY --from=pruner /app/apps/server/dist ./dist
+COPY --from=pruner /app/node_modules/.pnpm ./node_modules/.pnpm
+COPY --from=pruner /app/apps/server/node_modules ./node_modules
+COPY --from=pruner /app/apps/server/package.json ./
+
+EXPOSE 8000
+
+CMD ["node", "dist/index.js"]

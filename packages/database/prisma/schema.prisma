@@ -1,0 +1,125 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String         @id @db.VarChar(36)
+  email         String         @unique(map: "ix_users_email") @db.VarChar(255)
+  createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  conversations Conversation[]
+  memories      Memory[]
+
+  @@map("users")
+}
+
+model Conversation {
+  id        String    @id @db.VarChar(36)
+  title     String    @db.VarChar(255)
+  userId    String    @map("user_id") @db.VarChar(36)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  type      String    @default("chat") @db.VarChar(32)
+  sessionId String?   @map("session_id") @db.VarChar(64)
+  user      User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  memories  Memory[]
+  messages  Message[]
+
+  @@index([sessionId], map: "ix_conversations_session_id")
+  @@index([userId], map: "ix_conversations_user_id")
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @db.VarChar(36)
+  conversationId String       @map("conversation_id") @db.VarChar(36)
+  role           String       @db.VarChar(16)
+  content        String
+  model          String?      @db.VarChar(64)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([conversationId], map: "ix_messages_conversation_id")
+  @@map("messages")
+}
+
+model Memory {
+  id             String        @id @db.VarChar(36)
+  userId         String        @map("user_id") @db.VarChar(36)
+  type           memory_type
+  content        String
+  importance     Float
+  embeddingId    Int?          @map("embedding_id")
+  metadata       Json?         @map("metadata")
+  conversationId String?       @map("conversation_id") @db.VarChar(36)
+  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  user           User          @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([userId], map: "ix_memories_user_id")
+  @@map("memories")
+}
+
+model KnowledgeBase {
+  id          String              @id @db.VarChar(36)
+  name        String              @db.VarChar(255)
+  description String?
+  enabled     Boolean             @default(true)
+  createdAt   DateTime?           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime?           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  chunks      KnowledgeChunk[]
+  documents   KnowledgeDocument[]
+
+  @@map("knowledge_bases")
+}
+
+model KnowledgeDocument {
+  id              String           @id @db.VarChar(36)
+  knowledgeBaseId String           @map("knowledge_base_id") @db.VarChar(36)
+  title           String           @db.VarChar(500)
+  content         String
+  chunkCount      Int              @default(0) @map("chunk_count")
+  status          String           @default("pending") @db.VarChar(20)
+  enabled         Boolean          @default(true)
+  createdAt       DateTime?        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime?        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  chunks          KnowledgeChunk[]
+  knowledgeBase   KnowledgeBase    @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([knowledgeBaseId], map: "ix_knowledge_documents_kb_id")
+  @@map("knowledge_documents")
+}
+
+model KnowledgeChunk {
+  id              String            @id @db.VarChar(36)
+  documentId      String            @map("document_id") @db.VarChar(36)
+  knowledgeBaseId String            @map("knowledge_base_id") @db.VarChar(36)
+  chunkIndex      Int               @map("chunk_index")
+  content         String
+  tokenCount      Int               @default(0) @map("token_count")
+  milvusId        BigInt?           @map("milvus_id")
+  enabled         Boolean           @default(true)
+  created_at      DateTime?         @default(now()) @db.Timestamptz(6)
+  document        KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  knowledgeBase   KnowledgeBase     @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([documentId], map: "ix_knowledge_chunks_doc_id")
+  @@index([knowledgeBaseId], map: "ix_knowledge_chunks_kb_id")
+  @@map("knowledge_chunks")
+}
+
+model alembic_version {
+  version_num String @id(map: "alembic_version_pkc") @db.VarChar(32)
+}
+
+enum memory_type {
+  episodic
+  semantic
+  preference
+}

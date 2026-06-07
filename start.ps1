@@ -132,82 +132,36 @@ if (-not $milvus) {
 }
 Write-Host "  Milvus ready on port 19530" -ForegroundColor Green
 
-# ── 4. Backend (uvicorn) ──────────────────────────────────────
-Write-Host "`n[4/6] Starting backend (FastAPI)..." -ForegroundColor Yellow
+# ── 4. Backend (TS Hono) ──────────────────────────────────────
+Write-Host "`n[4/6] Starting backend (Hono)... " -ForegroundColor Yellow
 
-$ApiDir = Join-Path $RootDir "apps\api"
-$VenvPython = Join-Path $ApiDir ".venv\Scripts\python.exe"
-
-$Py312 = "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python312\python.exe"
-if (-not (Test-Path $Py312)) {
-    Write-Host "  ERROR: Python 3.12 not found at $Py312" -ForegroundColor Red
-    exit 1
-}
-
-$VenvPip = Join-Path $ApiDir ".venv\Scripts\pip.exe"
-
-# Recreate venv if python.exe or pip.exe is missing
-if (-not (Test-Path $VenvPython) -or -not (Test-Path $VenvPip)) {
-    if (Test-Path (Join-Path $ApiDir ".venv")) {
-        Write-Host "  Removing broken virtual environment..." -ForegroundColor Gray
-        Remove-Item -Recurse -Force (Join-Path $ApiDir ".venv")
-    }
-    Write-Host "  Creating Python virtual environment..." -ForegroundColor Gray
-    & $Py312 -m venv (Join-Path $ApiDir ".venv")
-    if (-not (Test-Path $VenvPip)) {
-        # Fallback: try ensurepip if venv didn't include pip
-        & $VenvPython -m ensurepip --upgrade 2>&1 | Out-Null
-    }
-    if (-not (Test-Path $VenvPip)) {
-        Write-Host "  ERROR: Failed to create venv with pip." -ForegroundColor Red
-        Write-Host "  Your Python 3.12 installation may be missing ensurepip." -ForegroundColor Red
-        Write-Host "  Try reinstalling Python 3.12 from https://python.org" -ForegroundColor Red
-        exit 1
-    }
-}
-
-# Always sync dependencies (handles first install + subsequent updates)
-Write-Host "  Syncing Python dependencies..." -ForegroundColor Gray
-& $VenvPython -m pip install -e $ApiDir
+Write-Host "  Installing Node.js dependencies..." -ForegroundColor Gray
+Push-Location $RootDir
+pnpm install
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "  ERROR: Failed to install Python dependencies" -ForegroundColor Red
-    exit 1
+    Write-Host "  WARNING: pnpm install had issues, continuing..." -ForegroundColor Yellow
 }
 
-# Run DB migrations
+Write-Host "  Generating Prisma client..." -ForegroundColor Gray
+pnpm --filter @agentforge/database db:generate
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  WARNING: Prisma generate had issues, continuing..." -ForegroundColor Yellow
+}
+
 Write-Host "  Running database migrations..." -ForegroundColor Gray
-Push-Location $ApiDir
-& $VenvPython -m alembic upgrade head
+pnpm --filter @agentforge/database db:migrate
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  WARNING: Database migration failed, continuing anyway..." -ForegroundColor Yellow
 }
 Pop-Location
 
-Write-Host "  Starting uvicorn on http://localhost:8000" -ForegroundColor Gray
-Start-Process -FilePath $VenvPython `
-    -ArgumentList "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload" `
-    -WorkingDirectory $ApiDir `
+Write-Host "  Starting TS server on http://localhost:8000" -ForegroundColor Gray
+Start-Process -FilePath "pnpm" `
+    -ArgumentList "--filter", "@agentforge/server", "dev" `
+    -WorkingDirectory $RootDir `
     -WindowStyle Minimized
 
 Start-Sleep -Seconds 3
-
-# Seed demo memories
-$seedScript = Join-Path $ApiDir "scripts\seed_demo.py"
-if (Test-Path $seedScript) {
-    Write-Host "  Seeding demo memories..." -ForegroundColor Gray
-    $prevErrorAction = $ErrorActionPreference
-    $ErrorActionPreference = "Continue"
-    try {
-        $seedOutput = & $VenvPython $seedScript 2>&1
-        $seedExit = $LASTEXITCODE
-        if ($seedOutput -match "Embedding failed") {
-            Write-Host "  Note: OpenAI API key not set, memories stored without vector embeddings" -ForegroundColor Yellow
-        }
-    } finally {
-        $ErrorActionPreference = $prevErrorAction
-    }
-    Write-Host "  Demo memories seeded (customer service scenario)" -ForegroundColor Green
-}
 
 # ── 5. Frontend (Vite) ────────────────────────────────────────
 Write-Host "`n[5/6] Starting frontend (Vite)..." -ForegroundColor Yellow
