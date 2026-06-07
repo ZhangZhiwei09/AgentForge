@@ -1,0 +1,32 @@
+{
+  "name": "@agentforge/server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup src/index.ts --format esm --clean",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist"
+  },
+  "dependencies": {
+    "@agentforge/database": "workspace:*",
+    "@agentforge/shared-prompts": "workspace:*",
+    "@agentforge/shared-types": "workspace:*",
+    "@hono/node-server": "^1.13",
+    "@hono/zod-validator": "^0.4",
+    "@zilliz/milvus2-sdk-node": "^2.4",
+    "dotenv": "^16.4",
+    "hono": "^4.6",
+    "openai": "^4.70",
+    "zod": "^3.23"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0",
+    "rimraf": "^6.0",
+    "tsup": "^8.3",
+    "tsx": "^4.19",
+    "typescript": "^5.7"
+  }
+}

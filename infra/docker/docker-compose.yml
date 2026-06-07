@@ -65,21 +65,21 @@ services:
       - etcd
       - minio
 
-  api:
+  server:
     build:
       context: ../../
-      dockerfile: infra/docker/Dockerfile.api
+      dockerfile: infra/docker/Dockerfile.server
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/agentforge
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/agentforge
       MILVUS_HOST: milvus
       MILVUS_PORT: "19530"
     depends_on:
       - db
       - milvus
     env_file:
-      - ../../apps/api/.env
+      - ../../apps/server/.env
 
 volumes:
   pgdata:
