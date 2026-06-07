@@ -14,5 +14,6 @@ __pycache__/
 venv/
 *.egg-info/
 
+.trae/
 .DS_Store
 Thumbs.db
