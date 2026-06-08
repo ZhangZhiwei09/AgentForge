@@ -1,3 +1,6 @@
+// 知识库文档摄取服务 —— 将文档切分、向量化，写入 Milvus 和 PostgreSQL
+// 摄取流程：创建 Document 记录 → 文本切分 → 生成 embedding → 写入 Milvus → 保存 chunk 元数据到 PG
+// 同时包含种子数据（客服 FAQ）和种子函数
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { getMilvusClient, MILVUS_KNOWLEDGE_COLLECTION, ensureKnowledgeCollection } from "./milvus.js";
@@ -19,6 +22,7 @@ export class KnowledgeIngestionService {
   private collectionLoaded = false;
 
   constructor() {
+    // 每块 500 字符，相邻块重叠 50 字符
     this.splitter = new RecursiveCharacterTextSplitter(500, 50);
   }
 
@@ -29,12 +33,13 @@ export class KnowledgeIngestionService {
     }
   }
 
+  // 摄取单篇文档：创建记录 → 切分 → 向量化 → 双写
   async ingestDocument(
     kbId: string,
     title: string,
     content: string,
   ) {
-    // 1. Create document record (processing)
+    // 1. 创建 Document 记录，状态标记为 processing
     const doc = await prisma.knowledgeDocument.create({
       data: {
         id: randomUUID(),
@@ -47,9 +52,10 @@ export class KnowledgeIngestionService {
     });
 
     try {
-      // 2. Split text
+      // 2. 文本切分为 chunk
       const chunks = this.splitter.splitText(content);
       if (!chunks.length) {
+        // 空内容：直接标记完成
         await prisma.knowledgeDocument.update({
           where: { id: doc.id },
           data: { status: "completed", chunkCount: 0 },
@@ -57,10 +63,10 @@ export class KnowledgeIngestionService {
         return await prisma.knowledgeDocument.findUnique({ where: { id: doc.id } })!;
       }
 
-      // 3. Ingest chunks
+      // 3. 逐 chunk 向量化并写入 Milvus + PG
       await this.ingestChunks(doc.id, kbId, chunks);
 
-      // 4. Update document status
+      // 4. 更新文档状态为 completed
       await prisma.knowledgeDocument.update({
         where: { id: doc.id },
         data: { chunkCount: chunks.length, status: "completed" },
@@ -69,6 +75,7 @@ export class KnowledgeIngestionService {
       console.log(`[knowledge] Document ingested: ${title} (${chunks.length} chunks)`);
       return (await prisma.knowledgeDocument.findUnique({ where: { id: doc.id } }))!;
     } catch (e) {
+      // 摄取失败：标记为 failed，抛出异常让调用方感知
       console.error(`[knowledge] Document ingestion failed: ${title}`, e);
       await prisma.knowledgeDocument.update({
         where: { id: doc.id },
@@ -78,6 +85,7 @@ export class KnowledgeIngestionService {
     }
   }
 
+  // 批量摄取：逐文档串行处理（避免并发写入 Milvus 的竞态问题）
   async batchIngest(
     kbId: string,
     documents: Array<{ title: string; content: string }>,
@@ -90,6 +98,7 @@ export class KnowledgeIngestionService {
     return results;
   }
 
+  // Chunk 向量化 + 双写核心逻辑
   private async ingestChunks(
     docId: string,
     kbId: string,
@@ -102,40 +111,30 @@ export class KnowledgeIngestionService {
 
     await this.ensureCollection();
 
-    // 1. Dense vectors (batch)
+    // 1. 批量生成 dense 向量（一次 API 调用，比逐条调用效率高）
     const denseVecs = await provider.embed(chunkTexts);
     if (!denseVecs || denseVecs.length !== chunkTexts.length) {
       throw new Error("Embedding failed or returned mismatched count");
     }
 
-    // 2. Sparse vectors (BM25)
-    const bm25 = getBM25();
-    const sparseVecs = bm25.encodeDocuments(chunkTexts);
-    // If BM25 not fitted, use zero-like sparse vectors
-    const sparseVectors = sparseVecs.map((sv) => {
-      const vec = new Array(1536).fill(0);
-      for (const [idx, val] of Object.entries(sv)) {
-        vec[parseInt(idx)] = val;
-      }
-      return vec;
-    });
-
-    // 3. Insert into Milvus
+    // 2. 批量插入 Milvus（行式格式：每个元素是一个 field→value 对象）
     const chunkIds = chunkTexts.map(() => randomUUID());
     const client = getMilvusClient();
 
+    // Milvus SDK v2.x: fields_data 是行数组，每行是 { fieldName: value } 对象
+    const rows = chunkTexts.map((text, i) => ({
+      chunk_id: chunkIds[i],
+      kb_id: kbId,
+      dense_vector: denseVecs[i],
+      content: text.slice(0, 4096), // Milvus VarChar 最长 4096
+    }));
+
     const mr = await client.insert({
       collection_name: MILVUS_KNOWLEDGE_COLLECTION,
-      fields_data: [
-        { name: "chunk_id", values: chunkIds },
-        { name: "kb_id", values: chunkTexts.map(() => kbId) },
-        { name: "dense_vector", values: denseVecs },
-        { name: "sparse_vector", values: sparseVectors },
-        { name: "content", values: chunkTexts.map((t) => t.slice(0, 4096)) },
-      ],
+      fields_data: rows,
     });
 
-    // 4. Save ChunkModel to PG
+    // 3. 保存 chunk 元数据到 PG（包含 Milvus 返回的内部 ID）
     const milvusIds = (mr.IDs as any)?.int_id?.data || [];
     for (let i = 0; i < chunkIds.length; i++) {
       await prisma.knowledgeChunk.create({
@@ -152,18 +151,19 @@ export class KnowledgeIngestionService {
     }
   }
 
+  // 删除文档：同时清理 PG 和 Milvus 中的数据
   async deleteDocument(docId: string): Promise<boolean> {
     const doc = await prisma.knowledgeDocument.findUnique({ where: { id: docId } });
     if (!doc) return false;
 
-    // Get milvus_ids for chunks
+    // 查出所有 chunk 的 milvus ID
     const chunks = await prisma.knowledgeChunk.findMany({
       where: { documentId: docId },
       select: { milvusId: true },
     });
     const milvusIds = chunks.filter((c) => c.milvusId !== null).map((c) => Number(c.milvusId));
 
-    // Delete from Milvus
+    // 从 Milvus 删除向量
     if (milvusIds.length > 0) {
       try {
         await this.ensureCollection();
@@ -178,7 +178,7 @@ export class KnowledgeIngestionService {
       }
     }
 
-    // Delete from PG
+    // 从 PG 删除（CASCADE 会自动删关联的 chunks）
     await prisma.knowledgeChunk.deleteMany({ where: { documentId: docId } });
     await prisma.knowledgeDocument.delete({ where: { id: docId } });
 
@@ -186,7 +186,19 @@ export class KnowledgeIngestionService {
     return true;
   }
 
+  // 重建 BM25 索引：从 PG 读取所有 chunk 文本，重新训练 BM25 编码器
   static async rebuildBM25Index(kbId: string): Promise<void> {
+    // 清除 KnowledgeService 中的 BM25 缓存（触发下次搜索时重新训练）
+    try {
+      const { KnowledgeService } = await import("./knowledge.js");
+      // 通过实例化临时对象来触发缓存失效
+      const tempService = new KnowledgeService();
+      await tempService.invalidateBM25Cache(kbId);
+    } catch {
+      // 静默失败，BM25 不是关键路径
+    }
+
+    // 同时在本服务的 BM25 实例上训练
     const chunks = await prisma.knowledgeChunk.findMany({
       where: { knowledgeBaseId: kbId, enabled: true },
       select: { content: true },
@@ -200,10 +212,13 @@ export class KnowledgeIngestionService {
   }
 }
 
-// ── Knowledge Base Seed Data ───────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// 种子数据：客服 FAQ 知识库
+// ════════════════════════════════════════════════════════════════
 
 const DEFAULT_KB_ID = "kb-a00000-0000-0000-0000-00000000001";
 
+// 5 篇示例 FAQ 文档（中文客服场景）
 const SAMPLE_FAQS = [
   {
     title: "退换货政策",
@@ -227,8 +242,9 @@ const SAMPLE_FAQS = [
   },
 ];
 
+// 种子函数：启动时检查并创建默认知识库 + 5 篇 FAQ
 export async function seedKnowledgeBase(): Promise<string> {
-  // Check if already seeded
+  // 幂等检查：已存在则跳过
   const existing = await prisma.knowledgeBase.findUnique({
     where: { id: DEFAULT_KB_ID },
   });
@@ -237,7 +253,7 @@ export async function seedKnowledgeBase(): Promise<string> {
     return DEFAULT_KB_ID;
   }
 
-  // Create knowledge base
+  // 创建知识库记录
   await prisma.knowledgeBase.create({
     data: {
       id: DEFAULT_KB_ID,
@@ -246,14 +262,14 @@ export async function seedKnowledgeBase(): Promise<string> {
     },
   });
 
-  // Check embedding provider
+  // 检查 embedding provider 是否可用
   const provider = getDefaultEmbeddingProvider();
   if (!provider) {
     console.log("[seed] No embedding provider configured, skipping document vectorization");
     return DEFAULT_KB_ID;
   }
 
-  // Ingest documents
+  // 批量摄取 FAQ 文档
   console.log(`[seed] Ingesting ${SAMPLE_FAQS.length} sample FAQ documents...`);
   try {
     const ingestion = new KnowledgeIngestionService();

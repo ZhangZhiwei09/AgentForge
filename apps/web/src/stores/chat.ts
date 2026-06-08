@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { Conversation, DebugInfo, Message, MemoryInfo, ProviderType } from "@/types";
 
-type PanelMode = "debug" | "memory";
+type PanelMode = "debug" | "memory" | "knowledge";
 
 interface ChatState {
     conversations: Conversation[];
