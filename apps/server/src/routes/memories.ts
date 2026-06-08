@@ -1,3 +1,4 @@
+// 记忆管理路由 —— /api/memories 查询、搜索、删除
 import { Hono } from "hono";
 import { MemoryEngine } from "../services/memory-engine.js";
 
@@ -5,7 +6,7 @@ export const memoryRoutes = new Hono();
 
 const DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001";
 
-// GET /api/memories
+// GET /api/memories —— 列出所有记忆（可选 type 过滤：semantic/preference/episodic）
 memoryRoutes.get("/api/memories", async (c) => {
   const type = c.req.query("type") || undefined;
   const engine = new MemoryEngine();
@@ -13,7 +14,7 @@ memoryRoutes.get("/api/memories", async (c) => {
   return c.json(memories);
 });
 
-// GET /api/memories/search?q=...&top_k=5
+// GET /api/memories/search?q=...&top_k=5 —— 语义搜索记忆
 memoryRoutes.get("/api/memories/search", async (c) => {
   const q = c.req.query("q");
   if (!q) {
@@ -26,7 +27,7 @@ memoryRoutes.get("/api/memories/search", async (c) => {
   return c.json(results);
 });
 
-// DELETE /api/memories/:id
+// DELETE /api/memories/:id —— 删除单条记忆（PG + Milvus 双删）
 memoryRoutes.delete("/api/memories/:id", async (c) => {
   const id = c.req.param("id");
   const engine = new MemoryEngine();

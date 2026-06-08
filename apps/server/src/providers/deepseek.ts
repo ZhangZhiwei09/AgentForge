@@ -1,3 +1,5 @@
+// DeepSeek Provider —— 封装 DeepSeek API（兼容 OpenAI 接口格式）
+// 实现 LLMProvider 接口，与 OpenAIProvider 结构对称，方便对比维护
 import OpenAI from "openai";
 import type { LLMProvider, StreamChunk } from "./types.js";
 
@@ -5,6 +7,7 @@ export class DeepSeekProvider implements LLMProvider {
   private client: OpenAI;
 
   constructor(apiKey: string, baseUrl: string = "https://api.deepseek.com/v1") {
+    // DeepSeek API 兼容 OpenAI SDK，只需换 baseURL 即可
     this.client = new OpenAI({
       apiKey,
       baseURL: baseUrl,
@@ -18,6 +21,7 @@ export class DeepSeekProvider implements LLMProvider {
     ];
   }
 
+  // 核心流式聊天方法 —— 与 OpenAIProvider 逻辑一致
   async *streamChat(
     messages: Array<{ role: string; content: string }>,
     model: string,

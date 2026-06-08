@@ -1,3 +1,4 @@
+// 知识库管理路由 —— /api/knowledge/* 完整 CRUD + 搜索 + 统计
 import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
@@ -8,7 +9,9 @@ import { KnowledgeIngestionService } from "../services/knowledge-ingestion.js";
 
 export const knowledgeRoutes = new Hono();
 
-// ── Knowledge Base CRUD ────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// 知识库 CRUD
+// ════════════════════════════════════════════════════════════════
 
 const kbCreateSchema = z.object({
   name: z.string().min(1).max(255),
@@ -21,7 +24,7 @@ const kbUpdateSchema = z.object({
   enabled: z.boolean().optional(),
 });
 
-// POST /api/knowledge/bases
+// POST /api/knowledge/bases —— 创建知识库
 knowledgeRoutes.post("/api/knowledge/bases", zValidator("json", kbCreateSchema), async (c) => {
   const { name, description } = c.req.valid("json");
 
@@ -40,12 +43,13 @@ knowledgeRoutes.post("/api/knowledge/bases", zValidator("json", kbCreateSchema),
   }, 201);
 });
 
-// GET /api/knowledge/bases
+// GET /api/knowledge/bases —— 列出所有知识库（含文档计数）
 knowledgeRoutes.get("/api/knowledge/bases", async (c) => {
   const bases = await prisma.knowledgeBase.findMany({
     orderBy: { createdAt: "desc" },
   });
 
+  // 为每个知识库统计文档数
   const responses = await Promise.all(
     bases.map(async (kb) => {
       const docCount = await prisma.knowledgeDocument.count({
@@ -66,7 +70,7 @@ knowledgeRoutes.get("/api/knowledge/bases", async (c) => {
   return c.json(responses);
 });
 
-// GET /api/knowledge/bases/:kbId
+// GET /api/knowledge/bases/:kbId —— 获取单个知识库详情
 knowledgeRoutes.get("/api/knowledge/bases/:kbId", async (c) => {
   const kbId = c.req.param("kbId");
   const kb = await prisma.knowledgeBase.findUnique({ where: { id: kbId } });
@@ -90,7 +94,7 @@ knowledgeRoutes.get("/api/knowledge/bases/:kbId", async (c) => {
   });
 });
 
-// PUT /api/knowledge/bases/:kbId
+// PUT /api/knowledge/bases/:kbId —— 更新知识库信息
 knowledgeRoutes.put("/api/knowledge/bases/:kbId", zValidator("json", kbUpdateSchema), async (c) => {
   const kbId = c.req.param("kbId");
   const data = c.req.valid("json");
@@ -125,7 +129,7 @@ knowledgeRoutes.put("/api/knowledge/bases/:kbId", zValidator("json", kbUpdateSch
   });
 });
 
-// DELETE /api/knowledge/bases/:kbId
+// DELETE /api/knowledge/bases/:kbId —— 删除知识库
 knowledgeRoutes.delete("/api/knowledge/bases/:kbId", async (c) => {
   const kbId = c.req.param("kbId");
   const kb = await prisma.knowledgeBase.findUnique({ where: { id: kbId } });
@@ -139,7 +143,9 @@ knowledgeRoutes.delete("/api/knowledge/bases/:kbId", async (c) => {
   return c.json({ status: "deleted" });
 });
 
-// ── Document CRUD ──────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// 文档 CRUD + 摄取
+// ════════════════════════════════════════════════════════════════
 
 const docCreateSchema = z.object({
   title: z.string().min(1).max(500),
@@ -147,10 +153,10 @@ const docCreateSchema = z.object({
 });
 
 const batchDocCreateSchema = z.object({
-  documents: z.array(docCreateSchema).min(1).max(100),
+  documents: z.array(docCreateSchema).min(1).max(100), // 单次最多 100 篇
 });
 
-// GET /api/knowledge/bases/:kbId/documents
+// GET /api/knowledge/bases/:kbId/documents —— 列出知识库中的所有文档
 knowledgeRoutes.get("/api/knowledge/bases/:kbId/documents", async (c) => {
   const kbId = c.req.param("kbId");
 
@@ -162,7 +168,7 @@ knowledgeRoutes.get("/api/knowledge/bases/:kbId/documents", async (c) => {
   return c.json(docs);
 });
 
-// GET /api/knowledge/documents/:docId
+// GET /api/knowledge/documents/:docId —— 获取单个文档详情
 knowledgeRoutes.get("/api/knowledge/documents/:docId", async (c) => {
   const docId = c.req.param("docId");
   const doc = await prisma.knowledgeDocument.findUnique({ where: { id: docId } });
@@ -174,7 +180,8 @@ knowledgeRoutes.get("/api/knowledge/documents/:docId", async (c) => {
   return c.json(doc);
 });
 
-// POST /api/knowledge/bases/:kbId/documents
+// POST /api/knowledge/bases/:kbId/documents —— 上传并摄取单篇文档
+// 流程：创建 PG 记录 → 切分 → embedding → 写入 Milvus → 更新 PG 状态
 knowledgeRoutes.post("/api/knowledge/bases/:kbId/documents", zValidator("json", docCreateSchema), async (c) => {
   const kbId = c.req.param("kbId");
   const { title, content } = c.req.valid("json");
@@ -190,7 +197,7 @@ knowledgeRoutes.post("/api/knowledge/bases/:kbId/documents", zValidator("json", 
   return c.json(doc, 201);
 });
 
-// POST /api/knowledge/bases/:kbId/documents/batch
+// POST /api/knowledge/bases/:kbId/documents/batch —— 批量上传文档
 knowledgeRoutes.post("/api/knowledge/bases/:kbId/documents/batch", zValidator("json", batchDocCreateSchema), async (c) => {
   const kbId = c.req.param("kbId");
   const { documents } = c.req.valid("json");
@@ -212,7 +219,70 @@ knowledgeRoutes.post("/api/knowledge/bases/:kbId/documents/batch", zValidator("j
   });
 });
 
-// DELETE /api/knowledge/documents/:docId
+// POST /api/knowledge/bases/:kbId/documents/upload —— 上传文件并自动摄取
+// 支持格式：.txt, .md, .json, .csv, .html, .xml, .yaml, .yml
+// Content-Type: multipart/form-data，字段名：file
+knowledgeRoutes.post("/api/knowledge/bases/:kbId/documents/upload", async (c) => {
+  const kbId = c.req.param("kbId");
+
+  const kb = await prisma.knowledgeBase.findUnique({ where: { id: kbId } });
+  if (!kb) {
+    return c.json({ detail: "知识库不存在" }, 404);
+  }
+
+  try {
+    const body = await c.req.parseBody();
+    const file = body["file"] as File | undefined;
+
+    if (!file || !(file instanceof File)) {
+      return c.json({ detail: "请上传文件（字段名：file）" }, 400);
+    }
+
+    // 获取文件名和扩展名
+    const fileName = file.name || "uploaded_file";
+    const ext = fileName.split(".").pop()?.toLowerCase() || "";
+    const supportedExts = ["txt", "md", "json", "csv", "html", "xml", "yaml", "yml", "log"];
+
+    if (!supportedExts.includes(ext)) {
+      return c.json({
+        detail: `不支持的文件类型 .${ext}。支持的格式：${supportedExts.join(", ")}`,
+      }, 400);
+    }
+
+    // 限制文件大小（10MB）
+    const MAX_SIZE = 10 * 1024 * 1024;
+    if (file.size > MAX_SIZE) {
+      return c.json({
+        detail: `文件过大（${(file.size / 1024 / 1024).toFixed(2)}MB），最大支持 10MB`,
+      }, 400);
+    }
+
+    // 读取文件内容为文本
+    const content = await file.text();
+    if (!content.trim()) {
+      return c.json({ detail: "文件内容为空" }, 400);
+    }
+
+    // 使用文件名（去掉扩展名）作为文档标题
+    const title = fileName.replace(/\.[^/.]+$/, "");
+
+    const ingestion = new KnowledgeIngestionService();
+    const doc = await ingestion.ingestDocument(kbId, title, content);
+
+    return c.json({
+      ...doc,
+      file_name: fileName,
+      file_size: file.size,
+    }, 201);
+  } catch (e) {
+    console.error("[knowledge] File upload failed:", e);
+    return c.json({
+      detail: e instanceof Error ? e.message : "文件上传处理失败",
+    }, 500);
+  }
+});
+
+// DELETE /api/knowledge/documents/:docId —— 删除文档（PG + Milvus 双删）
 knowledgeRoutes.delete("/api/knowledge/documents/:docId", async (c) => {
   const docId = c.req.param("docId");
   const ingestion = new KnowledgeIngestionService();
@@ -225,9 +295,11 @@ knowledgeRoutes.delete("/api/knowledge/documents/:docId", async (c) => {
   return c.json({ status: "deleted" });
 });
 
-// ── Chunk Query ────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// Chunk 查询
+// ════════════════════════════════════════════════════════════════
 
-// GET /api/knowledge/documents/:docId/chunks
+// GET /api/knowledge/documents/:docId/chunks —— 查看文档的所有切片
 knowledgeRoutes.get("/api/knowledge/documents/:docId/chunks", async (c) => {
   const docId = c.req.param("docId");
 
@@ -239,15 +311,17 @@ knowledgeRoutes.get("/api/knowledge/documents/:docId/chunks", async (c) => {
   return c.json(chunks);
 });
 
-// ── Search ──────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// 搜索
+// ════════════════════════════════════════════════════════════════
 
 const searchSchema = z.object({
   query: z.string().min(1),
-  kb_ids: z.array(z.string()).nullable().optional(),
+  kb_ids: z.array(z.string()).nullable().optional(), // 可选：限定知识库范围
   top_k: z.number().int().min(1).max(20).default(3),
 });
 
-// POST /api/knowledge/search
+// POST /api/knowledge/search —— 知识库语义搜索
 knowledgeRoutes.post("/api/knowledge/search", zValidator("json", searchSchema), async (c) => {
   const { query, kb_ids, top_k } = c.req.valid("json");
 
@@ -261,9 +335,11 @@ knowledgeRoutes.post("/api/knowledge/search", zValidator("json", searchSchema), 
   });
 });
 
-// ── Stats ────────────────────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// 统计
+// ════════════════════════════════════════════════════════════════
 
-// GET /api/knowledge/stats
+// GET /api/knowledge/stats —— 获取知识库整体统计
 knowledgeRoutes.get("/api/knowledge/stats", async (c) => {
   const service = new KnowledgeService();
   const milvusStats = await service.getCollectionStats();
