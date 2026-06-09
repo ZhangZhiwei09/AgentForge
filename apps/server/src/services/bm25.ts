@@ -7,6 +7,7 @@
 //   2. encodeDocuments(docs) —— 将文档转为稀疏向量 {词索引: BM25权重}
 //   3. encodeQueries(queries) —— 将查询转为稀疏向量（只保留 IDF>0 的 term）
 //
+import { logger } from "@agentforge/logger";
 // 稀疏向量格式：Record<string, number> —— key 是词索引（0~vocabSize-1），value 是权重
 
 // ── 分词工具函数 ──────────────────────────────
@@ -67,7 +68,7 @@ export class BM25SparseEncoder {
   // 语料库大小
   private corpusSize = 0;
   // 是否已训练
-  private isFitted = false;
+  isFitted = false;
 
   // 在语料库上训练 BM25：统计每个词的文档频率（DF）→ 计算 IDF
   // 幂等操作：多次调用会覆盖之前的统计
@@ -107,9 +108,7 @@ export class BM25SparseEncoder {
     }
 
     this.isFitted = true;
-    console.log(
-      `[bm25] Fitted on corpus: docs=${corpus.length}, vocab=${this.vocab.size}, avg_len=${Math.round(this.avgDocLen)}`,
-    );
+    logger.info({ docs: corpus.length, vocab: this.vocab.size, avgDocLen: Math.round(this.avgDocLen) }, "BM25 fitted");
   }
 
   // 将文档编码为稀疏向量 —— 用于存入 Milvus

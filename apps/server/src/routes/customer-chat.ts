@@ -1,12 +1,12 @@
 // 客服聊天路由 —— POST /api/customer-chat 为匿名客服 SSE 端点
 // 与 /api/chat 的主要区别：不需要 conversation_id（用 session_id），不注入记忆
-import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { CustomerChatService } from "../services/customer-chat.js";
+import { createHono } from "../lib/hono.js";
 
-export const customerChatRoutes = new Hono();
+export const customerChatRoutes = createHono();
 
 const customerChatRequestSchema = z.object({
   session_id: z.string().nullable().optional(), // null 则新建会话

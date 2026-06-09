@@ -3,6 +3,10 @@
 import { Hono } from "hono";
 import { corsMiddleware } from "./middleware/cors.js";
 import { errorHandler } from "./middleware/error.js";
+import { requestIdMiddleware } from "./middleware/request-id.js";
+import { authMiddleware } from "./middleware/auth.js";
+import { globalRateLimiter, chatRateLimiter } from "./middleware/rate-limit.js";
+import { authRoutes } from "./routes/auth.js";
 import { chatRoutes } from "./routes/chat.js";
 import { conversationRoutes } from "./routes/conversations.js";
 import { providerRoutes } from "./routes/providers.js";
@@ -10,12 +14,27 @@ import { memoryRoutes } from "./routes/memories.js";
 import { customerChatRoutes } from "./routes/customer-chat.js";
 import { knowledgeRoutes } from "./routes/knowledge.js";
 import { toolRoutes } from "./routes/tools.js";
+import type { AuthUser } from "@agentforge/shared-types";
+
+// Hono context variables — all middleware and routes share this type
+export type AppVariables = {
+  user: AuthUser;
+  requestId: string;
+};
 
 export function createApp() {
-  const app = new Hono();
+  const app = new Hono<{ Variables: AppVariables }>();
 
+  // 全局中间件：请求 ID 追踪（优先于 CORS，确保所有日志都有 reqId）
+  app.use("*", requestIdMiddleware);
   // 全局中间件：CORS 应用于所有路径
   app.use("*", corsMiddleware);
+  // 全局中间件：认证验证（白名单跳过 auth routes、health、customer-chat）
+  app.use("*", authMiddleware);
+  // 全局中间件：速率限制
+  app.use("*", globalRateLimiter);
+  // Chat API 专项速率限制（防止 token 滥用）
+  app.use("/api/chat", chatRateLimiter);
   // 全局错误处理：所有未捕获异常在此统一返回 JSON
   app.onError(errorHandler);
 
@@ -23,6 +42,7 @@ export function createApp() {
   app.get("/api/health", (c) => c.json({ status: "ok" }));
 
   // 注册所有业务路由（每个路由模块内部定义各自的路径前缀）
+  app.route("/", authRoutes);            // /api/auth/* (public)
   app.route("/", chatRoutes);           // /api/chat, /api/conversations/:id/messages
   app.route("/", conversationRoutes);    // /api/conversations CRUD
   app.route("/", providerRoutes);        // /api/providers

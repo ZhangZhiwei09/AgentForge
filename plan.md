@@ -15,6 +15,10 @@ V3 RAG System         ✅
 ↓
 V4 Tool Calling       ✅
 ↓
+P0 Platform Foundation  ← 认证 / 测试 / 日志 / CI
+↓
+P1 Agent Kernel         ← 推理 / 规划 / 工作内存
+↓
 V5 Voice Agent
 ↓
 V6 Workflow Engine
@@ -851,13 +855,1547 @@ Body: { "message": "...", "tools": ["calculator"] }
 ✅ 自测验证通过（calculator 和 get_current_time 工具调用正常）
 
 
-# 十五、V5+ 预留能力
+# 十五、P0 平台基础 —— 从 Demo 到可部署产品
 
-当前架构已预留以下扩展点：
+> **定位说明：** P0/P1/P2 是平台工程阶段，与 V5-V10 的 Agent 能力演进并行推进。
+> P0 聚焦"能让第二个用户使用"的最低平台门槛，P1 聚焦 Agent 内核，P2 聚焦生产运维。
+
+## P0-1 认证与多用户系统
+
+### 核心目标
+
+从硬编码的单用户 `00000000-...-0001` 演进为支持真实多用户的认证体系。
+
+### 架构设计
 
 ```text
-Voice Agent（ASR + TTS 集成）
-Workflow Engine（多步 Agent 工作流编排）
-Browser Agent（Playwright + Web 自动化）
-MCP Ecosystem（Model Context Protocol 集成）
+┌────────────────────────────────────────────┐
+│               Auth Middleware               │
+│  ┌──────────┬──────────┬──────────────┐    │
+│  │ JWT      │ API Key  │ OAuth 2.0    │    │
+│  │ (Web UI) │ (API)    │ (GitHub/Gmail)│    │
+│  └──────────┴──────────┴──────────────┘    │
+│              ↓                              │
+│  ┌──────────────────────────────────────┐  │
+│  │        AuthService (Singleton)        │  │
+│  │  - signUp / signIn / refreshToken    │  │
+│  │  - validateToken / revokeToken       │  │
+│  └──────────────────────────────────────┘  │
+└────────────────────────────────────────────┘
 ```
+
+### 数据模型扩展
+
+```sql
+-- users 表扩展
+ALTER TABLE users ADD COLUMN password_hash VARCHAR(255);
+ALTER TABLE users ADD COLUMN avatar_url VARCHAR(500);
+ALTER TABLE users ADD COLUMN role ENUM('admin', 'user', 'viewer') DEFAULT 'user';
+
+-- 新增 refresh_tokens 表
+CREATE TABLE refresh_tokens (
+  id          UUID PRIMARY KEY,
+  user_id     UUID REFERENCES users(id),
+  token_hash  VARCHAR(255),
+  expires_at  TIMESTAMP,
+  revoked     BOOLEAN DEFAULT FALSE,
+  created_at  TIMESTAMP
+);
+
+-- 新增 api_keys 表
+CREATE TABLE api_keys (
+  id          UUID PRIMARY KEY,
+  user_id     UUID REFERENCES users(id),
+  name        VARCHAR(100),
+  key_hash    VARCHAR(255),
+  last_used   TIMESTAMP,
+  expires_at  TIMESTAMP,
+  revoked     BOOLEAN DEFAULT FALSE,
+  created_at  TIMESTAMP
+);
+```
+
+### API 设计
+
+```http
+POST   /api/auth/signup          # 注册
+POST   /api/auth/signin          # 登录 → 返回 JWT + Refresh Token
+POST   /api/auth/refresh         # 刷新 Access Token
+POST   /api/auth/signout         # 登出
+GET    /api/auth/me              # 获取当前用户信息
+
+POST   /api/auth/api-keys        # 创建 API Key
+GET    /api/auth/api-keys        # 列出 API Key
+DELETE /api/auth/api-keys/:id    # 吊销 API Key
+```
+
+### Hono 中间件
+
+```typescript
+// apps/server/src/middleware/auth.ts
+const authMiddleware = createMiddleware(async (c, next) => {
+  const token = c.req.header("Authorization")?.replace("Bearer ", "")
+    ?? c.req.query("api_key");  // 也支持 query param 的 API Key
+
+  if (!token) return c.json({ detail: "Unauthorized" }, 401);
+
+  const user = await authService.validateToken(token);
+  if (!user) return c.json({ detail: "Invalid or expired token" }, 401);
+
+  c.set("user", user);  // 注入用户上下文
+  await next();
+});
+```
+
+### 验收标准
+
+- [ ] 用户注册/登录 API 完成（JWT + bcrypt）
+- [ ] Refresh Token 轮转机制完成
+- [ ] API Key 管理完成（CRUD + 吊销）
+- [ ] Auth 中间件注入用户上下文到所有路由
+- [ ] 现有 API 全部迁移为 per-user 数据隔离（conversation/memory/knowledge 按 user_id 过滤）
+- [ ] 前端登录/注册页面完成
+- [ ] 前端 Auth 状态管理（Zustand store + 请求拦截器自动附带 Token）
+
+---
+
+## P0-2 结构化日志与链路追踪
+
+### 核心目标
+
+从 `console.log` 演进为结构化日志 + 请求级 Correlation ID，让每条请求的处理链路可追踪。
+
+### 技术选型
+
+| 组件 | 技术 | 用途 |
+|------|------|------|
+| 日志库 | pino | 结构化 JSON 日志，极低开销 |
+| 日志传输 | pino-pretty (dev) / pino/file (prod) | 开发时人类可读，生产时 JSON → 文件或 stdout |
+| Correlation ID | Hono 中间件 + AsyncLocalStorage | 每个请求生成唯一 ID，贯穿所有日志 |
+| 日志级别 | trace / debug / info / warn / error / fatal | 通过环境变量 `LOG_LEVEL` 控制 |
+
+### 架构
+
+```typescript
+// packages/logger/src/index.ts  (新建共享包)
+import pino from "pino";
+
+export const logger = pino({
+  level: process.env.LOG_LEVEL || "info",
+  transport: process.env.NODE_ENV === "development"
+    ? { target: "pino-pretty", options: { colorize: true } }
+    : undefined,
+  mixin() {
+    // 自动注入 correlationId
+    const ctx = getRequestContext();
+    return ctx ? { reqId: ctx.requestId, userId: ctx.userId } : {};
+  },
+});
+```
+
+### Hono 中间件集成
+
+```typescript
+// apps/server/src/middleware/request-id.ts
+app.use("*", async (c, next) => {
+  const requestId = c.req.header("X-Request-ID") || crypto.randomUUID();
+  c.set("requestId", requestId);
+  c.header("X-Request-ID", requestId);  // 返回给前端便于问题定位
+  await runWithRequestContext({ requestId }, next);
+});
+```
+
+### 验收标准
+
+- [ ] `packages/logger` 共享包创建完成（pino 封装）
+- [ ] Request ID 中间件完成，自动注入到所有日志
+- [ ] 关键路径日志替换完成：ChatService、MemoryEngine、KnowledgeService、ToolRegistry
+- [ ] 日志级别分级：正常流 info，异常 warn/error，LLM 调用 debug
+- [ ] 前端 Console 日志替换为分级日志（开发环境输出，生产环境抑制）
+
+---
+
+## P0-3 测试基础设施
+
+### 核心目标
+
+从零测试覆盖到核心路径有测试保护，建立测试文化和 CI 门禁。
+
+### 技术选型
+
+| 组件 | 技术 | 用途 |
+|------|------|------|
+| 测试框架 | vitest | 与 Vite 生态一致，速度快 |
+| 断言 | vitest 内置 expect | 无需额外断言库 |
+| Mock | vitest + msw (Mock Service Worker) | Mock HTTP / Provider 层 |
+| 数据库测试 | 测试用 PostgreSQL 实例 或 SQLite 替代 | 隔离的测试数据库 |
+| E2E | Playwright | 浏览器端测试 |
+
+### 测试分层
+
+```text
+┌─────────────────────────────────────────┐
+│            E2E (Playwright)              │  ← 关键用户流程
+│  登录 → 创建会话 → 发送消息 → 验证流式响应  │
+└─────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────┐
+│         Integration Tests (vitest)       │  ← API 路由 + 数据库
+│  POST /api/chat → 验证 SSE 响应结构       │
+│  Tool Calling → 验证多轮循环              │
+└─────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────┐
+│          Unit Tests (vitest)             │  ← 核心逻辑
+│  ToolRegistry.execute()                 │
+│  MemoryEngine.search()                  │
+│  TextSplitter.split()                   │
+│  Provider.streamChat() Mock             │
+└─────────────────────────────────────────┘
+```
+
+### 优先测试清单
+
+1. **ToolRegistry** — 注册、查找、执行、未知工具报错、参数解析失败
+2. **ChatService** — 记忆注入、知识库注入、工具调用循环、最大轮数边界
+3. **MemoryEngine** — 存储、搜索、提取、删除
+4. **TextSplitter** — 各种文本长度和语言
+5. **BM25** — 关键词搜索正确性
+6. **API 路由** — 所有端点的正常和异常响应
+
+### 验收标准
+
+- [ ] vitest 配置完成，`pnpm test` 可运行
+- [ ] `packages/database` 测试辅助工具（测试数据库初始化/清理）完成
+- [ ] ToolRegistry 单元测试覆盖 ≥ 90%
+- [ ] ChatService 集成测试覆盖核心流程（含 Mock Provider）
+- [ ] MemoryEngine 集成测试覆盖 CRUD + 搜索
+- [ ] API 路由测试覆盖所有端点（至少 happy path + 错误场景各 1 个）
+- [ ] `pnpm test` 在 CI 中运行（见 P0-4）
+
+---
+
+## P0-4 CI/CD 流水线
+
+### 核心目标
+
+自动化构建、测试、类型检查、Lint，确保每次提交的质量门禁。
+
+### GitHub Actions 流水线设计
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+on:
+  push:
+    branches: [main, init, 'feature/**']
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: agentforge_test
+        ports: ["5434:5432"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v2
+      - uses: actions/setup-node@v4
+        with: { node-version: '20', cache: 'pnpm' }
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck        # 全量类型检查
+      - run: pnpm lint             # ESLint
+      - run: pnpm format --check   # Prettier 格式检查
+      - run: pnpm test             # vitest 测试
+      - run: pnpm build            # 构建验证
+```
+
+### 流水线阶段
+
+| 阶段 | 触发条件 | 操作 |
+|------|----------|------|
+| **Quality** | 每次 push/PR | typecheck → lint → format → test → build |
+| **Preview Deploy** | PR 创建 | 部署到临时环境（后续可加） |
+| **Release** | main 分支 tag push | 构建 Docker 镜像 → 推送到 Registry |
+
+### 验收标准
+
+- [ ] `.github/workflows/ci.yml` 创建并通过
+- [ ] `pnpm typecheck` 全量通过
+- [ ] `pnpm lint` 配置完成（ESLint flat config）
+- [ ] `pnpm format --check` 配置完成（Prettier）
+- [ ] `pnpm test` 在 CI 中通过
+- [ ] PR 门禁：所有 Quality 检查必须通过才能合并
+
+---
+
+## P0-5 安全加固
+
+### Rate Limiting
+
+```typescript
+// 使用 Hono 的 rate-limiter 或 hono-rate-limiter
+// apps/server/src/middleware/rate-limit.ts
+import { rateLimiter } from "hono-rate-limiter";
+
+// 全局：每个 IP 每分钟最多 60 次请求
+app.use("*", rateLimiter({
+  windowMs: 60 * 1000,
+  max: 60,
+  keyGenerator: (c) => c.req.header("X-Forwarded-For") || "unknown",
+}));
+
+// Chat API：每个用户每分钟最多 20 次（防止 token 滥用）
+app.use("/api/chat", rateLimiter({
+  windowMs: 60 * 1000,
+  max: 20,
+  keyGenerator: (c) => c.get("user")?.id || c.req.header("X-Forwarded-For"),
+}));
+```
+
+### Input Validation
+
+- 所有 API 路由使用 `@hono/zod-validator` 进行参数校验（已有部分，需全覆盖）
+- Chat message 长度限制（如 16k 字符）
+- Conversation title 长度限制
+- 文件上传大小限制（知识库文档）
+- SQL 注入防护：Prisma 参数化查询已覆盖，需审查原生 SQL（如有）
+
+### Content Safety
+
+- 可选的输入/输出内容过滤（接入 OpenAI Moderation API 或关键词过滤）
+- System Prompt 注入防护：检测用户消息中是否包含"忽略上述指令"等 prompt injection 尝试
+
+### 验收标准
+
+- [ ] 全局 Rate Limiting 中间件完成
+- [ ] Chat API 特殊 Rate Limiting 完成（更高优先级保护）
+- [ ] 所有 POST/PUT/PATCH 路由有 Zod 参数校验
+- [ ] 输入长度限制和特殊字符转义
+- [ ] Rate Limit 超限时返回标准 `429 Too Many Requests` + Retry-After 头
+
+---
+
+## P1-1 后台任务队列
+
+### 核心目标
+
+将记忆提取、Embedding 生成等耗时操作从 Chat 请求的同步流中解耦，提升首 Token 响应速度。
+
+### 架构
+
+```text
+Chat 请求
+  ↓
+LLM 流式响应完成
+  ↓
+发送消息到 Job Queue ────→ Worker 异步处理
+  ↓                              ↓
+立即返回 done 事件          MemoryEngine.extractAndStore()
+  ↑                              ↓
+前端收到完整响应             Milvus.insert() (非阻塞)
+                              ↓
+                            知识库文档摄取 (chunk → embed → store)
+```
+
+### 技术选型
+
+| 组件 | 技术 | 用途 |
+|------|------|------|
+| 消息队列 | BullMQ (Redis) | 可靠的任务队列，支持重试、延迟、优先级 |
+| Worker | 独立 tsx 进程 | 消费队列任务 |
+| Dashboard | Bull Board | 任务监控 UI |
+
+### 数据流
+
+```typescript
+// apps/server/src/jobs/queue.ts
+import { Queue } from "bullmq";
+
+export const memoryQueue = new Queue("memory-extraction", {
+  connection: { host: "localhost", port: 6379 },
+});
+
+export const ingestionQueue = new Queue("knowledge-ingestion", {
+  connection: { host: "localhost", port: 6379 },
+});
+
+// 在 ChatService.streamChat() 的 done 事件后：
+await memoryQueue.add("extract", {
+  messages: [...],
+  userId,
+  conversationId,
+  providerName,
+}, {
+  attempts: 3,
+  backoff: { type: "exponential", delay: 1000 },
+  removeOnComplete: true,
+});
+```
+
+### 验收标准
+
+- [ ] Redis 容器添加到 `infra/docker/compose.yml`
+- [ ] BullMQ 队列创建完成（memory-extraction + knowledge-ingestion）
+- [ ] Worker 进程独立启动（`pnpm server:worker`）
+- [ ] ChatService 中记忆提取改为异步投递
+- [ ] 知识库文档摄取改为异步投递
+- [ ] Bull Board 监控面板集成到 Debug Panel
+- [ ] 向后兼容：Worker 不可用时不影响 Chat 主流程（graceful degradation）
+
+---
+
+## P1-2 可观测性：Metrics + Tracing
+
+### 核心目标
+
+知道系统在干什么、有多快、哪里慢。
+
+### Metrics（Prometheus 格式）
+
+```typescript
+// apps/server/src/observability/metrics.ts
+// 关键指标：
+// - http_requests_total{method, path, status}    ← 请求量
+// - http_request_duration_ms{method, path}        ← 延迟分位数
+// - chat_messages_total{provider, model}          ← LLM 调用量
+// - chat_tokens_total{provider, type}             ← Token 消耗（prompt/completion）
+// - tool_calls_total{tool_name, status}           ← 工具调用量/成功率
+// - memory_extractions_total                      ← 记忆提取量
+// - milvus_search_duration_ms                     ← 向量搜索延迟
+```
+
+### Tracing（OpenTelemetry）
+
+```typescript
+// Chat 请求的全链路追踪：
+// HTTP Request
+//   ├── MemoryEngine.search()      ← span: 语义搜索
+//   ├── KnowledgeService.search()  ← span: 知识库搜索
+//   ├── LLM API Call (Round 1)     ← span: LLM 调用
+//   │   └── ToolRegistry.execute() ← span: 工具执行
+//   ├── LLM API Call (Round 2)     ← span: 第二轮
+//   └── MemoryEngine.extract()     ← span: 记忆提取（或入队）
+```
+
+### 技术选型
+
+| 组件 | 技术 | 用途 |
+|------|------|------|
+| Metrics 库 | prom-client | Prometheus 指标采集 |
+| Metrics 端点 | GET /api/metrics | Prometheus scrape |
+| Tracing SDK | @opentelemetry/sdk-node | 分布式追踪 |
+| Exporter | OTLP → Jaeger / Grafana Tempo | 追踪存储和可视化 |
+| 仪表盘 | Grafana | 统一可视化 |
+
+### 验收标准
+
+- [ ] `GET /api/metrics` 端点完成，暴露 Prometheus 格式指标
+- [ ] 核心指标埋点完成（HTTP、Chat、Tool、Memory）
+- [ ] OpenTelemetry SDK 集成，自动插桩 HTTP + 手动插桩 Chat/Memory
+- [ ] Jaeger 容器添加到 infra（可选，或直接用 Grafana Cloud 免费层）
+- [ ] Grafana Dashboard JSON 模板创建
+
+---
+
+# 十六、P1 Agent 内核 —— 从 "Chatbot with Tools" 到 "Autonomous Agent"
+
+> **定位说明：** V4 的 Tool Calling 是被动的——LLM 在单次调用中决定是否用工具。
+> Agent 内核阶段将引入主动规划、自我反思、工作记忆，让系统从"响应指令"升级为"自主完成任务"。
+
+## P1-3 Agent 推理框架
+
+### 核心目标
+
+引入 ReAct（Reasoning + Acting）模式，让 Agent 能够先思考再行动，观察结果后再思考。
+
+### ReAct 循环设计
+
+```text
+┌─────────────────────────────────────────────────┐
+│                  Agent Loop                      │
+│                                                  │
+│  ┌──────────┐     ┌──────────┐     ┌─────────┐ │
+│  │ THINK    │ ──→ │ ACT      │ ──→ │ OBSERVE │ │
+│  │ 分析现状  │     │ 调用工具  │     │ 观察结果 │ │
+│  │ 制定计划  │     │ 或回复    │     │ 评估进展 │ │
+│  └──────────┘     └──────────┘     └─────────┘ │
+│        ↑                                    │    │
+│        └──────────── 循环 ─────────────────┘    │
+│                                                  │
+│  终止条件：                                       │
+│  - Agent 决定 respond（任务完成）                  │
+│  - 达到最大迭代次数（默认 10 轮）                    │
+│  - Agent 决定 ask_user（需要澄清）                  │
+└─────────────────────────────────────────────────┘
+```
+
+### 决策输出格式（Structured Decision）
+
+替代自由文本，Agent 每轮输出结构化决策：
+
+```typescript
+// packages/shared-types/src/agent-decision.ts
+type AgentDecision =
+  | { action: "tool_call"; tool: string; args: Record<string, unknown>; reason: string }
+  | { action: "respond"; content: string; summary: string }
+  | { action: "ask_user"; question: string; context: string }
+  | { action: "delegate"; agent: string; task: string; context: string };  // V9 Multi-Agent
+```
+
+### System Prompt 模板（ReAct 风格）
+
+```text
+You are an AI Agent with access to tools. For each step, you MUST output a JSON decision:
+
+{
+  "observation": "What I see right now...",
+  "analysis": "What this means and what I need to do...",
+  "plan": "Step 1: ..., Step 2: ...",
+  "decision": { "action": "tool_call" | "respond" | "ask_user", ... }
+}
+
+Rules:
+1. ALWAYS think before acting — fill observation/analysis/plan first
+2. If you have enough information to answer, respond directly
+3. If you're unsure, ask the user instead of guessing
+4. Break complex tasks into smaller steps
+```
+
+### AgentService 设计
+
+```typescript
+// apps/server/src/services/agent.ts
+class AgentService {
+  async *run(
+    conversationId: string,
+    task: string,
+    options: {
+      model?: string;
+      maxIterations?: number;
+      tools?: string[];
+      requireApproval?: boolean;  // P1-5 Human-in-the-loop
+    }
+  ): AsyncGenerator<AgentStreamEvent> {
+    let iteration = 0;
+    const scratchpad: AgentStep[] = [];  // 工作内存
+
+    while (iteration < (options.maxIterations || 10)) {
+      // 1. 构建上下文（system prompt + scratchpad + task）
+      // 2. 调用 LLM 获取结构化决策
+      // 3. 根据决策执行：
+      //    - tool_call → 执行工具 → 记录到 scratchpad → 继续
+      //    - respond → 流式输出文本 → 结束
+      //    - ask_user → 暂停等待用户输入 → 继续
+      // 4. yield AgentStreamEvent
+      iteration++;
+    }
+  }
+}
+```
+
+### 验收标准
+
+- [ ] AgentService 实现完成，支持 ReAct 循环
+- [ ] 结构化决策 JSON 输出 + Zod 校验
+- [ ] System Prompt 模板注册到 `shared-prompts`
+- [ ] 前端流式渲染适配 Agent 事件类型（think/act/observe/respond）
+- [ ] Debug Panel 展示 Agent 推理步骤（observation → analysis → plan → decision）
+- [ ] 向后兼容：无 tools 参数时回退到普通 Chat 模式
+
+---
+
+## P1-4 Agent 工作内存 + 任务 Scratchpad
+
+### 核心目标
+
+不同于 V2 的长期记忆（跨会话），Agent 需要一个当前任务的 scratchpad：
+- 存储中间推理步骤
+- 存储工具调用的中间结果
+- 任务完成后可归档为长期记忆或丢弃
+
+### 数据模型
+
+```sql
+-- agent_sessions 表
+CREATE TABLE agent_sessions (
+  id              UUID PRIMARY KEY,
+  conversation_id UUID REFERENCES conversations(id),
+  task            TEXT NOT NULL,               -- 用户最初的任务描述
+  status          ENUM('running', 'paused', 'completed', 'failed') DEFAULT 'running',
+  scratchpad      JSONB DEFAULT '[]',          -- 中间步骤记录
+  final_summary   TEXT,                        -- 任务完成后的总结
+  started_at      TIMESTAMP,
+  completed_at    TIMESTAMP
+);
+
+-- scratchpad 条目结构 (JSONB)
+[
+  {
+    "step": 1,
+    "observation": "...",
+    "analysis": "...",
+    "plan": "...",
+    "decision": { "action": "tool_call", ... },
+    "result": "...",
+    "timestamp": "..."
+  },
+  ...
+]
+```
+
+### 工作内存生命周期
+
+```text
+Task Start
+  ↓
+[Scratchpad 初始化]
+  ↓
+Step 1: observe → analyze → plan → act → result → append to scratchpad
+  ↓
+Step 2: observe (reads scratchpad[0..n-1]) → analyze → act → result → append
+  ↓
+...
+  ↓
+Task Complete
+  ↓
+[Optional] Archive to Long-term Memory (summary + key findings)
+  ↓
+[Scratchpad 可丢弃或保留 N 天用于审计]
+```
+
+### 验收标准
+
+- [ ] `agent_sessions` 数据模型 + Prisma 迁移完成
+- [ ] AgentService 每步自动追加 scratchpad
+- [ ] 每轮推理时自动注入 scratchpad 到上下文
+- [ ] API: `GET /api/agent-sessions` 列出历史 Agent 任务
+- [ ] API: `GET /api/agent-sessions/:id` 查看任务详情和推理步骤
+- [ ] 前端：Agent Session 面板展示推理链（类似 Debug Panel 的 Agent 视图）
+
+---
+
+## P1-5 Human-in-the-Loop 审批门
+
+### 核心目标
+
+对于高风险操作（发邮件、调用外部 API、修改数据、大额交易等），Agent 必须暂停并请求人类审批。
+
+### 审批流程
+
+```text
+Agent 决定执行高风险工具
+  ↓
+暂停 Agent 循环
+  ↓
+SSE 事件: { type: "approval_request", tool: "send_email", args: {...} }
+  ↓
+前端展示审批卡片：[批准] [拒绝] [修改参数]
+  ↓
+用户操作 → POST /api/agent/approve 或 /reject
+  ↓
+Agent 循环恢复（继续执行 或 跳过该工具）
+```
+
+### 工具风险等级定义
+
+```typescript
+// tools/registry.ts 扩展
+interface RegisteredTool {
+  definition: ToolDefinition;
+  execute: ToolExecutor;
+  riskLevel: "safe" | "read_only" | "mutation" | "destructive";
+  requireApproval: boolean;  // true = 必须审批
+  approvalMessage?: (args: Record<string, unknown>) => string;  // 审批提示
+}
+```
+
+### API 设计
+
+```http
+POST /api/agent/approval/:agent_session_id/:decision_id
+Body: { "action": "approve" | "reject" | "modify", "modified_args": {...} }
+```
+
+### 验收标准
+
+- [ ] 工具注册扩展 `riskLevel` 和 `requireApproval` 字段
+- [ ] Agent 循环中的审批暂停/恢复机制
+- [ ] SSE 协议扩展 `approval_request` / `approval_result` 事件
+- [ ] 前端审批卡片 UI（显示工具名、参数、风险等级）
+- [ ] 审批超时处理（默认 5 分钟无响应自动拒绝）
+- [ ] 审批历史记录审计日志
+
+---
+
+## P1-6 工具生态深化
+
+### 核心目标
+
+从 3 个玩具级工具（time、calculator、web_search stub）扩展为具备实际生产力的工具集。
+
+### 新增内置工具
+
+| 工具 | 类别 | 描述 | 风险等级 |
+|------|------|------|----------|
+| `file_read` | 文件系统 | 读取指定路径的文件内容 | safe |
+| `file_write` | 文件系统 | 写入内容到文件 | destructive |
+| `file_search` | 文件系统 | 按文件名/内容搜索 | read_only |
+| `code_execute` | 沙箱 | 在 Docker 沙箱中执行 Python/JS 代码 | mutation |
+| `http_request` | 网络 | 发送 HTTP 请求（GET/POST） | mutation |
+| `db_query` | 数据库 | 执行只读 SQL 查询 | read_only |
+| `web_search` | 搜索 | 真实在线搜索（SerpAPI/Tavily） | read_only |
+| `web_fetch` | 网络 | 抓取指定 URL 内容 | read_only |
+| `send_email` | 通信 | 发送邮件（需审批） | destructive |
+| `calendar_query` | 日程 | 查询日历事件 | read_only |
+| `github_issue` | 集成 | 创建/查询 GitHub Issue | mutation |
+
+### 工具执行沙箱
+
+```text
+┌─────────────────────────────────────┐
+│         Tool Execution Sandbox       │
+│                                      │
+│  ┌──────────────────────────────┐   │
+│  │  Timeout (per-tool config)   │   │
+│  │  - safe: 5s                  │   │
+│  │  - read_only: 15s            │   │
+│  │  - mutation: 30s             │   │
+│  └──────────────────────────────┘   │
+│                                      │
+│  ┌──────────────────────────────┐   │
+│  │  Code Execution (Docker)     │   │
+│  │  - Isolated container        │   │
+│  │  - Network: none (default)   │   │
+│  │  - Memory limit: 256MB       │   │
+│  │  - CPU limit: 0.5 core       │   │
+│  │  - Auto-destroy after 60s    │   │
+│  └──────────────────────────────┘   │
+│                                      │
+│  ┌──────────────────────────────┐   │
+│  │  Circuit Breaker             │   │
+│  │  - 5 consecutive failures →  │   │
+│  │    pause tool for 60s        │   │
+│  └──────────────────────────────┘   │
+└─────────────────────────────────────┘
+```
+
+### 验收标准
+
+- [ ] 工具注册扩展：`timeout`、`riskLevel`、`requireApproval`、`sandbox` 字段
+- [ ] 至少 6 个新工具实现并注册
+- [ ] Docker 沙箱集成完成（code_execute 工具）
+- [ ] 工具超时机制完成（每个工具独立 timeout）
+- [ ] 熔断器完成（连续失败自动暂停）
+- [ ] Web Search 真实实现（SerpAPI 或 Tavily 集成）
+- [ ] 工具执行指标记录（调用次数、成功率、平均延迟）
+
+
+# 十七、V5 Voice Agent 语音交互
+
+## 1. 核心目标
+
+为 AgentForge 添加语音输入（ASR）和语音输出（TTS）能力，支持实时语音对话。
+
+## 2. 系统架构
+
+```text
+┌───────────────────────────────────────────────────┐
+│                   React Web                        │
+│  ┌─────────────────────────────────────────────┐  │
+│  │  Voice Panel                                 │  │
+│  │  ┌─────────────┐  ┌──────────┐  ┌────────┐ │  │
+│  │  │ 麦克风按钮    │  │ 音频波形  │  │ 状态    │ │  │
+│  │  │ (唤醒词检测)  │  │ (可视化)  │  │ (听/说) │ │  │
+│  │  └─────────────┘  └──────────┘  └────────┘ │  │
+│  └─────────────────────────────────────────────┘  │
+└──────────────────────┬────────────────────────────┘
+                       │ WebSocket (双向音频流)
+                       ▼
+┌───────────────────────────────────────────────────┐
+│              Hono Server                           │
+│  ┌────────────── ─┬──────────────────┬──────────┐ │
+│  │  VoiceService  │   ChatService    │ Provider │ │
+│  │  ┌───────────┐ │                  │  Layer   │ │
+│  │  │ ASR Engine│ │  Agent Loop +   │          │ │
+│  │  │ (Whisper) │ │  Tool Calling   │          │ │
+│  │  ├───────────┤ │                  │          │ │
+│  │  │ TTS Engine│ │                  │          │ │
+│  │  │ (Edge TTS │ │                  │          │ │
+│  │  │  / OpenAI)│ │                  │          │ │
+│  │  └───────────┘ │                  │          │ │
+│  └────────────────┴──────────────────┴──────────┘ │
+└───────────────────────────────────────────────────┘
+```
+
+## 3. 技术选型
+
+| 组件 | 技术 | 用途 |
+|------|------|------|
+| ASR (语音识别) | OpenAI Whisper API | 高精度多语言语音转文字 |
+| TTS (语音合成) | OpenAI TTS API / Edge TTS | 文字转语音，多种音色 |
+| 实时通信 | WebSocket | 音频流双向传输（替代 HTTP SSE） |
+| 音频采集 | MediaRecorder API (浏览器) | 前端麦克风采集 |
+| 音频播放 | Web Audio API | 前端播放 TTS 音频流 |
+| VAD (语音活动检测) | @ricky0123/vad-web | 检测用户是否在说话 |
+
+## 4. 打断机制
+
+```text
+AI 正在说话 (TTS 播放中)
+  ↓
+用户开始说话 (VAD 检测到语音)
+  ↓
+前端发送 interrupt 信号 → WebSocket
+  ↓
+服务器停止当前 LLM 生成 → 中断 TTS → 切换到聆听模式
+  ↓
+处理用户新的语音输入
+```
+
+## 5. 数据模型扩展
+
+```sql
+-- voice_sessions 表
+CREATE TABLE voice_sessions (
+  id              UUID PRIMARY KEY,
+  conversation_id UUID REFERENCES conversations(id),
+  status          ENUM('active', 'ended') DEFAULT 'active',
+  audio_duration  INT,                  -- 总音频时长（秒）
+  asr_tokens      INT,                  -- 语音识别 token 数
+  tts_tokens      INT,                  -- 语音合成字符数
+  created_at      TIMESTAMP
+);
+```
+
+## 6. API 设计
+
+### WebSocket 端点
+
+```text
+WS /api/voice/stream
+  → Client: { type: "audio", data: <base64 PCM> }
+  ← Server: { type: "transcript", text: "用户说了什么" }
+  ← Server: { type: "response_text", text: "AI 文本回复" }
+  ← Server: { type: "audio", data: <base64 MP3> }
+  ← Server: { type: "interrupted" }
+  ← Server: { type: "done" }
+```
+
+### HTTP 端点（非实时备选）
+
+```http
+POST /api/voice/transcribe    # 上传音频 → 返回文字
+POST /api/voice/synthesize    # 提交文字 → 返回音频
+```
+
+## 7. 验收标准
+
+- [ ] WebSocket 端点 `/api/voice/stream` 完成
+- [ ] ASR 集成完成（Whisper API，支持中英文）
+- [ ] TTS 集成完成（至少 3 种音色可选）
+- [ ] VAD 语音活动检测集成（前端）
+- [ ] 打断机制完成（AI 说话时可被用户打断）
+- [ ] 前端 Voice Panel 完成（麦克风按钮 + 波形可视化 + 状态指示）
+- [ ] 向后兼容：文本聊天模式不受影响
+- [ ] 语音对话历史可回看（自动保存 transcript）
+
+
+# 十八、V6 Workflow Engine 工作流引擎
+
+## 1. 核心目标
+
+从单次 Agent 任务执行演进为多步骤、可编排、可恢复的工作流引擎。支持 DAG 编排、条件分支、并行执行、人工审批节点。
+
+## 2. 系统架构
+
+```text
+┌─────────────────────────────────────────────────┐
+│              Workflow Engine                     │
+│                                                  │
+│  ┌──────────┐    ┌──────────────┐               │
+│  │ Workflow │───→│ DAG Executor │               │
+│  │  Editor  │    │              │               │
+│  │ (JSON    │    │ ┌──────────┐ │               │
+│  │  DSL)    │    │ │ Scheduler│ │               │
+│  └──────────┘    │ └────┬─────┘ │               │
+│                  │      ↓       │               │
+│  ┌──────────┐    │ ┌──────────┐ │               │
+│  │ Workflow │    │ │ Parallel │ │               │
+│  │ Templates│    │ │ Executor │ │               │
+│  └──────────┘    │ └────┬─────┘ │               │
+│                  │      ↓       │               │
+│                  │ ┌──────────┐ │               │
+│  ┌──────────┐    │ │ State    │ │               │
+│  │ Checkpoint│←──│ │ Manager  │ │               │
+│  │ & Resume │    │ └──────────┘ │               │
+│  └──────────┘    └──────────────┘               │
+└─────────────────────────────────────────────────┘
+```
+
+## 3. 工作流 DSL（JSON 格式）
+
+```json
+{
+  "name": "Customer Onboarding",
+  "version": "1.0",
+  "variables": {
+    "customer_name": { "type": "string", "required": true },
+    "company_size": { "type": "number", "default": 1 }
+  },
+  "steps": [
+    {
+      "id": "greet",
+      "type": "agent",
+      "prompt": "Welcome {{customer_name}}! Generate a personalized greeting.",
+      "model": "gpt-4o",
+      "tools": ["get_current_time"],
+      "timeout": 30
+    },
+    {
+      "id": "decision",
+      "type": "condition",
+      "expression": "{{company_size}} > 50",
+      "then": "enterprise_flow",
+      "else": "smb_flow"
+    },
+    {
+      "id": "enterprise_flow",
+      "type": "parallel",
+      "branches": [
+        {
+          "id": "check_slack",
+          "type": "tool",
+          "tool": "slack_invite",
+          "args": { "email": "{{customer_email}}" },
+          "require_approval": true
+        },
+        {
+          "id": "create_ticket",
+          "type": "tool",
+          "tool": "jira_create",
+          "args": { "project": "ONBOARD", "summary": "..." }
+        }
+      ]
+    },
+    {
+      "id": "smb_flow",
+      "type": "agent",
+      "prompt": "Generate self-serve onboarding guide for a small team."
+    },
+    {
+      "id": "summary",
+      "type": "agent",
+      "prompt": "Summarize the onboarding results. Steps taken: {{steps}}",
+      "depends_on": ["enterprise_flow", "smb_flow"]
+    }
+  ]
+}
+```
+
+## 4. 工作流状态机
+
+```text
+                    ┌──────────┐
+                    │  Draft   │
+                    └────┬─────┘
+                         ↓
+                    ┌──────────┐
+                    │  Ready   │
+                    └────┬─────┘
+                         ↓
+              ┌──────────────────────┐
+              │      Running         │
+              │  ┌────┐ ┌────┐ ┌──┐ │
+              │  │Step│→│Step│→│..│ │
+              │  └────┘ └────┘ └──┘ │
+              └──┬──────┬──────┬────┘
+                 ↓      ↓      ↓
+            ┌──────┐ ┌──────┐ ┌────────┐
+            │ Done │ │Paused│ │Failed  │
+            └──────┘ └──┬───┘ └───┬────┘
+                        ↓          ↓
+                   ┌────────┐ ┌──────────┐
+                   │Resumed │ │ Retrying │
+                   └────────┘ └──────────┘
+```
+
+## 5. 检查点与恢复
+
+```typescript
+// 每个步骤完成后自动保存检查点
+interface WorkflowCheckpoint {
+  workflowId: string;
+  completedSteps: string[];       // 已完成的步骤 ID
+  currentStep: string | null;     // 正在执行的步骤 ID
+  stepResults: Record<string, unknown>;  // 每个步骤的输出
+  variables: Record<string, unknown>;    // 累积变量快照
+  savedAt: Date;
+}
+
+// 恢复时从最近检查点继续
+async function resumeWorkflow(workflowId: string): Promise<void> {
+  const checkpoint = await loadCheckpoint(workflowId);
+  // 从 checkpoint.currentStep 继续执行
+  // 已完成步骤的结果从 checkpoint.stepResults 读取
+}
+```
+
+## 6. 重试与超时策略
+
+```typescript
+interface StepConfig {
+  retry: {
+    maxAttempts: number;       // 最大重试次数（默认 3）
+    backoff: "fixed" | "exponential" | "linear";
+    initialDelay: number;      // 初始延迟（ms）
+    maxDelay: number;          // 最大延迟（ms）
+    retryOn: string[];         // 可重试的错误类型
+  };
+  timeout: number;             // 步骤超时（秒）
+  onTimeout: "fail" | "skip" | "fallback";
+  fallbackStep?: string;       // 超时后的回退步骤
+}
+```
+
+## 7. 数据模型
+
+```sql
+-- workflows 表
+CREATE TABLE workflows (
+  id              UUID PRIMARY KEY,
+  user_id         UUID REFERENCES users(id),
+  name            VARCHAR(200),
+  description     TEXT,
+  definition      JSONB NOT NULL,          -- 工作流 DSL (JSON)
+  version         INT DEFAULT 1,
+  status          ENUM('draft', 'ready', 'archived') DEFAULT 'draft',
+  created_at      TIMESTAMP,
+  updated_at      TIMESTAMP
+);
+
+-- workflow_runs 表
+CREATE TABLE workflow_runs (
+  id              UUID PRIMARY KEY,
+  workflow_id     UUID REFERENCES workflows(id),
+  status          ENUM('running', 'paused', 'completed', 'failed', 'cancelled'),
+  input           JSONB,                   -- 输入变量
+  output          JSONB,                   -- 最终输出
+  checkpoint      JSONB,                   -- 当前检查点
+  started_at      TIMESTAMP,
+  completed_at    TIMESTAMP
+);
+
+-- workflow_step_logs 表
+CREATE TABLE workflow_step_logs (
+  id              UUID PRIMARY KEY,
+  run_id          UUID REFERENCES workflow_runs(id),
+  step_id         VARCHAR(100),
+  step_type       VARCHAR(50),
+  status          ENUM('pending', 'running', 'completed', 'failed', 'skipped'),
+  input           JSONB,
+  output          JSONB,
+  error           TEXT,
+  retry_count     INT DEFAULT 0,
+  duration_ms     INT,
+  started_at      TIMESTAMP,
+  completed_at    TIMESTAMP
+);
+```
+
+## 8. API 设计
+
+```http
+POST   /api/workflows              # 创建工作流
+GET    /api/workflows              # 列出工作流
+GET    /api/workflows/:id          # 获取工作流详情（含 DSL）
+PUT    /api/workflows/:id          # 更新工作流定义
+DELETE /api/workflows/:id          # 删除工作流
+
+POST   /api/workflows/:id/run      # 执行工作流
+GET    /api/workflows/:id/runs     # 列出运行历史
+GET    /api/workflows/runs/:run_id # 获取运行详情（含步骤日志）
+POST   /api/workflows/runs/:run_id/pause   # 暂停
+POST   /api/workflows/runs/:run_id/resume  # 恢复
+POST   /api/workflows/runs/:run_id/cancel  # 取消
+
+GET    /api/workflows/runs/:run_id/stream  # SSE 实时流（步骤执行事件）
+```
+
+## 9. 验收标准
+
+- [ ] Workflow DSL 规范定义完成（JSON Schema）
+- [ ] DAG 执行器完成（支持串行、并行、条件分支、依赖等待）
+- [ ] 步骤类型：agent、tool、condition、parallel、human_approval
+- [ ] 检查点自动保存 + 恢复机制完成
+- [ ] 每步骤独立重试策略 + 超时处理
+- [ ] 工作流 CRUD API 完成
+- [ ] 工作流运行 SSE 实时流完成
+- [ ] 前端：工作流编辑器（JSON 模式，初版可用代码编辑器）
+- [ ] 前端：工作流运行监控面板（DAG 可视化 + 步骤日志）
+- [ ] 至少 3 个内置工作流模板
+
+
+# 十九、V7-V8 Browser Agent 浏览器智能体
+
+## V7 Browser Extension 浏览器扩展
+
+### 核心目标
+
+开发 Chrome/Edge 浏览器扩展，让 AgentForge 可以伴随用户浏览网页，提供上下文感知的 AI 辅助。
+
+### 扩展能力
+
+- **页面内容获取**：获取当前页面标题、正文、选中文本
+- **右键菜单集成**：选中文本 → "Ask AgentForge"
+- **侧边栏面板**：在任意网页侧边注入 AgentForge Chat UI
+- **页面摘要**：一键生成当前页面摘要
+- **上下文感知**：AI 知道用户正在看什么页面，提供更精准的回答
+
+### 技术选型
+
+| 组件 | 技术 | 用途 |
+|------|------|------|
+| 扩展框架 | WXT (Web eXtension Tools) | 现代化浏览器扩展开发框架 |
+| 通信 | chrome.runtime.sendMessage | 扩展 ↔ AgentForge Server |
+| UI | React (同 web 共享组件) | 侧边栏和弹出窗口 |
+
+### 验收标准
+
+- [ ] Chrome 扩展项目创建（`apps/extension`）
+- [ ] 侧边栏面板完成（复用 ChatArea 组件）
+- [ ] 页面内容获取 API（标题、正文、选中文本）
+- [ ] 右键菜单 "Ask AgentForge" 完成
+- [ ] 页面摘要功能完成
+- [ ] 上下文自动注入到 Chat（当前页面 URL + 标题）
+
+---
+
+## V8 Browser Agent 浏览器自动化
+
+### 核心目标
+
+让 Agent 能够自主操控浏览器完成任务：浏览网页、填写表单、提取信息、执行 Web 操作。
+
+### 架构
+
+```text
+┌─────────────────────────────────────────────────┐
+│              Browser Agent                       │
+│                                                  │
+│  ┌──────────────────────────────────────────┐   │
+│  │         Agent Loop (ReAct)                │   │
+│  │  THINK → ACT → OBSERVE → THINK → ...     │   │
+│  └──────────────┬───────────────────────────┘   │
+│                 │                                │
+│                 ▼                                │
+│  ┌──────────────────────────────────────────┐   │
+│  │        Playwright Controller              │   │
+│  │  ┌────────────────────────────────────┐  │   │
+│  │  │   Browser Sandbox (Docker)         │  │   │
+│  │  │  ┌──────────────────────────────┐  │  │   │
+│  │  │  │  Chromium (headless)         │  │  │   │
+│  │  │  │  - navigate / click / type   │  │  │   │
+│  │  │  │  - screenshot / extract      │  │  │   │
+│  │  │  │  - waitFor / evaluate        │  │  │   │
+│  │  │  └──────────────────────────────┘  │  │   │
+│  │  └────────────────────────────────────┘  │   │
+│  └──────────────────────────────────────────┘   │
+│                                                  │
+│  ┌──────────────────────────────────────────┐   │
+│  │      DOM Understanding Module            │   │
+│  │  - accessibility tree → structured JSON  │   │
+│  │  - interactive element detection         │   │
+│  │  - form field identification             │   │
+│  └──────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────┘
+```
+
+### 浏览器操作工具集
+
+```typescript
+const browserTools = [
+  { name: "browser_navigate",   args: { url: "string" } },
+  { name: "browser_click",      args: { selector: "string" } },
+  { name: "browser_type",       args: { selector: "string", text: "string" } },
+  { name: "browser_screenshot", args: { fullPage: "boolean" } },
+  { name: "browser_extract",    args: { selector: "string" } },
+  { name: "browser_scroll",     args: { direction: "up|down", amount: "number" } },
+  { name: "browser_wait",       args: { ms: "number" } },
+  { name: "browser_get_state",  args: {} },  // 返回当前页面的可交互元素
+  { name: "browser_execute_js", args: { code: "string" } },
+  { name: "browser_fill_form",  args: { fields: "Record<string,string>" } },
+];
+```
+
+### 安全沙箱
+
+- Playwright 运行在独立 Docker 容器中
+- 网络可配置（完全隔离 / 仅白名单域名 / 完全开放）
+- 操作录制：所有浏览器操作自动录屏（供审计）
+- 敏感数据检测：自动检测 Agent 是否尝试输入密码/信用卡号（阻止并警告）
+
+### 验收标准
+
+- [ ] Playwright 集成完成，Docker 沙箱启动
+- [ ] 浏览器工具集（10 个工具）全部实现
+- [ ] DOM 理解模块完成（accessibility tree → 结构化 JSON）
+- [ ] Agent Loop 集成（Agent 可以自主操控浏览器）
+- [ ] 操作录制与回放完成
+- [ ] 前端：浏览器操作实时预览（screenshot 流）
+- [ ] 电商自动下单、信息采集等 demo 场景验证通过
+
+
+# 二十、V9 Multi-Agent 多智能体协作
+
+## 1. 核心目标
+
+从单一 Agent 演进为多 Agent 协作系统。多个 Agent 各自承担不同角色，通过消息总线通信，协作完成复杂任务。
+
+## 2. 角色模型
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│                    Multi-Agent System                     │
+│                                                          │
+│  ┌──────────────┐                                        │
+│  │ Orchestrator │  ← 任务分解、分配、协调、汇总            │
+│  └──────┬───────┘                                        │
+│         │                                                │
+│    ┌────┼────────┬────────────┬────────────┐             │
+│    ↓    ↓        ↓            ↓            ↓             │
+│  ┌────┐ ┌────┐ ┌──────┐ ┌────────┐ ┌──────────┐       │
+│  │Plan│ │Exec│ │Review│ │Research│ │Specialist│  ...   │
+│  │ner │ │utor│ │er    │ │er      │ │(Domain)  │       │
+│  └────┘ └────┘ └──────┘ └────────┘ └──────────┘       │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │           Message Bus (Shared Context)             │   │
+│  │  - Agent → Agent 直接消息                          │   │
+│  │  - Broadcast 广播                                  │   │
+│  │  - Shared Memory 共享工作内存                       │   │
+│  └──────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 默认角色定义
+
+| 角色 | 职责 | 工具权限 | 典型 Prompt |
+|------|------|----------|-------------|
+| **Planner** | 分析任务，制定执行计划，分解子任务 | 无工具（纯推理） | "Break this task into steps..." |
+| **Executor** | 执行具体步骤，调用工具 | 全部工具 | "Execute step N: ..." |
+| **Reviewer** | 审查执行结果，发现遗漏和错误 | 只读工具 | "Review the output for errors..." |
+| **Researcher** | 信息搜集，网页搜索和分析 | search/fetch 工具 | "Research the topic: ..." |
+| **Orchestrator** | 整体协调，决定何时委派给谁 | 委派工具 | "Decide who handles this..." |
+
+## 3. Agent 间通信协议
+
+```typescript
+// 消息总线上的消息格式
+interface AgentMessage {
+  id: string;
+  from: string;          // 发送 Agent 名称
+  to: string | "broadcast";  // 接收方
+  type: "task" | "result" | "question" | "feedback" | "handoff";
+  payload: {
+    task?: string;
+    result?: unknown;
+    question?: string;
+    feedback?: { approved: boolean; comments: string };
+    context?: Record<string, unknown>;
+  };
+  timestamp: Date;
+  replyTo?: string;      // 回复的消息 ID
+}
+```
+
+## 4. 协作模式
+
+### 模式 1：Orchestrator 模式（层级式）
+```
+User Task → Orchestrator
+              ├→ Planner (制定计划)
+              ├→ Executor (执行步骤 1)
+              ├→ Reviewer (审查步骤 1)
+              ├→ Executor (执行步骤 2，含修正)
+              └→ Orchestrator (汇总回复)
+```
+
+### 模式 2：Peer-to-Peer 模式（对等式）
+```
+Agent A (前端) ←→ Agent B (后端)
+  "这个 API 怎么调？"  "需要 userId 参数"
+  "明白了，在这改..."   "检查一下这里..."
+```
+
+### 模式 3：Debate 模式（辩论式）
+```
+Question → Agent A (Pro) + Agent B (Con) + Agent C (Judge)
+              ↓                  ↓                ↓
+           论证支持            论证反对          评估双方
+              ↓                  ↓                ↓
+              └──────────────────┴────────────────┘
+                               ↓
+                          Final Verdict
+```
+
+## 5. 数据模型
+
+```sql
+-- agent_teams 表
+CREATE TABLE agent_teams (
+  id              UUID PRIMARY KEY,
+  user_id         UUID REFERENCES users(id),
+  name            VARCHAR(200),
+  description     TEXT,
+  agents          JSONB,              -- Agent 配置列表
+  collaboration   ENUM('orchestrator', 'peer', 'debate') DEFAULT 'orchestrator',
+  created_at      TIMESTAMP
+);
+
+-- agent_team_runs 表
+CREATE TABLE agent_team_runs (
+  id              UUID PRIMARY KEY,
+  team_id         UUID REFERENCES agent_teams(id),
+  task            TEXT,
+  status          ENUM('running', 'completed', 'failed'),
+  messages        JSONB DEFAULT '[]',  -- Agent 间通信记录
+  result          TEXT,
+  started_at      TIMESTAMP,
+  completed_at    TIMESTAMP
+);
+```
+
+## 6. 验收标准
+
+- [ ] Multi-Agent 消息总线完成
+- [ ] 5 个默认 Agent 角色实现完成（Planner/Executor/Reviewer/Researcher/Orchestrator）
+- [ ] 3 种协作模式完成（Orchestrator / Peer / Debate）
+- [ ] Agent Team CRUD API 完成
+- [ ] Agent Team Run SSE 流（展示各 Agent 的思考过程）
+- [ ] 前端：Multi-Agent 可视化面板（Agent 卡片 + 消息流）
+- [ ] 复杂任务 demo 验证（如：研究一个主题 → 写报告 → 审查修改）
+
+
+# 二十一、V10 MCP Ecosystem Model Context Protocol
+
+## 1. 核心目标
+
+实现 MCP (Model Context Protocol) 的 Client 和 Server 两端，让 AgentForge 既能调用外部 MCP 工具，也能将自身能力暴露给其他 MCP Client。
+
+## 2. 架构
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│                  AgentForge MCP Layer                     │
+│                                                          │
+│  ┌─────────────────────┐    ┌─────────────────────────┐ │
+│  │   MCP Server        │    │    MCP Client            │ │
+│  │                     │    │                          │ │
+│  │  Expose:            │    │  Consume:                │ │
+│  │  - Memory Search    │    │  - Filesystem Server     │ │
+│  │  - Knowledge Search │    │  - GitHub Server         │ │
+│  │  - Agent Execute    │    │  - Slack Server          │ │
+│  │  - Tool Call        │    │  - Database Server       │ │
+│  │                     │    │  - Custom MCP Servers    │ │
+│  │  Protocol:          │    │                          │ │
+│  │  - stdio            │    │  Protocol:               │ │
+│  │  - SSE (HTTP)       │    │  - stdio (子进程)         │ │
+│  │                     │    │  - SSE (远程)             │ │
+│  └─────────────────────┘    └─────────────────────────┘ │
+│                                                          │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │           MCP Tool Registry                       │   │
+│  │  - 动态发现：自动扫描 MCP Server 提供的工具        │   │
+│  │  - 热加载：无需重启即可注册新 MCP 工具             │   │
+│  │  - 命名空间：mcp/github/issues → github_issues     │   │
+│  └──────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────┘
+```
+
+## 3. MCP Server 实现
+
+暴露 AgentForge 核心能力为标准 MCP 工具：
+
+```typescript
+// AgentForge MCP Server 暴露的工具
+const exposedTools = [
+  {
+    name: "agentforge_memory_search",
+    description: "Search user's long-term memory for relevant facts",
+    inputSchema: { query: "string", topK: "number" }
+  },
+  {
+    name: "agentforge_knowledge_search",
+    description: "Search knowledge base for reference documents",
+    inputSchema: { query: "string", kbId: "string?", topK: "number" }
+  },
+  {
+    name: "agentforge_agent_execute",
+    description: "Execute an AI agent task with tool access",
+    inputSchema: { task: "string", tools: "string[]?", model: "string?" }
+  },
+  {
+    name: "agentforge_conversation_history",
+    description: "Retrieve conversation history",
+    inputSchema: { conversationId: "string", limit: "number" }
+  },
+];
+```
+
+## 4. MCP Client 实现
+
+连接到外部 MCP Server 并自动注册其工具：
+
+```typescript
+// apps/server/src/mcp/client.ts
+class MCPClientManager {
+  private clients: Map<string, Client> = new Map();
+
+  async connect(config: MCPServerConfig): Promise<void> {
+    const client = new Client({ name: "agentforge", version: "1.0.0" });
+    if (config.transport === "stdio") {
+      // 启动子进程通信
+      const transport = new StdioClientTransport({
+        command: config.command,
+        args: config.args,
+      });
+      await client.connect(transport);
+    } else if (config.transport === "sse") {
+      // HTTP SSE 通信
+      const transport = new SSEClientTransport(new URL(config.url));
+      await client.connect(transport);
+    }
+
+    // 列出 MCP Server 的工具并自动注册到 ToolRegistry
+    const tools = await client.listTools();
+    for (const tool of tools.tools) {
+      toolRegistry.registerMCPTool(config.name, tool);
+    }
+
+    this.clients.set(config.name, client);
+  }
+}
+```
+
+## 5. 工具命名空间
+
+为避免冲突，MCP 工具使用命名空间前缀：
+
+```text
+内置工具:    calculator, get_current_time, web_search
+MCP 工具:    mcp:github/create_issue, mcp:slack/send_message
+AgentForge:  agentforge:memory/search, agentforge:agent/execute
+```
+
+## 6. 验收标准
+
+- [ ] MCP Server 完成（暴露 AgentForge 核心能力为 MCP 工具）
+- [ ] MCP Client 完成（连接外部 MCP Server，自动注册工具）
+- [ ] stdio Transport 支持（子进程通信）
+- [ ] SSE Transport 支持（HTTP 远程通信）
+- [ ] 工具热加载：添加 MCP Server 配置后无需重启
+- [ ] MCP Server 配置管理 API + 前端管理界面
+- [ ] 至少 3 个 MCP Server 集成验证（如 filesystem、github、postgres）
+- [ ] MCP 工具在 Debug Panel 中展示来源标注
+
+
+# 二十二、持续演进 —— Beyond V10
+
+V1-V10 完成后，AgentForge 已经是一个功能完备的 Agent 平台。以下是更高阶的演进方向：
+
+## Agent 评估与基准测试
+
+- **Eval Framework**：建立 Agent 评估框架（任务成功率、工具选择准确率、响应质量）
+- **Benchmark 套件**：常见 Agent 任务基准测试集（WebArena、GAIA、SWE-bench 适配）
+- **A/B 测试**：不同 Prompt、模型、工具配置的效果对比
+- **回归测试**：每次变更后自动运行 Eval 套件，防止 Agent 能力退化
+
+## Fine-tuning 管线
+
+- **数据收集**：从用户反馈和人工修正中收集高质量训练数据
+- **SFT 微调**：针对特定领域（客服、编程、写作）微调模型
+- **RLHF/DPO**：基于人类偏好对齐 Agent 的决策行为
+- **工具调用专项微调**：提升 Function Calling 的准确率和参数正确性
+
+## 多模态 Agent
+
+- **Vision**：支持图片理解和生成（GPT-4V / DALL-E）
+- **Video**：视频内容分析和摘要
+- **Audio**：语音之外的音乐、环境音理解
+- **File**：PDF、Excel、PPT 等文件格式的深度解析
+
+## 部署与运维
+
+- **Docker Compose → Kubernetes**：生产级容器编排
+- **Helm Chart**：一键部署到 K8s 集群
+- **Horizontal Scaling**：后端水平扩展（无状态 + Redis 会话）
+- **Database HA**：PostgreSQL 主从复制 + 自动故障转移
+- **Multi-Region**：跨区域部署，降低 LLM API 延迟
+- **Cost Tracking**：按用户/部门/项目维度的 Token 消耗账单
+
+## 企业功能
+
+- **SSO 集成**：SAML/OIDC 企业单点登录
+- **Audit Log**：完整的操作审计日志（合规需求）
+- **Data Retention**：数据保留策略和自动清理
+- **Private Deployment**：VPC 内部署，数据不出企业网络
+- **Custom Terms & Policies**：自定义使用条款和 AI 策略
+
+
+# 二十三、执行路线图总览
+
+## 优先级矩阵
+
+```text
+                    高影响
+                      │
+         P0-1 认证    │    P1-3 Agent 推理框架
+         P0-2 日志    │    P1-4 工作内存
+         P0-3 测试    │    P1-6 工具生态
+         P0-4 CI/CD   │
+         P0-5 安全    │    V6  Workflow Engine
+                      │    V9  Multi-Agent
+    ──────────────────┼──────────────────
+         低紧急       │       高紧急
+                      │
+         P1-1 后台队列│
+         P1-2 可观测  │    V5  Voice Agent
+         P1-5 审批门  │    V7  Browser Extension
+                      │
+         V8  Browser  │    V10 MCP Ecosystem
+          Agent       │
+                      │
+                    低影响
+```
+
+## 建议执行顺序
+
+| 批次 | 阶段 | 预估工期 | 关键产出 |
+|------|------|----------|----------|
+| **Batch 1** | P0-1 认证 + P0-2 日志 + P0-3 测试 | 2-3 周 | 多用户可以注册登录，结构化日志，vitest 测试套件 |
+| **Batch 2** | P0-4 CI/CD + P0-5 安全加固 | 1 周 | GitHub Actions 流水线，Rate Limiting，参数校验 |
+| **Batch 3** | P1-3 Agent 推理框架 + P1-4 工作内存 | 2 周 | ReAct 循环，Agent Scratchpad，本质从 chatbot → agent |
+| **Batch 4** | P1-6 工具生态 + P1-5 审批门 | 2-3 周 | 6+ 个生产工具，代码沙箱，人工审批 |
+| **Batch 5** | P1-1 后台队列 + P1-2 可观测性 | 1-2 周 | BullMQ 解耦，Prometheus + Grafana |
+| **Batch 6** | V5 Voice Agent | 2 周 | WebSocket 音频流，ASR/TTS，打断机制 |
+| **Batch 7** | V6 Workflow Engine | 3-4 周 | DAG 执行器，检查点恢复，工作流模板 |
+| **Batch 8** | V7 Browser Extension | 1-2 周 | Chrome 扩展，侧边栏，页面上下文 |
+| **Batch 9** | V8 Browser Agent | 2-3 周 | Playwright 沙箱，浏览器工具集 |
+| **Batch 10** | V9 Multi-Agent | 3-4 周 | 多角色 Agent，消息总线，协作模式 |
+| **Batch 11** | V10 MCP Ecosystem | 2-3 周 | MCP Server/Client，工具热加载 |
+
+> **总计预估：** 22-30 周（约 5-7 个月，1 人全职）。可根据实际人力并行推进。
+
+---
+
+## 健壮性说明
+
+本文档中所有带 `✅` 标记的阶段表示已完成并通过自我验证。P0/P1/P2 和 V5-V10 阶段的验收标准均为待完成状态。每个阶段的验收标准设计为可独立验证——任意阶段完成后即可合并到 main 分支，不依赖后续阶段。

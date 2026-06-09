@@ -8,6 +8,7 @@ import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { getProvider, resolveModel } from "../providers/registry.js";
 import type { ChatMessage } from "../providers/types.js";
+import { logger } from "@agentforge/logger";
 import { toolRegistry } from "../tools/registry.js";
 
 const CUSTOMER_USER_ID = "00000000-0000-0000-0000-000000000002"; // 客服系统专用用户
@@ -82,7 +83,7 @@ export class CustomerChatService {
       const service = new KnowledgeService();
 
       const results = await service.search(userMessage, undefined, 3); // 搜索 top 3
-      console.log(results, 'results');
+      logger.debug({ results: results.length }, "Knowledge search results");
 
       if (!results.length) return { context: "", results: [] };
 
@@ -101,7 +102,7 @@ export class CustomerChatService {
         results: scoredResults,
       };
     } catch (e) {
-      console.warn(`[customer-chat] Knowledge search failed:`, e);
+      logger.warn(e, "Customer chat knowledge search failed");
       return { context: "", results: [] };
     }
   }
@@ -199,7 +200,7 @@ export class CustomerChatService {
           };
         } else if (chunk.type === "tool_call" && chunk.tool_call) {
           const tc = chunk.tool_call;
-          console.log(`[customer-chat] Tool call: ${tc.name}(${tc.arguments.slice(0, 100)})`);
+          logger.debug({ tool: tc.name, args: tc.arguments.slice(0, 100) }, "Customer chat tool call");
 
           let args: Record<string, unknown> = {};
           try { args = JSON.parse(tc.arguments); } catch { /* keep empty */ }

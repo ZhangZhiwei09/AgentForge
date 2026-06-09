@@ -76,7 +76,9 @@ This way each component is independently controllable — restart the backend wi
 
 ## Architecture
 
-AgentForge is a **pnpm + Turborepo monorepo** building a ChatGPT clone as the foundation (V1) for a progressive AI agent platform (V1→V10: Memory → RAG → Tool Calling → Voice → Workflow → Browser Agent → Multi-Agent → MCP). Completed phases are marked with ✅ in both this file and `plan.md`.
+AgentForge is a **pnpm + Turborepo monorepo** building a ChatGPT clone as the foundation (V1) for a progressive AI agent platform. The roadmap spans platform engineering (P0-P2) and agent capability phases (V5-V10). Completed phases are marked with ✅ in both this file and `plan.md`.
+
+**Evolution path:** V1 ChatGPT Clone → V2 Memory → V3 RAG → V4 Tool Calling → P0 Platform Foundation → P1 Agent Kernel → V5 Voice → V6 Workflow → V7-V8 Browser Agent → V9 Multi-Agent → V10 MCP
 
 ### Package Layout
 
@@ -112,7 +114,7 @@ Browser (React) ←SSE/HTTP→ Hono (8000) → LLMProvider (abstract) → OpenAI
 
 2. **Prisma as shared package** (`packages/database/`): Single source of truth for the data model. All packages import `prisma` from `@agentforge/database`. Migrations are managed independently via `pnpm db:migrate`.
 
-3. **Single-tenant MVP:** A default user (`00000000-0000-0000-0000-000000000001`) is auto-seeded on startup. All conversations belong to this user.
+3. **Single-tenant MVP (temporary):** A default user (`00000000-0000-0000-0000-000000000001`) is auto-seeded on startup. All conversations belong to this user. **This will be replaced by P0-1 (Auth & Multi-Tenancy)** — JWT-based authentication with per-user data isolation.
 
 4. **Conversation titles** are auto-generated from the first line of the first user message (max 80 chars).
 
@@ -143,17 +145,34 @@ When a development phase from `plan.md` is completed:
 
 This ensures CLAUDE.md always reflects the current state of the project, not just the original plan.
 
-### Version Roadmap (V1→V10)
+### Version Roadmap (V1→V10 + P0-P2)
 
-The `plan.md` defines the V1→V10 roadmap. Completed phases are marked with ✅. When a new phase is completed, update both `plan.md` and this section.
+The `plan.md` defines the full V1→V10 + P0-P2 roadmap. Completed phases are marked with ✅. When a new phase is completed, update both `plan.md` and this section.
 
+**Platform Foundation:**
+- **P0-1 Auth & Multi-Tenancy:** JWT authentication, API keys, per-user data isolation
+- **P0-2 Structured Logging:** pino-based structured logging with correlation IDs
+- **P0-3 Testing:** vitest unit + integration tests with CI enforcement
+- **P0-4 CI/CD:** GitHub Actions pipeline (typecheck → lint → test → build)
+- **P0-5 Security:** Rate limiting, Zod validation, content safety
+- **P1-1 Background Jobs:** BullMQ job queue for async memory extraction
+- **P1-2 Observability:** Prometheus metrics + OpenTelemetry tracing
+- **P1-3 Agent Reasoning:** ReAct loop with structured decision output
+- **P1-4 Working Memory:** Agent scratchpad for multi-step task context
+- **P1-5 Human-in-the-Loop:** Approval gates for high-risk tool operations
+- **P1-6 Tool Ecosystem:** Code sandbox, 10+ production tools with timeouts/circuit-breakers
+
+**Agent Capabilities:**
 - **V1 ChatGPT Clone:** Multi-turn chat, streaming, model switching, provider abstraction ✅
 - **V2 Memory:** PostgreSQL + Milvus for long-term memory ✅
 - **V3 RAG:** Document ingestion, hybrid search, knowledge UI, customer chat ✅
 - **V4 Tool Calling:** Tool registry and execution engine ✅
-- **V5 Voice Agent:** ASR + TTS integration
-- **V6 Workflow Engine:** Multi-step agent workflows
-- **V7 Browser Extension:** Browser companion extension
-- **V8 Browser Agent:** Web automation
-- **V9 Multi-Agent:** Multi-agent collaboration
-- **V10 MCP Ecosystem:** Model Context Protocol integration
+- **V5 Voice Agent:** WebSocket real-time audio, ASR/TTS, interruption handling
+- **V6 Workflow Engine:** DAG-based orchestration, checkpoint/resume, human approval nodes
+- **V7 Browser Extension:** Chrome extension companion with page context awareness
+- **V8 Browser Agent:** Playwright sandbox, DOM understanding, web automation
+- **V9 Multi-Agent:** Role-based agent teams, message bus, 3 collaboration patterns
+- **V10 MCP Ecosystem:** MCP Server + Client, dynamic tool discovery, hot-reload
+
+**Beyond V10:**
+- Agent evaluation & benchmarking, fine-tuning pipeline, multi-modal, K8s deployment

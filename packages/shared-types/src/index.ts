@@ -1,4 +1,4 @@
-export type { User, CreateUserDTO } from "./user";
+export type { User, AuthUser, CreateUserDTO, SignUpRequest, SignInRequest, AuthResponse, ApiKeyDTO, CreateApiKeyResponse } from "./user";
 export type {
   Conversation,
   CreateConversationDTO,
