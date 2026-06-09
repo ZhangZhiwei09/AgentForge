@@ -69,7 +69,9 @@ export class CustomerChatService {
       // 动态导入避免循环依赖
       const { KnowledgeService } = await import("./knowledge.js");
       const service = new KnowledgeService();
+
       const results = await service.search(userMessage, undefined, 3); // 搜索 top 3
+      console.log(results, 'results');
 
       if (!results.length) return { context: "", results: [] };
 
