@@ -10,6 +10,7 @@ import { getMilvusClient, MILVUS_MEMORY_COLLECTION, EMBEDDING_DIM, ensureMemoryC
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
 import { settings } from "../config.js";
 import OpenAI from "openai";
+import { logger } from "@agentforge/logger";
 
 // 记忆创建参数
 export interface MemoryCreate {
@@ -71,7 +72,7 @@ export class MemoryEngine {
     try {
       return await provider.embedSingle(text);
     } catch (e) {
-      console.warn(`[memory] Embedding failed:`, e);
+      logger.warn(e, "Embedding failed");
       return null;
     }
   }
@@ -103,7 +104,7 @@ export class MemoryEngine {
         });
         embeddingId = BigInt((mr.IDs as any)?.int_id?.data?.[0] ?? 0);
       } catch (e) {
-        console.warn(`[memory] Milvus insert failed:`, e);
+        logger.warn(e, "Milvus insert failed (graceful degradation)");
         // Milvus 失败不阻塞 PG 写入
       }
     }
@@ -218,7 +219,7 @@ export class MemoryEngine {
         }
       }
     } catch (e) {
-      console.warn(`[memory] Vector search failed, falling back to PG:`, e);
+      logger.warn(e, "Vector search failed, falling back to PG");
     }
 
     // 纯 PG 回退：用重要度作为分数
@@ -314,11 +315,11 @@ export class MemoryEngine {
       }
 
       if (results.length > 0) {
-        console.log(`[memory] Extracted ${results.length} memories from conversation`);
+        logger.info({ count: results.length }, "Memories extracted from conversation");
       }
       return results;
     } catch (e) {
-      console.warn(`[memory] Memory extraction failed:`, e);
+      logger.warn(e, "Memory extraction failed");
       return [];
     }
   }
@@ -361,7 +362,7 @@ export class MemoryEngine {
           filter: `id in [${dbMemory.embeddingId}]`,
         });
       } catch (e) {
-        console.warn(`[memory] Milvus delete failed:`, e);
+        logger.warn(e, "Milvus delete failed");
       }
     }
 

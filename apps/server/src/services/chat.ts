@@ -6,6 +6,7 @@ import { getProvider, resolveModel } from "../providers/registry.js";
 import type { ChatMessage } from "../providers/types.js";
 import { MemoryEngine } from "./memory-engine.js";
 import { toolRegistry } from "../tools/registry.js";
+import { logger } from "@agentforge/logger";
 
 // 拼在 system prompt 后面的记忆上下文前缀
 const MEMORY_PROMPT_PREFIX = "\n\n# User Context (from memory)\nThe following is what you know about the user from past conversations:\n";
@@ -33,7 +34,7 @@ export class ChatService {
         return [enhancedPrompt, relevant.map((m) => m.content)];
       }
     } catch (e) {
-      console.warn(`[chat] Memory injection failed:`, e);
+      logger.warn(e, "Memory injection failed");
     }
     return [systemPrompt, []];
   }
@@ -78,10 +79,10 @@ export class ChatService {
 
       const knowledgeText = lines.join("\n\n");
       const enhancedPrompt = systemPrompt + KNOWLEDGE_PROMPT_PREFIX + knowledgeText;
-      console.log(`[chat] Knowledge injected: ${results.length} references from ${kbIds.length} KB(s)`);
+      logger.info({ refs: results.length, kbs: kbIds.length }, "Knowledge injected");
       return [enhancedPrompt, knowledgeResults];
     } catch (e) {
-      console.warn(`[chat] Knowledge injection failed:`, e);
+      logger.warn(e, "Knowledge injection failed");
     }
     return [systemPrompt, []];
   }
@@ -202,14 +203,14 @@ export class ChatService {
           };
         } else if (chunk.type === "tool_call" && chunk.tool_call) {
           const tc = chunk.tool_call;
-          console.log(`[chat] Tool call: ${tc.name}(${tc.arguments.slice(0, 100)})`);
+          logger.debug({ tool: tc.name, args: tc.arguments.slice(0, 100) }, "Tool call");
 
           // 解析参数
           let args: Record<string, unknown> = {};
           try {
             args = JSON.parse(tc.arguments);
           } catch {
-            console.warn(`[chat] Failed to parse tool arguments: ${tc.arguments}`);
+            logger.warn({ arguments: tc.arguments }, "Failed to parse tool arguments");
           }
 
           // 执行工具（立即执行，立即通知前端）
@@ -264,7 +265,7 @@ export class ChatService {
         });
       }
 
-      console.log(`[chat] Round ${round + 1} complete: ${executedTools.length} tool(s) executed, continuing...`);
+      logger.debug({ round: round + 1, toolCount: executedTools.length }, "Tool round complete");
     }
 
     // 12. 保存助手消息到 PG（累积的完整响应文本）
@@ -302,7 +303,7 @@ export class ChatService {
       );
       newMemoryCount = extracted.length;
     } catch (e) {
-      console.warn(`[chat] Memory extraction failed:`, e);
+      logger.warn(e, "Memory extraction failed");
     }
 
     // 15. 延迟统计

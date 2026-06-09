@@ -1,13 +1,14 @@
 // 知识库管理路由 —— /api/knowledge/* 完整 CRUD + 搜索 + 统计
-import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { KnowledgeService } from "../services/knowledge.js";
 import { KnowledgeIngestionService } from "../services/knowledge-ingestion.js";
+import { logger } from "@agentforge/logger";
+import { createHono } from "../lib/hono.js";
 
-export const knowledgeRoutes = new Hono();
+export const knowledgeRoutes = createHono();
 
 // ════════════════════════════════════════════════════════════════
 // 知识库 CRUD
@@ -275,7 +276,7 @@ knowledgeRoutes.post("/api/knowledge/bases/:kbId/documents/upload", async (c) =>
       file_size: file.size,
     }, 201);
   } catch (e) {
-    console.error("[knowledge] File upload failed:", e);
+    logger.error(e, "File upload failed");
     return c.json({
       detail: e instanceof Error ? e.message : "文件上传处理失败",
     }, 500);

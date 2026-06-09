@@ -10,12 +10,47 @@ datasource db {
 model User {
   id            String         @id @db.VarChar(36)
   email         String         @unique(map: "ix_users_email") @db.VarChar(255)
+  passwordHash  String?        @map("password_hash") @db.VarChar(255)
+  avatarUrl     String?        @map("avatar_url") @db.VarChar(500)
+  role          String         @default("user") @db.VarChar(20)
   createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   conversations Conversation[]
   memories      Memory[]
+  refreshTokens RefreshToken[]
+  apiKeys       ApiKey[]
 
   @@map("users")
+}
+
+model RefreshToken {
+  id        String   @id @db.VarChar(36)
+  userId    String   @map("user_id") @db.VarChar(36)
+  tokenHash String   @map("token_hash") @db.VarChar(255)
+  expiresAt DateTime @map("expires_at") @db.Timestamptz(6)
+  revoked   Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "ix_refresh_tokens_user_id")
+  @@index([tokenHash], map: "ix_refresh_tokens_token_hash")
+  @@map("refresh_tokens")
+}
+
+model ApiKey {
+  id        String    @id @db.VarChar(36)
+  userId    String    @map("user_id") @db.VarChar(36)
+  name      String    @db.VarChar(100)
+  keyHash   String    @map("key_hash") @db.VarChar(255)
+  lastUsed  DateTime? @map("last_used") @db.Timestamptz(6)
+  expiresAt DateTime? @map("expires_at") @db.Timestamptz(6)
+  revoked   Boolean   @default(false)
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId], map: "ix_api_keys_user_id")
+  @@index([keyHash], map: "ix_api_keys_key_hash")
+  @@map("api_keys")
 }
 
 model Conversation {

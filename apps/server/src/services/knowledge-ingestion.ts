@@ -7,6 +7,7 @@ import { getMilvusClient, MILVUS_KNOWLEDGE_COLLECTION, ensureKnowledgeCollection
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
 import { RecursiveCharacterTextSplitter } from "./text-splitter.js";
 import { BM25SparseEncoder } from "./bm25.js";
+import { logger } from "@agentforge/logger";
 
 let bm25Encoder: BM25SparseEncoder | null = null;
 
@@ -72,11 +73,11 @@ export class KnowledgeIngestionService {
         data: { chunkCount: chunks.length, status: "completed" },
       });
 
-      console.log(`[knowledge] Document ingested: ${title} (${chunks.length} chunks)`);
+      logger.info({ title, chunks: chunks.length }, "Document ingested");
       return (await prisma.knowledgeDocument.findUnique({ where: { id: doc.id } }))!;
     } catch (e) {
       // 摄取失败：标记为 failed，抛出异常让调用方感知
-      console.error(`[knowledge] Document ingestion failed: ${title}`, e);
+      logger.error(e, `Document ingestion failed: ${title}`);
       await prisma.knowledgeDocument.update({
         where: { id: doc.id },
         data: { status: "failed" },
@@ -174,7 +175,7 @@ export class KnowledgeIngestionService {
           filter: `id in [${idExpr}]`,
         });
       } catch (e) {
-        console.warn(`[knowledge] Milvus delete failed:`, e);
+        logger.warn(e, "Milvus delete failed during document cleanup");
       }
     }
 
@@ -182,7 +183,7 @@ export class KnowledgeIngestionService {
     await prisma.knowledgeChunk.deleteMany({ where: { documentId: docId } });
     await prisma.knowledgeDocument.delete({ where: { id: docId } });
 
-    console.log(`[knowledge] Document deleted: ${docId}, cleaned up ${milvusIds.length} vectors`);
+    logger.info({ docId, vectors: milvusIds.length }, "Document deleted");
     return true;
   }
 
@@ -207,7 +208,7 @@ export class KnowledgeIngestionService {
     if (corpus.length > 0) {
       const bm25 = getBM25();
       bm25.fit(corpus);
-      console.log(`[bm25] Index rebuilt: kb=${kbId}, corpus=${corpus.length}`);
+      logger.info({ kbId, corpus: corpus.length }, "BM25 index rebuilt");
     }
   }
 }
@@ -249,7 +250,7 @@ export async function seedKnowledgeBase(): Promise<string> {
     where: { id: DEFAULT_KB_ID },
   });
   if (existing) {
-    console.log("[seed] Knowledge base seed data already exists, skipping");
+    logger.info("Knowledge base seed data already exists, skipping");
     return DEFAULT_KB_ID;
   }
 
@@ -265,18 +266,18 @@ export async function seedKnowledgeBase(): Promise<string> {
   // 检查 embedding provider 是否可用
   const provider = getDefaultEmbeddingProvider();
   if (!provider) {
-    console.log("[seed] No embedding provider configured, skipping document vectorization");
+    logger.info("No embedding provider configured, skipping document vectorization");
     return DEFAULT_KB_ID;
   }
 
   // 批量摄取 FAQ 文档
-  console.log(`[seed] Ingesting ${SAMPLE_FAQS.length} sample FAQ documents...`);
+  logger.info({ count: SAMPLE_FAQS.length }, "Ingesting sample FAQ documents...");
   try {
     const ingestion = new KnowledgeIngestionService();
     await ingestion.batchIngest(DEFAULT_KB_ID, SAMPLE_FAQS);
-    console.log(`[seed] Seed data created: KB=${DEFAULT_KB_ID}, docs=${SAMPLE_FAQS.length}`);
+    logger.info({ kbId: DEFAULT_KB_ID, docs: SAMPLE_FAQS.length }, "Seed data created");
   } catch (e) {
-    console.warn(`[seed] Seed data vectorization failed (Milvus may not be running):`, e);
+    logger.warn(e, "Seed data vectorization failed (Milvus may not be running)");
   }
 
   return DEFAULT_KB_ID;

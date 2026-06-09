@@ -3,6 +3,7 @@
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool, ToolExecutor } from "./types.js";
 import { builtinTools } from "./builtins.js";
+import { logger } from "@agentforge/logger";
 
 class ToolRegistry {
   private tools: Map<string, RegisteredTool> = new Map();
@@ -15,14 +16,14 @@ class ToolRegistry {
       this.register(tool);
     }
     this.initialized = true;
-    console.log(`[tools] Registered ${this.tools.size} tools: ${this.listNames().join(", ")}`);
+    logger.info({ count: this.tools.size, tools: this.listNames() }, "Tools registered");
   }
 
   // Register a single tool
   register(tool: RegisteredTool): void {
     const name = tool.definition.function.name;
     if (this.tools.has(name)) {
-      console.warn(`[tools] Tool "${name}" already registered, overwriting`);
+      logger.warn({ tool: name }, "Tool already registered, overwriting");
     }
     this.tools.set(name, tool);
   }
@@ -50,11 +51,11 @@ class ToolRegistry {
       const start = Date.now();
       const result = await tool.execute(args);
       const duration = Date.now() - start;
-      console.log(`[tools] ${name}(${JSON.stringify(args)}) → ${result.slice(0, 80)}... (${duration}ms)`);
+      logger.debug({ tool: name, args, result: result.slice(0, 80), durationMs: duration }, "Tool executed");
       return result;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Unknown error";
-      console.error(`[tools] ${name} failed:`, msg);
+      logger.error({ tool: name, error: msg }, "Tool execution failed");
       return `Error executing tool "${name}": ${msg}`;
     }
   }

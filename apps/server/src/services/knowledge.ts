@@ -7,6 +7,7 @@ import { BM25SparseEncoder } from "./bm25.js";
 import { settings } from "../config.js";
 import { getProvider } from "../providers/registry.js";
 import OpenAI from "openai";
+import { logger } from "@agentforge/logger";
 
 const DENSE_WEIGHT = 0.6;  // 语义向量权重
 const SPARSE_WEIGHT = 0.4; // 关键词匹配权重
@@ -72,10 +73,10 @@ export class KnowledgeService {
         const corpus = chunks.map((c) => c.content);
         bm25.fit(corpus);
         this.bm25FittedKbIds.add(targetKbId);
-        console.log(`[knowledge] BM25 fitted on KB=${targetKbId}, corpus=${corpus.length}`);
+        logger.info({ kbId: targetKbId, corpus: corpus.length }, "BM25 fitted");
       }
     } catch (e) {
-      console.warn(`[knowledge] BM25 fit failed:`, e);
+      logger.warn(e, "BM25 fit failed");
     }
   }
 
@@ -83,7 +84,7 @@ export class KnowledgeService {
   async invalidateBM25Cache(kbId?: string): Promise<void> {
     const targetKbId = kbId || "__all__";
     this.bm25FittedKbIds.delete(targetKbId);
-    console.log(`[knowledge] BM25 cache invalidated for KB=${targetKbId}`);
+    logger.info({ kbId: targetKbId }, "BM25 cache invalidated");
   }
 
   // 计算查询与候选文本之间的 BM25 关键词相似度分数
@@ -129,7 +130,7 @@ export class KnowledgeService {
     // 1. 获取 embedding provider
     const provider = getDefaultEmbeddingProvider();
     if (!provider) {
-      console.warn("[knowledge] No embedding provider configured");
+      logger.warn("No embedding provider configured");
       return [];
     }
 
@@ -204,7 +205,7 @@ export class KnowledgeService {
 
       return searchResults;
     } catch (e) {
-      console.warn(`[knowledge] Search failed:`, e);
+      logger.warn(e, "Knowledge search failed");
       return [];
     }
   }
@@ -232,7 +233,7 @@ export class KnowledgeService {
       const reranked = await this.llmRerank(query, candidates, topK, llmProviderName);
       if (reranked) return reranked;
     } catch (e) {
-      console.warn(`[knowledge] LLM rerank failed:`, e);
+      logger.warn(e, "LLM rerank failed");
     }
 
     return candidates.slice(0, topK); // Rerank 失败则回退到截断
@@ -352,7 +353,7 @@ export class KnowledgeService {
         total_vectors: stats.data?.row_count || 0,
       };
     } catch (e) {
-      console.warn(`[knowledge] Failed to get collection stats:`, e);
+      logger.warn(e, "Failed to get collection stats");
       return { collection: MILVUS_KNOWLEDGE_COLLECTION, total_vectors: 0 };
     }
   }

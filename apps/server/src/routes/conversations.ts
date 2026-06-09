@@ -1,14 +1,11 @@
 // 对话管理路由 —— /api/conversations CRUD
-import { Hono } from "hono";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
+import { createHono } from "../lib/hono.js";
 
-export const conversationRoutes = new Hono();
-
-// 单用户 MVP：所有对话挂在此用户下
-const DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001";
+export const conversationRoutes = createHono();
 
 const createConversationSchema = z.object({
   title: z.string().optional(), // 可选标题，默认 "New Conversation"
@@ -17,12 +14,13 @@ const createConversationSchema = z.object({
 // POST /api/conversations —— 创建新对话
 conversationRoutes.post("/api/conversations", zValidator("json", createConversationSchema), async (c) => {
   const { title } = c.req.valid("json");
+  const user = c.get("user");
 
   const conv = await prisma.conversation.create({
     data: {
       id: randomUUID(),
       title: title || "New Conversation",
-      userId: DEFAULT_USER_ID,
+      userId: user.id,
     },
   });
 
@@ -31,8 +29,10 @@ conversationRoutes.post("/api/conversations", zValidator("json", createConversat
 
 // GET /api/conversations —— 获取当前用户的所有对话（按更新时间倒序）
 conversationRoutes.get("/api/conversations", async (c) => {
+  const user = c.get("user");
+
   const conversations = await prisma.conversation.findMany({
-    where: { userId: DEFAULT_USER_ID },
+    where: { userId: user.id },
     orderBy: { updatedAt: "desc" },
   });
 
@@ -42,7 +42,10 @@ conversationRoutes.get("/api/conversations", async (c) => {
 // GET /api/conversations/:id —— 获取单个对话详情
 conversationRoutes.get("/api/conversations/:id", async (c) => {
   const id = c.req.param("id");
-  const conv = await prisma.conversation.findUnique({ where: { id } });
+  const user = c.get("user");
+  const conv = await prisma.conversation.findFirst({
+    where: { id, userId: user.id },
+  });
 
   if (!conv) {
     return c.json({ detail: "Conversation not found" }, 404);
@@ -54,7 +57,10 @@ conversationRoutes.get("/api/conversations/:id", async (c) => {
 // DELETE /api/conversations/:id —— 删除对话（CASCADE 自动清理关联消息）
 conversationRoutes.delete("/api/conversations/:id", async (c) => {
   const id = c.req.param("id");
-  const conv = await prisma.conversation.findUnique({ where: { id } });
+  const user = c.get("user");
+  const conv = await prisma.conversation.findFirst({
+    where: { id, userId: user.id },
+  });
 
   if (!conv) {
     return c.json({ detail: "Conversation not found" }, 404);

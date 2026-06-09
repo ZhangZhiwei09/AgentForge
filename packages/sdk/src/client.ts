@@ -1,21 +1,39 @@
-import type { ChatRequest, ChatStreamChunk, Conversation, CreateConversationDTO, LLMProviderInfo, Message, Memory, MemorySearchResult } from "@agentforge/shared-types";
+import type { AuthResponse, ChatRequest, ChatStreamChunk, Conversation, CreateConversationDTO, LLMProviderInfo, Message, Memory, MemorySearchResult, ApiKeyDTO, CreateApiKeyResponse, AuthUser } from "@agentforge/shared-types";
 
 export interface AgentForgeConfig {
     baseUrl: string;
+    getAccessToken?: () => string | null;
+    onAuthError?: () => void;
 }
 
 export class AgentForgeClient {
     private baseUrl: string;
+    private getAccessToken: () => string | null;
+    private onAuthError: (() => void) | undefined;
 
     constructor(config: AgentForgeConfig) {
         this.baseUrl = config.baseUrl.replace(/\/$/, "");
+        this.getAccessToken = config.getAccessToken ?? (() => null);
+        this.onAuthError = config.onAuthError;
+    }
+
+    private authHeaders(): Record<string, string> {
+        const token = this.getAccessToken();
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) {
+            headers["Authorization"] = `Bearer ${token}`;
+        }
+        return headers;
     }
 
     async request<T>(path: string, options?: RequestInit): Promise<T> {
         const res = await fetch(`${this.baseUrl}${path}`, {
-            headers: { "Content-Type": "application/json" },
+            headers: this.authHeaders(),
             ...options,
         });
+        if (res.status === 401 && this.onAuthError) {
+            this.onAuthError();
+        }
         if (!res.ok) {
             const error = await res.json().catch(() => ({ detail: res.statusText }));
             throw new Error(error.detail ?? `HTTP ${res.status}`);
@@ -23,10 +41,58 @@ export class AgentForgeClient {
         return res.json();
     }
 
+    // ---- Auth Methods ----
+
+    async signUp(email: string, password: string): Promise<AuthResponse> {
+        return this.request<AuthResponse>("/api/auth/signup", {
+            method: "POST",
+            body: JSON.stringify({ email, password }),
+        });
+    }
+
+    async signIn(email: string, password: string): Promise<AuthResponse> {
+        return this.request<AuthResponse>("/api/auth/signin", {
+            method: "POST",
+            body: JSON.stringify({ email, password }),
+        });
+    }
+
+    async refreshToken(refreshToken: string): Promise<AuthResponse> {
+        return this.request<AuthResponse>("/api/auth/refresh", {
+            method: "POST",
+            body: JSON.stringify({ refresh_token: refreshToken }),
+        });
+    }
+
+    async signOut(): Promise<void> {
+        await this.request<void>("/api/auth/signout", { method: "POST" });
+    }
+
+    async getMe(): Promise<AuthUser> {
+        return this.request<AuthUser>("/api/auth/me");
+    }
+
+    async createApiKey(name: string): Promise<CreateApiKeyResponse> {
+        return this.request<CreateApiKeyResponse>("/api/auth/api-keys", {
+            method: "POST",
+            body: JSON.stringify({ name }),
+        });
+    }
+
+    async listApiKeys(): Promise<ApiKeyDTO[]> {
+        return this.request<ApiKeyDTO[]>("/api/auth/api-keys");
+    }
+
+    async revokeApiKey(id: string): Promise<void> {
+        await this.request<void>(`/api/auth/api-keys/${id}`, { method: "DELETE" });
+    }
+
+    // ---- Streaming ----
+
     async *streamChat(request: ChatRequest): AsyncGenerator<ChatStreamChunk> {
         const res = await fetch(`${this.baseUrl}/api/chat`, {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: this.authHeaders(),
             body: JSON.stringify(request),
         });
 

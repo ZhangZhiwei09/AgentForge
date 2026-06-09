@@ -3,37 +3,24 @@ import { serve } from "@hono/node-server";
 import { createApp } from "./app.js";
 import { settings } from "./config.js";
 import { prisma } from "./db.js";
+import { logger } from "@agentforge/logger";
+import { authService } from "./services/auth.js";
 
-// 单用户 MVP：所有数据挂在这两个固定用户下
-const DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001";  // 普通聊天用户
-const CUSTOMER_USER_ID = "00000000-0000-0000-0000-000000000002";  // 客服会话用户
-
-// 确保默认用户存在（幂等：已存在则跳过）
+// Dev seed: ensure default users exist with known passwords
+// In production, users register via /api/auth/signup
 async function seedDefaultUsers() {
-  const defaultUser = await prisma.user.findUnique({
-    where: { id: DEFAULT_USER_ID },
-  });
-  if (!defaultUser) {
-    await prisma.user.create({
-      data: {
-        id: DEFAULT_USER_ID,
-        email: "default@agentforge.local",
-      },
-    });
-    console.log("[seed] Created default user:", DEFAULT_USER_ID);
+  try {
+    await authService.signUp("default@agentforge.local", "agentforge");
+    logger.info("Default user seeded (default@agentforge.local / agentforge)");
+  } catch {
+    // Already exists — that's fine
   }
 
-  const customerUser = await prisma.user.findUnique({
-    where: { id: CUSTOMER_USER_ID },
-  });
-  if (!customerUser) {
-    await prisma.user.create({
-      data: {
-        id: CUSTOMER_USER_ID,
-        email: "customer@agentforge.local",
-      },
-    });
-    console.log("[seed] Created customer user:", CUSTOMER_USER_ID);
+  try {
+    await authService.signUp("customer@agentforge.local", "agentforge");
+    logger.info("Customer user seeded");
+  } catch {
+    // Already exists
   }
 }
 
@@ -41,9 +28,9 @@ async function main() {
   // 第一步：检查数据库连接
   try {
     await prisma.$connect();
-    console.log("[db] PostgreSQL connected");
+    logger.info("PostgreSQL connected");
   } catch (err) {
-    console.error("[db] Failed to connect to PostgreSQL:", err);
+    logger.error(err, "Failed to connect to PostgreSQL");
     process.exit(1);
   }
 
@@ -54,23 +41,23 @@ async function main() {
     const { seedKnowledgeBase } = await import("./services/knowledge-ingestion.js");
     await seedKnowledgeBase();
   } catch (err) {
-    console.warn("[seed] Knowledge base seeding skipped:", (err as Error).message);
+    logger.warn({ error: (err as Error).message }, "Knowledge base seeding skipped");
   }
 
   // 第三步：创建 Hono 应用并启动 HTTP 服务
   const app = createApp();
 
-  console.log(`[server] AgentForge TS backend starting on http://localhost:${settings.port}`);
+  logger.info({ port: settings.port }, "AgentForge TS backend starting");
   serve({
     fetch: app.fetch,       // Hono 的 fetch 方法直接适配 node-server
     port: settings.port,
   });
 
-  console.log(`[server] Listening on port ${settings.port}`);
+  logger.info({ port: settings.port }, "Server listening");
 }
 
 // 顶层 await 包装：用 .catch 兜底未捕获错误
 main().catch((err) => {
-  console.error("[server] Fatal error:", err);
+  logger.fatal(err, "Fatal error — exiting");
   process.exit(1);
 });

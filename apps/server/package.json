@@ -8,10 +8,13 @@
     "build": "tsup src/index.ts --format esm --clean",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rimraf dist"
   },
   "dependencies": {
     "@agentforge/database": "workspace:*",
+    "@agentforge/logger": "workspace:*",
     "@agentforge/shared-prompts": "workspace:*",
     "@agentforge/shared-types": "workspace:*",
     "@hono/node-server": "^1.13",
@@ -24,9 +27,11 @@
   },
   "devDependencies": {
     "@types/node": "^22.0",
+    "@vitest/coverage-v8": "^3.0",
     "rimraf": "^6.0",
     "tsup": "^8.3",
     "tsx": "^4.19",
-    "typescript": "^5.7"
+    "typescript": "^5.7",
+    "vitest": "^3.0"
   }
 }
