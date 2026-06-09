@@ -15,6 +15,7 @@ interface ChatState {
     isDebugOpen: boolean;
     panelMode: PanelMode;
     toolCalls: ToolCallRecord[];
+    enabledTools: string[];
 
     setConversations: (convs: Conversation[]) => void;
     setCurrentConversation: (id: string | null) => void;
@@ -31,6 +32,8 @@ interface ChatState {
     resetChat: () => void;
     addToolCall: (tc: { id: string; name: string; arguments: string }) => void;
     setToolResult: (id: string, result: string) => void;
+    toggleTool: (name: string) => void;
+    setEnabledTools: (tools: string[]) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -45,6 +48,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     isDebugOpen: true,
     panelMode: "debug",
     toolCalls: [],
+    enabledTools: [],
 
     setConversations: (convs) => set({ conversations: convs }),
     setCurrentConversation: (id) => set({ currentConversationId: id }),
@@ -72,6 +76,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
     toggleDebugPanel: () => set((s) => ({ isDebugOpen: !s.isDebugOpen })),
     setPanelMode: (mode) => set({ panelMode: mode }),
     resetChat: () => set({ messages: [], debugInfo: null, memoryInfo: null, toolCalls: [] }),
+    toggleTool: (name) =>
+        set((s) => ({
+            enabledTools: s.enabledTools.includes(name)
+                ? s.enabledTools.filter((t) => t !== name)
+                : [...s.enabledTools, name],
+        })),
+    setEnabledTools: (tools) => set({ enabledTools: tools }),
     addToolCall: (tc) =>
         set((s) => ({
             toolCalls: [...s.toolCalls, { ...tc, status: "pending" as const }],

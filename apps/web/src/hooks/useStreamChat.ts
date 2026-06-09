@@ -9,6 +9,7 @@ export function useStreamChat() {
     const {
         currentConversationId,
         selectedModel,
+        enabledTools,
         appendMessage,
         appendStreamToken,
         setDebugInfo,
@@ -51,6 +52,7 @@ export function useStreamChat() {
                     conversation_id: currentConversationId,
                     message: content,
                     model: selectedModel,
+                    tools: enabledTools.length > 0 ? enabledTools : null,
                 })) {
                     if (chunk.type === "meta") {
                         metaInfo = chunk;
@@ -91,7 +93,7 @@ export function useStreamChat() {
                 setIsStreaming(false);
             }
         },
-        [currentConversationId, selectedModel, appendMessage, appendStreamToken, setDebugInfo, setMemoryInfo, setIsStreaming, addToolCall, setToolResult]
+        [currentConversationId, selectedModel, enabledTools, appendMessage, appendStreamToken, setDebugInfo, setMemoryInfo, setIsStreaming, addToolCall, setToolResult]
     );
 
     const abort = useCallback(() => {

@@ -19,6 +19,8 @@ export interface ChatRequest {
   conversation_id: string;
   message: string;
   model?: string;
+  kb_ids?: string[] | null;
+  tools?: string[] | null;
 }
 
 export interface ChatStreamChunk {
