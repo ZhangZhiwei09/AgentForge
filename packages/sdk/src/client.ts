@@ -92,6 +92,10 @@ export class AgentForgeClient {
         return this.request<LLMProviderInfo[]>("/api/providers");
     }
 
+    async listTools(): Promise<{ tools: Array<{ name: string; description: string; parameters: unknown }>; count: number }> {
+        return this.request("/api/tools");
+    }
+
     async listMemories(type?: string): Promise<Memory[]> {
         const path = type ? `/api/memories?type=${encodeURIComponent(type)}` : "/api/memories";
         return this.request<Memory[]>(path);

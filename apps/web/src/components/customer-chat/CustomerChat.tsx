@@ -8,6 +8,14 @@ interface KnowledgeResult {
     docTitle: string; // 所属文档标题
 }
 
+interface ToolCallRecord {
+    id: string;
+    name: string;
+    arguments: string;
+    result?: string;
+    status: "pending" | "done";
+}
+
 interface ChatMessage {
     id: string;
     role: "user" | "assistant";
@@ -15,6 +23,8 @@ interface ChatMessage {
     timestamp: number;
     // 关联的知识库检索结果（仅 assistant 消息有）
     knowledge?: KnowledgeResult[];
+    // 关联的工具调用记录
+    toolCalls?: ToolCallRecord[];
 }
 
 export function CustomerChat() {
@@ -121,6 +131,7 @@ export function CustomerChat() {
             let buffer = "";
             let streamContent = "";
             let knowledgeResults: KnowledgeResult[] | undefined;
+            const toolCalls: ToolCallRecord[] = [];
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -146,10 +157,66 @@ export function CustomerChat() {
                                 localStorage.setItem("customer_chat_session_id", chunk.session_id);
                                 setSessionId(chunk.session_id);
                             }
-                            // 保存知识库检索结果，等流结束后挂到 assistant 消息上
                             if (chunk.knowledge && Array.isArray(chunk.knowledge)) {
                                 knowledgeResults = chunk.knowledge;
                             }
+                            continue;
+                        }
+
+                        // tool_call 事件：LLM 请求调用工具
+                        if (chunk.type === "tool_call" && chunk.tool_call) {
+                            toolCalls.push({
+                                id: chunk.tool_call.id,
+                                name: chunk.tool_call.name,
+                                arguments: chunk.tool_call.arguments,
+                                status: "pending",
+                            });
+                            // 更新流消息以显示工具调用状态
+                            setMessages((prev) => {
+                                const last = prev[prev.length - 1];
+                                if (last?.id === "__stream__") {
+                                    return [
+                                        ...prev.slice(0, -1),
+                                        { ...last, content: streamContent, toolCalls: [...toolCalls] },
+                                    ];
+                                }
+                                return [
+                                    ...prev,
+                                    {
+                                        id: "__stream__",
+                                        role: "assistant" as const,
+                                        content: streamContent,
+                                        timestamp: Date.now(),
+                                        knowledge: knowledgeResults,
+                                        toolCalls: [...toolCalls],
+                                    },
+                                ];
+                            });
+                            continue;
+                        }
+
+                        // tool_result 事件：工具执行完成
+                        if (chunk.type === "tool_result" && chunk.tool_result) {
+                            const idx = toolCalls.findIndex(
+                                (tc) => tc.id === chunk.tool_result!.tool_call_id
+                            );
+                            if (idx >= 0) {
+                                toolCalls[idx] = {
+                                    ...toolCalls[idx],
+                                    result: chunk.tool_result.result,
+                                    status: "done",
+                                };
+                            }
+                            setMessages((prev) => {
+                                const last = prev[prev.length - 1];
+                                if (last?.id === "__stream__") {
+                                    return [
+                                        ...prev.slice(0, -1),
+                                        { ...last, content: streamContent, toolCalls: [...toolCalls] },
+                                    ];
+                                }
+                                return prev;
+                            });
                             continue;
                         }
 
@@ -170,7 +237,8 @@ export function CustomerChat() {
                                         role: "assistant" as const,
                                         content: streamContent,
                                         timestamp: Date.now(),
-                                        knowledge: knowledgeResults, // 挂上检索结果
+                                        knowledge: knowledgeResults,
+                                        toolCalls: [...toolCalls],
                                     },
                                 ];
                             });
@@ -277,6 +345,36 @@ export function CustomerChat() {
                                         {msg.content}
                                     </div>
                                 </div>
+
+                                {/* 工具调用展示（仅 assistant 消息 + 有工具调用时显示） */}
+                                {msg.role === "assistant" &&
+                                    msg.toolCalls &&
+                                    msg.toolCalls.length > 0 && (
+                                        <div className="mt-1.5 space-y-1">
+                                            {msg.toolCalls.map((tc) => (
+                                                <div
+                                                    key={tc.id}
+                                                    className="ml-1 flex items-center gap-1.5 text-[11px] text-muted-foreground"
+                                                >
+                                                    {tc.status === "pending" ? (
+                                                        <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
+                                                    ) : (
+                                                        <span className="text-green-500">✓</span>
+                                                    )}
+                                                    <span className="font-medium">
+                                                        {tc.name === "get_current_time" ? "获取当前时间" : tc.name}
+                                                    </span>
+                                                    {tc.result && (
+                                                        <span className="text-muted-foreground/70">
+                                                            → {tc.result.length > 50
+                                                                ? tc.result.slice(0, 50) + "..."
+                                                                : tc.result}
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
 
                                 {/* 知识库参考来源（仅 assistant 消息 + 有检索结果时显示） */}
                                 {msg.role === "assistant" &&

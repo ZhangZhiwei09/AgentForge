@@ -7,13 +7,13 @@ AgentForge 是一个渐进式演化的 AI Agent 平台项目。
 项目不会直接构建 Browser Agent 或 Multi-Agent 系统，而是按照真实产品演进路径逐步迭代：
 
 ```text
-V1 ChatGPT Clone
+V1 ChatGPT Clone      ✅
 ↓
-V2 Memory System
+V2 Memory System      ✅
 ↓
-V3 RAG System
+V3 RAG System         ✅
 ↓
-V4 Tool Calling
+V4 Tool Calling       ✅
 ↓
 V5 Voice Agent
 ↓
@@ -47,13 +47,18 @@ V1 的目标并不是实现一个简单聊天机器人，而是搭建未来所�
 * Debug 面板
 * Monorepo 基础设施
 
+已完成：
+
+* Memory（V2 ✅）
+* RAG（V3 ✅）
+
 未来新增：
 
-* Memory
-* RAG
-* Voice
 * Tool Calling
+* Voice
+* Workflow Engine
 * Browser Agent
+* MCP Ecosystem
 
 无需推翻现有架构。
 
@@ -110,20 +115,21 @@ V1 的目标并不是实现一个简单聊天机器人，而是搭建未来所�
 
 ### Framework
 
-* Python
-* FastAPI
+* TypeScript
+* Node.js 20+
+* Hono 4
 
 ### ORM
 
-* SQLAlchemy
+* Prisma 6
 
 ### Validation
 
-* Pydantic
+* Zod
 
 ### Migration
 
-* Alembic
+* Prisma Migrate
 
 ---
 
@@ -131,11 +137,16 @@ V1 的目标并不是实现一个简单聊天机器人，而是搭建未来所�
 
 ### PostgreSQL
 
+* 端口 5434（避免与其他服务冲突）
+* Milvus 向量数据库（Docker 部署，端口 19530）
+
 负责：
 
 * User
 * Conversation
 * Message
+* Memory（元数据 + 向量）
+* KnowledgeBase / KnowledgeDocument / KnowledgeChunk（RAG 知识库）
 
 存储
 
@@ -155,19 +166,20 @@ V1 的目标并不是实现一个简单聊天机器人，而是搭建未来所�
 # 四、Monorepo 结构
 
 ```text
-agent-os/
+AgentForge/
 
 apps/
-├── web/
-└── api/
+├── web/          ← React 前端（端口 5173）
+└── server/       ← TypeScript Hono 后端（端口 8000）
 
 packages/
-├── shared-types/
-├── shared-prompts/
-└── sdk/
+├── shared-types/   ← 共享 TypeScript 类型
+├── shared-prompts/ ← Prompt 管理中心
+├── database/       ← Prisma Schema + Client 单例
+└── sdk/            ← API 客户端 + SSE 流解析
 
 infra/
-└── docker/
+└── docker/         ← PostgreSQL + pgAdmin + Milvus + MinIO + etcd
 
 docs/
 ```
@@ -187,16 +199,18 @@ React Web 应用。
 
 ---
 
-## apps/api
+## apps/server
 
-FastAPI 服务。
+TypeScript Hono 服务。
 
 职责：
 
-* Chat API
-* SSE Stream
+* Chat API（SSE 流式）
+* Customer Chat API（匿名客服 + 知识库检索）
 * Conversation API
 * Message API
+* Memory API
+* Knowledge Base API
 
 ---
 
@@ -237,15 +251,16 @@ future tool prompt
 
 ## packages/sdk
 
-模型 SDK 抽象层。
+API 客户端 SDK（TypeScript）。
 
 提供：
 
-```python
-LLMProvider
+```typescript
+AgentForgeClient   // HTTP 请求封装
+streamChat()       // SSE 流解析 → AsyncGenerator<ChatStreamChunk>
 ```
 
-统一调用接口。
+前端通过 SDK 调用后端，不直接 fetch。
 
 ---
 
@@ -255,10 +270,10 @@ LLMProvider
 ┌─────────────────────┐
 │      React Web      │
 └──────────┬──────────┘
-           │
+           │ SSE / HTTP
            ▼
 ┌─────────────────────┐
-│      FastAPI        │
+│    Hono (TS Node)   │
 └──────────┬──────────┘
            │
            ▼
@@ -267,15 +282,14 @@ LLMProvider
 └──────────┬──────────┘
            │
            ▼
- ┌─────────┴─────────┐
- ▼                   ▼
-
-OpenAI          DeepSeek
-
+ ┌─────────┼─────────┐
+ ▼                    ▼
+OpenAI           DeepSeek
            │
            ▼
-
-     PostgreSQL
+┌─────────────────────┐
+│  PostgreSQL + Milvus │
+└─────────────────────┘
 ```
 
 ---
@@ -324,28 +338,25 @@ created_at
 
 统一使用：
 
-```python
-class LLMProvider:
-    async def stream_chat():
-        pass
+```typescript
+interface LLMProvider {
+  streamChat(
+    messages: { role: string; content: string }[],
+    model: string,
+    systemPrompt?: string,
+  ): AsyncGenerator<StreamChunk>;
+}
 ```
 
 实现：
 
-```python
+```typescript
 OpenAIProvider
 DeepSeekProvider
+AzureProvider
 ```
 
-未来扩展：
-
-```python
-QwenProvider
-GeminiProvider
-ClaudeProvider
-```
-
-无需修改业务逻辑。
+未来扩展无需修改业务逻辑。
 
 ---
 
@@ -461,7 +472,7 @@ Frontend
 ↓
 Fetch Stream
 ↓
-FastAPI
+Hono (SSE)
 ↓
 Provider
 ↓
@@ -485,7 +496,7 @@ LLM
 
 ✅ Monorepo 架构搭建完成
 
-✅ React + FastAPI 通信完成
+✅ React + Hono 通信完成
 
 ✅ PostgreSQL 持久化完成
 
@@ -506,6 +517,8 @@ LLM
 ✅ Prompt 管理体系完成
 
 ✅ Shared Types 完成
+
+✅ SDK 客户端完成
 
 ---
 
@@ -537,7 +550,7 @@ LLM
                    │
                    ▼
 ┌─────────────────────────────────────┐
-│              FastAPI                 │
+│           Hono (TypeScript)          │
 │  ┌──────────┬──────────┬──────────┐ │
 │  │ Chat API │ Mem API  │Provider  │ │
 │  │          │          │  Layer   │ │
@@ -601,23 +614,24 @@ content         VarChar               -- 冗余存储便于调试
 
 ## 5. Memory Engine 抽象
 
-```python
-class MemoryEngine:
-    async def store(memory: MemoryCreate) -> Memory
-        """存储记忆到 PG + Milvus"""
+```typescript
+class MemoryEngine {
+  async store(memory: MemoryCreate): Promise<Memory>
+    // 存储记忆到 PG + Milvus
 
-    async def search(query: str, user_id: str, top_k: int) -> list[Memory]
-        """语义搜索相关记忆"""
+  async search(query: string, userId: string, topK: number): Promise<Memory[]>
+    // 语义搜索相关记忆
 
-    async def extract_and_store(messages: list, user_id: str,
-                                 conversation_id: str) -> list[Memory]
-        """LLM 提取关键信息并存储"""
+  async extractAndStore(messages: Message[], userId: string,
+                        conversationId: string): Promise<Memory[]>
+    // LLM 提取关键信息并存储
 
-    async def list(user_id: str, type: str | None) -> list[Memory]
-        """列出用户记忆"""
+  async list(userId: string, type?: MemoryType): Promise<Memory[]>
+    // 列出用户记忆
 
-    async def delete(memory_id: str) -> None
-        """删除记忆"""
+  async delete(memoryId: string): Promise<void>
+    // 删除记忆
+}
 ```
 
 ---
@@ -702,36 +716,148 @@ LLM 分析对话内容，判断是否有新信息
 
 完成以下能力即视为 V2 完成：
 
-☐ Milvus 容器化部署完成
+✅ Milvus 容器化部署完成
 
-☐ Memory 数据模型 + 迁移完成
+✅ Memory 数据模型 + 迁移完成
 
-☐ Memory Engine 抽象层完成
+✅ Memory Engine 抽象层完成
 
-☐ 语义搜索 API 完成
+✅ 语义搜索 API 完成
 
-☐ 对话后自动记忆提取完成
+✅ 对话后自动记忆提取完成
 
-☐ 对话前记忆注入上下文完成
+✅ 对话前记忆注入上下文完成
 
-☐ 前端记忆管理面板完成
+✅ 前端记忆管理面板完成
 
-☐ 记忆 Debug 信息展示完成
+✅ 记忆 Debug 信息展示完成
 
 ---
 
-# 十三、V3 预留能力
+# 十三、V3 RAG 知识库系统（已完成 ✅）
 
-V2 必须提前预留以下扩展点：
+V3 在 V2 Memory Engine 的向量检索能力基础上，扩展为完整的 RAG 知识库系统。
+
+## 核心能力
+
+* 文档管理：上传、删除、按知识库组织
+* 文档摄取：自动切片 → Embedding → Milvus + PostgreSQL 双写
+* 混合检索：dense 语义向量（0.6）+ BM25 关键词（0.4），可选 LLM Rerank
+* 客服集成：`CustomerChatService` 自动搜索知识库，注入 system prompt
+* 前端管理：知识库管理 UI + 搜索测试界面
+
+## 数据模型
+
+* `knowledge_bases` — 知识库（名称、描述、Embedding 模型）
+* `knowledge_documents` — 文档（标题、类型、状态）
+* `knowledge_chunks` — 切片（内容、序号、Embedding ID）
+
+## 技术栈
+
+* Milvus Hybrid Search（dense + sparse）
+* `RecursiveCharacterTextSplitter` — 递归文本切分
+* OpenAI `text-embedding-ada-002` → 1536 维向量
+
+---
+
+# 十四、V4 Tool Calling（已完成 ✅）
+
+## 1. 核心目标
+
+为 LLM 对话添加工具调用能力，让 AI 能够主动调用外部工具（计算器、时钟、搜索引擎等）来完成用户请求。
+
+关键能力：
+
+- Tool Registry：统一注册和管理所有可用工具
+- 多轮工具调用：Server 端工具调用循环（最多 5 轮）
+- SSE 流式协议：新增 `tool_call`、`tool_result` 事件类型
+- 实时反馈：前端展示工具调用状态和结果
+- Provider 透明：OpenAI 和 DeepSeek 均支持 Function Calling
+
+## 2. 系统架构
 
 ```text
-RAG Engine（复用 Memory Engine 的向量检索能力）
-Tool Registry（Tool 定义可视为特殊记忆）
-Knowledge Base（文档记忆 → RAG 自然过渡）
+User: "123 * 456 = ?"
+  ↓
+ChatService (Tool Calling Loop)
+  ↓
+Provider.streamChat(messages, tools=[calculator])
+  ↓
+LLM → tool_call(name="calculator", args="{expression: '123*456'}")
+  ↓
+ToolRegistry.execute("calculator", args)
+  ↓
+Result: "56088"
+  ↓
+Feed back to LLM → "123 × 456 = 56,088"
+  ↓
+SSE Stream → Frontend
 ```
 
-V3 开始接入：
+## 3. 数据流
 
 ```text
-RAG System（文档上传 → 切片 → Embedding → 检索增强生成）
+Meta Event:  tools_enabled: ["calculator", "get_current_time", "web_search"]
+Tool Call:   tool_call: { id, name, arguments }
+Tool Result: tool_result: { tool_call_id, name, result }
+Tokens:      token (streaming text after tool results)
+Done:        tool_calls_count: 1
+```
+
+## 4. 技术选型
+
+| 组件 | 技术 | 用途 |
+|------|------|------|
+| 工具注册 | ToolRegistry (Singleton) | 注册、查找、执行工具 |
+| 内置工具 | get_current_time, calculator, web_search | MVP 基础工具集 |
+| LLM 集成 | OpenAI Function Calling API | 工具定义传递和调用 |
+| 执行循环 | ChatService Multi-Round | Server 端最多 5 轮循环 |
+
+## 5. API 设计
+
+### 查询可用工具
+
+```http
+GET /api/tools
+```
+
+### 发送带工具的消息
+
+```http
+POST /api/chat
+Body: { "message": "...", "tools": ["calculator"] }
+```
+
+## 6. V4 验收标准
+
+完成以下能力即视为 V4 完成：
+
+✅ Tool Registry 设计完成
+
+✅ 内置工具（get_current_time, calculator, web_search）实现完成
+
+✅ Provider Layer 扩展（ChatMessage + Tools 参数）完成
+
+✅ 多轮工具调用循环（Server 端最多 5 轮）完成
+
+✅ SSE 流式协议扩展（tool_call, tool_result 事件）完成
+
+✅ GET /api/tools 端点完成
+
+✅ 前端工具调用展示（ToolCallBadge + DebugPanel Tools）完成
+
+✅ 向后兼容（无 tools 参数时不发送工具定义）完成
+
+✅ 自测验证通过（calculator 和 get_current_time 工具调用正常）
+
+
+# 十五、V5+ 预留能力
+
+当前架构已预留以下扩展点：
+
+```text
+Voice Agent（ASR + TTS 集成）
+Workflow Engine（多步 Agent 工作流编排）
+Browser Agent（Playwright + Web 自动化）
+MCP Ecosystem（Model Context Protocol 集成）
 ```

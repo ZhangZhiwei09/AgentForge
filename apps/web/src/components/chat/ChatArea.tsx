@@ -4,13 +4,22 @@ import { useMessages, useCreateConversation } from "@/hooks/useApi";
 import { ChatInput } from "./ChatInput";
 import { MessageBubble } from "./MessageBubble";
 import { ModelSelector } from "./ModelSelector";
-import { MessageSquare } from "lucide-react";
+import { MessageSquare, Wrench } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+const AVAILABLE_TOOLS = [
+    { name: "calculator", label: "Calculator" },
+    { name: "get_current_time", label: "Time" },
+    { name: "web_search", label: "Search" },
+];
 
 export function ChatArea() {
     const currentId = useChatStore((s) => s.currentConversationId);
     const messages = useChatStore((s) => s.messages);
     const setMessages = useChatStore((s) => s.setMessages);
     const isStreaming = useChatStore((s) => s.isStreaming);
+    const enabledTools = useChatStore((s) => s.enabledTools);
+    const toggleTool = useChatStore((s) => s.toggleTool);
     const bottomRef = useRef<HTMLDivElement>(null);
     const { data: apiMessages } = useMessages(currentId);
     const createConv = useCreateConversation();
@@ -52,9 +61,27 @@ export function ChatArea() {
     return (
         <main className="flex flex-1 flex-col bg-[hsl(var(--background))]">
             <div className="flex items-center justify-between border-b border-[hsl(var(--border))] px-4 py-2">
-                <span className="text-xs text-muted-foreground">
-                    Streaming: <code>text/event-stream</code>
-                </span>
+                <div className="flex items-center gap-2">
+                    <Wrench className="h-3.5 w-3.5 text-muted-foreground" />
+                    <div className="flex items-center gap-1">
+                        {AVAILABLE_TOOLS.map((tool) => (
+                            <button
+                                key={tool.name}
+                                onClick={() => toggleTool(tool.name)}
+                                disabled={isStreaming}
+                                className={cn(
+                                    "rounded-md border px-2 py-0.5 text-xs transition-colors",
+                                    enabledTools.includes(tool.name)
+                                        ? "border-blue-500/50 bg-blue-500/10 text-blue-400"
+                                        : "border-[hsl(var(--border))] text-muted-foreground hover:border-foreground/20 hover:text-foreground",
+                                    "disabled:opacity-40"
+                                )}
+                            >
+                                {tool.label}
+                            </button>
+                        ))}
+                    </div>
+                </div>
                 <ModelSelector />
             </div>
 

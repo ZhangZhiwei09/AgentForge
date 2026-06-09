@@ -9,11 +9,14 @@ export function useStreamChat() {
     const {
         currentConversationId,
         selectedModel,
+        enabledTools,
         appendMessage,
         appendStreamToken,
         setDebugInfo,
         setMemoryInfo,
         setIsStreaming,
+        addToolCall,
+        setToolResult,
     } = useChatStore();
 
     const sendMessage = useCallback(
@@ -49,11 +52,20 @@ export function useStreamChat() {
                     conversation_id: currentConversationId,
                     message: content,
                     model: selectedModel,
+                    tools: enabledTools.length > 0 ? enabledTools : null,
                 })) {
                     if (chunk.type === "meta") {
                         metaInfo = chunk;
                     } else if (chunk.type === "token" && chunk.content) {
                         appendStreamToken(chunk.content);
+                    } else if (chunk.type === "tool_call" && chunk.tool_call) {
+                        addToolCall({
+                            id: chunk.tool_call.id,
+                            name: chunk.tool_call.name,
+                            arguments: chunk.tool_call.arguments,
+                        });
+                    } else if (chunk.type === "tool_result" && chunk.tool_result) {
+                        setToolResult(chunk.tool_result.tool_call_id, chunk.tool_result.result);
                     } else if (chunk.type === "done") {
                         setDebugInfo({
                             model: (metaInfo.model || chunk.model || selectedModel) ?? "",
@@ -81,7 +93,7 @@ export function useStreamChat() {
                 setIsStreaming(false);
             }
         },
-        [currentConversationId, selectedModel, appendMessage, appendStreamToken, setDebugInfo, setIsStreaming]
+        [currentConversationId, selectedModel, enabledTools, appendMessage, appendStreamToken, setDebugInfo, setMemoryInfo, setIsStreaming, addToolCall, setToolResult]
     );
 
     const abort = useCallback(() => {

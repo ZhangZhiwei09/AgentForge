@@ -58,6 +58,18 @@ Provider 层 (src/providers/) → LLM 抽象：统一不同 AI 厂商的接口
       └─ 8. [done] 保存助手消息 + 自动生成标题 + MemoryEngine.extractAndStore()
 ```
 
+---
+
+## 各文件详细分析
+
+| 文件 | 文档 |
+|------|------|
+| `customer-chat.ts` | [CustomerChatService 数据流详解 →](customer-chat.md) |
+
+其他文件的分析可通过 `/analyze-flow` skill 逐步补充。
+
+---
+
 ## 设计要点
 
 - **路由不碰业务逻辑**：routes/ 只做参数校验和 HTTP 响应，具体"怎么做"全在 services/
