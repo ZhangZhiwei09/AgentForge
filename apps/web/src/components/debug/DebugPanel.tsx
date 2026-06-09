@@ -1,5 +1,5 @@
 import { useChatStore } from "@/stores/chat";
-import { PanelRightClose, Cpu, Braces, Timer, Gauge, Brain } from "lucide-react";
+import { PanelRightClose, Cpu, Braces, Timer, Gauge, Brain, Wrench, Check, Loader2 } from "lucide-react";
 
 export function DebugPanel() {
     const debugInfo = useChatStore((s) => s.debugInfo);
@@ -7,6 +7,7 @@ export function DebugPanel() {
     const isStreaming = useChatStore((s) => s.isStreaming);
     const toggleDebugPanel = useChatStore((s) => s.toggleDebugPanel);
     const selectedModel = useChatStore((s) => s.selectedModel);
+    const toolCalls = useChatStore((s) => s.toolCalls);
 
     return (
         <aside className="flex w-72 flex-col border-l border-[hsl(var(--border))] bg-[hsl(var(--muted))]/30">
@@ -52,6 +53,42 @@ export function DebugPanel() {
                         <Section label="Memory" icon={<Brain className="h-3.5 w-3.5" />}>
                             <InfoRow label="Injected" value={String(memoryInfo.injected)} />
                             <InfoRow label="Extracted" value={String(memoryInfo.extracted)} />
+                        </Section>
+                    )}
+
+                    {toolCalls.length > 0 && (
+                        <Section label="Tools" icon={<Wrench className="h-3.5 w-3.5" />}>
+                            {toolCalls.map((tc) => (
+                                <div key={tc.id} className="space-y-1 py-1">
+                                    <div className="flex items-center gap-1.5">
+                                        {tc.status === "pending" ? (
+                                            <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+                                        ) : (
+                                            <Check className="h-3 w-3 text-green-500" />
+                                        )}
+                                        <span className="text-xs font-medium">
+                                            {tc.name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())}
+                                        </span>
+                                    </div>
+                                    <div className="text-[10px] font-mono text-muted-foreground pl-4">
+                                        {(() => {
+                                            try {
+                                                const args = JSON.parse(tc.arguments);
+                                                return Object.entries(args)
+                                                    .map(([k, v]) => `${k}=${String(v).slice(0, 40)}`)
+                                                    .join(" ");
+                                            } catch {
+                                                return tc.arguments.slice(0, 60);
+                                            }
+                                        })()}
+                                    </div>
+                                    {tc.result && (
+                                        <div className="text-[10px] font-mono text-muted-foreground pl-4 break-all">
+                                            → {tc.result.slice(0, 80)}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
                         </Section>
                     )}
 

@@ -9,6 +9,7 @@ import { providerRoutes } from "./routes/providers.js";
 import { memoryRoutes } from "./routes/memories.js";
 import { customerChatRoutes } from "./routes/customer-chat.js";
 import { knowledgeRoutes } from "./routes/knowledge.js";
+import { toolRoutes } from "./routes/tools.js";
 
 export function createApp() {
   const app = new Hono();
@@ -28,6 +29,7 @@ export function createApp() {
   app.route("/", memoryRoutes);          // /api/memories, /api/memories/search
   app.route("/", customerChatRoutes);    // /api/customer-chat
   app.route("/", knowledgeRoutes);       // /api/knowledge/*
+  app.route("/", toolRoutes);            // /api/tools
 
   return app;
 }

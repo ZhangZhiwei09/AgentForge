@@ -14,3 +14,13 @@ export type {
 export type { LLMProviderInfo, ProviderType, ModelInfo } from "./provider";
 export type { DebugInfo, DebugPanelProps } from "./debug";
 export type { Memory, MemoryType, MemorySearchResult, MemoryInfo } from "./memory";
+export type {
+  ToolDefinition,
+  ToolFunctionDefinition,
+  ToolCall,
+  ToolResult,
+  ToolCallChunk,
+  ToolResultChunk,
+  JSONSchema,
+  JSONSchemaProperty,
+} from "./tool";

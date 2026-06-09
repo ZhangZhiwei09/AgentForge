@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Conversation, DebugInfo, Message, MemoryInfo, ProviderType } from "@/types";
+import type { Conversation, DebugInfo, Message, MemoryInfo, ProviderType, ToolCallRecord } from "@/types";
 
 type PanelMode = "debug" | "memory" | "knowledge";
 
@@ -14,6 +14,7 @@ interface ChatState {
     selectedProvider: ProviderType;
     isDebugOpen: boolean;
     panelMode: PanelMode;
+    toolCalls: ToolCallRecord[];
 
     setConversations: (convs: Conversation[]) => void;
     setCurrentConversation: (id: string | null) => void;
@@ -28,6 +29,8 @@ interface ChatState {
     toggleDebugPanel: () => void;
     setPanelMode: (mode: PanelMode) => void;
     resetChat: () => void;
+    addToolCall: (tc: { id: string; name: string; arguments: string }) => void;
+    setToolResult: (id: string, result: string) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -41,6 +44,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     selectedProvider: "deepseek",
     isDebugOpen: true,
     panelMode: "debug",
+    toolCalls: [],
 
     setConversations: (convs) => set({ conversations: convs }),
     setCurrentConversation: (id) => set({ currentConversationId: id }),
@@ -67,5 +71,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     setSelectedProvider: (provider) => set({ selectedProvider: provider }),
     toggleDebugPanel: () => set((s) => ({ isDebugOpen: !s.isDebugOpen })),
     setPanelMode: (mode) => set({ panelMode: mode }),
-    resetChat: () => set({ messages: [], debugInfo: null, memoryInfo: null }),
+    resetChat: () => set({ messages: [], debugInfo: null, memoryInfo: null, toolCalls: [] }),
+    addToolCall: (tc) =>
+        set((s) => ({
+            toolCalls: [...s.toolCalls, { ...tc, status: "pending" as const }],
+        })),
+    setToolResult: (id, result) =>
+        set((s) => ({
+            toolCalls: s.toolCalls.map((tc) =>
+                tc.id === id ? { ...tc, result, status: "done" as const } : tc,
+            ),
+        })),
 }));
