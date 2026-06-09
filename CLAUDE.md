@@ -76,7 +76,7 @@ This way each component is independently controllable — restart the backend wi
 
 ## Architecture
 
-AgentForge is a **pnpm + Turborepo monorepo** building a ChatGPT clone as the foundation (V1) for a progressive AI agent platform (V1→V10: Memory → RAG → Tool Calling → Voice → Workflow → Browser Agent → Multi-Agent → MCP).
+AgentForge is a **pnpm + Turborepo monorepo** building a ChatGPT clone as the foundation (V1) for a progressive AI agent platform (V1→V10: Memory → RAG → Tool Calling → Voice → Workflow → Browser Agent → Multi-Agent → MCP). Completed phases are marked with ✅ in both this file and `plan.md`.
 
 ### Package Layout
 
@@ -95,11 +95,13 @@ AgentForge is a **pnpm + Turborepo monorepo** building a ChatGPT clone as the fo
 ```
 Browser (React) ←SSE/HTTP→ Hono (8000) → LLMProvider (abstract) → OpenAI | DeepSeek
                                     ↓
-                       @agentforge/database (Prisma)
-                                    ↓
-                              PostgreSQL 16
-                                    ↓
-                            Milvus Vector DB
+                               ChatService
+                              ↙           ↘
+                 ToolRegistry          @agentforge/database (Prisma)
+                                           ↓
+                                     PostgreSQL 16
+                                           ↓
+                                   Milvus Vector DB
 ```
 
 **Streaming path:** Frontend calls `POST /api/chat` → Hono SSE via `streamSSE()` yields `data: {json}\n\n` lines → `AgentForgeClient.streamChat()` parses the `ReadableStream` into an `AsyncGenerator<ChatStreamChunk>` → Zustand store accumulates tokens into messages.
@@ -126,16 +128,32 @@ Browser (React) ←SSE/HTTP→ Hono (8000) → LLMProvider (abstract) → OpenAI
 
 10. **DB schema is baseline-introspected** from the existing Python Alembic tables. The Prisma schema uses `@@map`/`@map` for snake_case column names. IDs are `@db.VarChar(36)` (not UUID type), so UUIDs are generated in application code.
 
+11. **Tool Calling** (`apps/server/src/tools/`): Server-side multi-round tool calling loop in `ChatService.streamChat()` (max 5 rounds). Tools are registered via `ToolRegistry` singleton and sent to LLM only when explicitly requested via `tools` param. The SSE protocol extends with `tool_call` and `tool_result` event types. Built-in tools include `get_current_time`, `calculator`, and `web_search` (stub). The `LLMProvider` interface was extended with `ChatMessage` type (supporting `tool_calls` and `tool_call_id` fields) and an optional `tools` parameter.
+
 ### Python Backend (Retained)
 
 The original Python FastAPI backend lives in `apps/api/` and is preserved for reference. It is not included in the Turbo pipeline (`turbo dev` filters `@agentforge/server` + `@agentforge/web` only). The Python code, Alembic migrations, and models remain untouched.
 
-### Upcoming Versions
+### Keeping CLAUDE.md in Sync with plan.md
 
-The `project.md` defines a V1→V10 roadmap:
+When a development phase from `plan.md` is completed:
+1. Mark the phase with ✅ in `plan.md` (version roadmap + acceptance criteria)
+2. Update the "Version Roadmap" section above with the same ✅ and a brief description of what was built
+3. If the phase introduced new packages, commands, or architectural patterns, add them to the relevant sections
+
+This ensures CLAUDE.md always reflects the current state of the project, not just the original plan.
+
+### Version Roadmap (V1→V10)
+
+The `plan.md` defines the V1→V10 roadmap. Completed phases are marked with ✅. When a new phase is completed, update both `plan.md` and this section.
+
+- **V1 ChatGPT Clone:** Multi-turn chat, streaming, model switching, provider abstraction ✅
 - **V2 Memory:** PostgreSQL + Milvus for long-term memory ✅
-- **V3 RAG:** Document ingestion and retrieval ✅
-- **V4 Tool Calling:** Tool registry and execution engine
+- **V3 RAG:** Document ingestion, hybrid search, knowledge UI, customer chat ✅
+- **V4 Tool Calling:** Tool registry and execution engine ✅
+- **V5 Voice Agent:** ASR + TTS integration
 - **V6 Workflow Engine:** Multi-step agent workflows
+- **V7 Browser Extension:** Browser companion extension
 - **V8 Browser Agent:** Web automation
+- **V9 Multi-Agent:** Multi-agent collaboration
 - **V10 MCP Ecosystem:** Model Context Protocol integration
