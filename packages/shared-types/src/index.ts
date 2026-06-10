@@ -24,3 +24,20 @@ export type {
   JSONSchema,
   JSONSchemaProperty,
 } from "./tool";
+export type {
+  AgentDecision,
+  AgentStep,
+  AgentSessionDTO,
+  AgentRunRequest,
+  AgentRespondRequest,
+  AgentThinkEvent,
+  AgentActEvent,
+  AgentObserveEvent,
+  AgentTokenEvent,
+  AgentRespondEvent,
+  AgentAskUserEvent,
+  AgentErrorEvent,
+  AgentDoneEvent,
+  AgentMetaEvent,
+  AgentStreamEvent,
+} from "./agent";

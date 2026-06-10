@@ -27,14 +27,15 @@ interface JwtPayload {
   sub: string;      // user id
   email: string;
   role: string;
+  jti: string;      // unique token ID to prevent identical tokens
   iat: number;
   exp: number;
   type: "access" | "refresh";
 }
 
-function createToken(payload: Omit<JwtPayload, "iat" | "exp">, expiresIn: number): string {
+function createToken(payload: Omit<JwtPayload, "iat" | "exp" | "jti">, expiresIn: number): string {
   const now = Math.floor(Date.now() / 1000);
-  const fullPayload = { ...payload, iat: now, exp: now + expiresIn };
+  const fullPayload = { ...payload, jti: randomUUID(), iat: now, exp: now + expiresIn };
   const header = base64urlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const body = base64urlEncode(JSON.stringify(fullPayload));
   const signature = sign(`${header}.${body}`, JWT_SECRET);

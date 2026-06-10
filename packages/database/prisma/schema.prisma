@@ -59,11 +59,12 @@ model Conversation {
   userId    String    @map("user_id") @db.VarChar(36)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  type      String    @default("chat") @db.VarChar(32)
-  sessionId String?   @map("session_id") @db.VarChar(64)
-  user      User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  memories  Memory[]
-  messages  Message[]
+  type           String         @default("chat") @db.VarChar(32)
+  sessionId      String?        @map("session_id") @db.VarChar(64)
+  user           User           @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  memories       Memory[]
+  messages       Message[]
+  agentSessions  AgentSession[]
 
   @@index([sessionId], map: "ix_conversations_session_id")
   @@index([userId], map: "ix_conversations_user_id")
@@ -147,6 +148,21 @@ model KnowledgeChunk {
   @@index([documentId], map: "ix_knowledge_chunks_doc_id")
   @@index([knowledgeBaseId], map: "ix_knowledge_chunks_kb_id")
   @@map("knowledge_chunks")
+}
+
+model AgentSession {
+  id             String       @id @db.VarChar(36)
+  conversationId String       @map("conversation_id") @db.VarChar(36)
+  task           String
+  status         String       @default("running") @db.VarChar(20)
+  scratchpad     Json         @default("[]")
+  finalSummary   String?      @map("final_summary")
+  startedAt      DateTime     @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt    DateTime?    @map("completed_at") @db.Timestamptz(6)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId], map: "ix_agent_sessions_conversation_id")
+  @@map("agent_sessions")
 }
 
 model alembic_version {

@@ -6,6 +6,7 @@ import { errorHandler } from "./middleware/error.js";
 import { requestIdMiddleware } from "./middleware/request-id.js";
 import { authMiddleware } from "./middleware/auth.js";
 import { globalRateLimiter, chatRateLimiter } from "./middleware/rate-limit.js";
+import { contentSafetyMiddleware } from "./middleware/content-safety.js";
 import { authRoutes } from "./routes/auth.js";
 import { chatRoutes } from "./routes/chat.js";
 import { conversationRoutes } from "./routes/conversations.js";
@@ -14,6 +15,7 @@ import { memoryRoutes } from "./routes/memories.js";
 import { customerChatRoutes } from "./routes/customer-chat.js";
 import { knowledgeRoutes } from "./routes/knowledge.js";
 import { toolRoutes } from "./routes/tools.js";
+import { agentRoutes } from "./routes/agent.js";
 import type { AuthUser } from "@agentforge/shared-types";
 
 // Hono context variables — all middleware and routes share this type
@@ -35,6 +37,8 @@ export function createApp() {
   app.use("*", globalRateLimiter);
   // Chat API 专项速率限制（防止 token 滥用）
   app.use("/api/chat", chatRateLimiter);
+  // 内容安全检测（防止 prompt injection 和超长消息）
+  app.use("/api/chat", contentSafetyMiddleware);
   // 全局错误处理：所有未捕获异常在此统一返回 JSON
   app.onError(errorHandler);
 
@@ -50,6 +54,7 @@ export function createApp() {
   app.route("/", customerChatRoutes);    // /api/customer-chat
   app.route("/", knowledgeRoutes);       // /api/knowledge/*
   app.route("/", toolRoutes);            // /api/tools
+  app.route("/", agentRoutes);           // /api/agent/*, /api/agent-sessions/*
 
   return app;
 }

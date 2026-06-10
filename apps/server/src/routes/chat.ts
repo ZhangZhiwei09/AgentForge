@@ -12,7 +12,7 @@ export const chatRoutes = createHono();
 // 请求体校验：对话 ID + 消息文本 + 可选模型 + 可选工具 + 可选知识库
 const chatRequestSchema = z.object({
   conversation_id: z.string(),
-  message: z.string().min(1),
+  message: z.string().min(1).max(16000, "Message must be at most 16000 characters"),
   model: z.string().nullable().optional(),
   kb_ids: z.array(z.string()).nullable().optional(), // 可选：限定使用的知识库
   tools: z.array(z.string()).nullable().optional(),   // 可选：启用的工具名称列表
