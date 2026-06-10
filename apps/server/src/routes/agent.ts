@@ -96,12 +96,10 @@ agentRoutes.post(
 
     logger.info({ sessionId: session_id }, "Agent session resumed");
 
-    // Re-run agent with the user's response — this continues the task
+    // Resume the paused agent session with the user's response
     return streamSSE(c, async (stream) => {
       try {
-        for await (const event of agentService.run(session.conversationId, response, {
-          tools: null, // Reuse all tools
-        })) {
+        for await (const event of agentService.resume(session_id, response)) {
           await stream.writeSSE({ data: JSON.stringify(event) });
         }
         await stream.writeSSE({ data: "[DONE]" });

@@ -144,87 +144,82 @@ export class MemoryEngine {
     topK: number = 5,
     sessionId?: string,
   ): Promise<MemorySearchResult[]> {
-    // 兜底：从 PG 按重要度和时间排序取候选
-    const memories = await prisma.memory.findMany({
-      where: { userId },
-      orderBy: [{ importance: "desc" }, { createdAt: "desc" }],
-      take: topK,
-    });
+    const MILVUS_WEIGHT = 0.7;
+    const IMPORTANCE_WEIGHT = 0.3;
 
-    // 尝试向量搜索增强
+    // 尝试向量搜索优先：Milvus语义搜索 → PG元数据补充 → 混合打分
     try {
       const vector = await this.embed(query);
       if (vector) {
         await this.ensureCollection();
         const client = getMilvusClient();
 
+        // 搜索更宽候选集（topK×3），避免遗漏低importance但高语义相关的记忆
         const results = await client.search({
           collection_name: MILVUS_MEMORY_COLLECTION,
           vector: vector,
-          limit: topK,
-          filter: `user_id == "${userId}"`,   // 只搜当前用户的记忆
+          limit: topK * 3,
+          filter: `user_id == "${userId}"`,
           output_fields: ["memory_id"],
           params: { nprobe: 16 },
         });
 
         if (results.results && results.results.length > 0) {
-          // 构建 memory_id → Milvus score 的映射
-          const scored: Record<string, number> = {};
+          // 提取Milvus结果中的memory_id和分数
+          const milvusScores = new Map<string, number>();
+          let maxMilvusScore = 0;
           for (const hit of results.results) {
             const mid = hit.memory_id as string;
-            scored[mid] = hit.score ?? 0;
+            const score = hit.score ?? 0;
+            milvusScores.set(mid, score);
+            if (score > maxMilvusScore) maxMilvusScore = score;
           }
 
-          // 合并 PG 记忆和 Milvus 分数
-          const scoredMemories: MemorySearchResult[] = [];
-          const memoryMap = new Map(memories.map((m) => [m.id, m]));
+          // 从PG批量获取完整记忆记录
+          const memoryIds = Array.from(milvusScores.keys());
+          const pgMemories = await prisma.memory.findMany({
+            where: { id: { in: memoryIds } },
+          });
 
-          for (const [mid, score] of Object.entries(scored)) {
-            const m = memoryMap.get(mid);
-            if (m) {
-              scoredMemories.push({
-                id: m.id,
-                userId: m.userId,
-                type: m.type,
-                content: m.content,
-                importance: m.importance,
-                metadata: m.metadata as Record<string, unknown> | null,
-                conversationId: m.conversationId,
-                createdAt: m.createdAt,
-                updatedAt: m.updatedAt,
-                score,
-              });
-            }
-          }
+          // 混合打分：Milvus语义相似度(0.7) + importance(0.3)
+          const scored: MemorySearchResult[] = pgMemories.map((m) => {
+            const milvusScore = milvusScores.get(m.id) || 0;
+            const normalizedMilvus = maxMilvusScore > 0
+              ? milvusScore / maxMilvusScore
+              : 0;
+            const blendedScore =
+              MILVUS_WEIGHT * normalizedMilvus +
+              IMPORTANCE_WEIGHT * m.importance;
 
-          // 未被向量搜索命中的记忆给 0 分（排在最后）
-          const scoredIds = new Set(Object.keys(scored));
-          for (const m of memories) {
-            if (!scoredIds.has(m.id)) {
-              scoredMemories.push({
-                id: m.id,
-                userId: m.userId,
-                type: m.type,
-                content: m.content,
-                importance: m.importance,
-                metadata: m.metadata as Record<string, unknown> | null,
-                conversationId: m.conversationId,
-                createdAt: m.createdAt,
-                updatedAt: m.updatedAt,
-                score: 0.0,
-              });
-            }
-          }
+            return {
+              id: m.id,
+              userId: m.userId,
+              type: m.type,
+              content: m.content,
+              importance: m.importance,
+              metadata: m.metadata as Record<string, unknown> | null,
+              conversationId: m.conversationId,
+              createdAt: m.createdAt,
+              updatedAt: m.updatedAt,
+              score: Math.round(blendedScore * 10000) / 10000,
+            };
+          });
 
-          scoredMemories.sort((a, b) => b.score - a.score);
-          return this.filterBySession(scoredMemories.slice(0, topK), sessionId);
+          scored.sort((a, b) => b.score - a.score);
+          return this.filterBySession(scored.slice(0, topK), sessionId);
         }
       }
     } catch (e) {
       logger.warn(e, "Vector search failed, falling back to PG");
     }
 
-    // 纯 PG 回退：用重要度作为分数
+    // 纯 PG 回退：用重要度作为分数（Milvus不可用时的降级策略）
+    const memories = await prisma.memory.findMany({
+      where: { userId },
+      orderBy: [{ importance: "desc" }, { createdAt: "desc" }],
+      take: topK,
+    });
+
     const fallbackResults = memories.map((m) => ({
       id: m.id,
       userId: m.userId,

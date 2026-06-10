@@ -20,12 +20,14 @@
     "@hono/node-server": "^1.13",
     "@hono/zod-validator": "^0.4",
     "@zilliz/milvus2-sdk-node": "^2.4",
+    "bcryptjs": "^3.0.3",
     "dotenv": "^16.4",
     "hono": "^4.6",
     "openai": "^4.70",
     "zod": "^3.23"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^3.0.0",
     "@types/node": "^22.0",
     "@vitest/coverage-v8": "^3.0",
     "rimraf": "^6.0",

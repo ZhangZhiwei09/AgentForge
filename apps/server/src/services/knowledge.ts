@@ -86,6 +86,24 @@ export class KnowledgeService {
     logger.info({ kbId: targetKbId }, "BM25 cache invalidated");
   }
 
+  // 启动时预热：预先训练所有启用的知识库BM25，避免首次搜索的冷启动延迟
+  async warmupAll(): Promise<void> {
+    try {
+      const kbs = await prisma.knowledgeBase.findMany({
+        where: { enabled: true },
+        select: { id: true },
+      });
+      for (const kb of kbs) {
+        await this.ensureBM25Fitted(kb.id);
+      }
+      // Also warm up the global (all-KB) index
+      await this.ensureBM25Fitted();
+      logger.info({ kbCount: kbs.length }, "BM25 warmup complete");
+    } catch (e) {
+      logger.warn(e, "BM25 warmup failed — will train lazily on first search");
+    }
+  }
+
   // 计算查询与候选文本之间的 BM25 关键词相似度分数
   // 使用稀疏向量点积作为相似度度量
   private computeBM25Scores(query: string, candidates: string[]): number[] {

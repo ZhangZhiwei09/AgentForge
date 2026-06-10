@@ -1,5 +1,6 @@
 // AuthService — JWT-based authentication with refresh tokens and API key support
 import { randomUUID, createHash, createHmac, timingSafeEqual } from "crypto";
+import bcrypt from "bcryptjs";
 import { prisma } from "../db.js";
 import { logger } from "@agentforge/logger";
 import type { AuthUser, AuthResponse, ApiKeyDTO, CreateApiKeyResponse } from "@agentforge/shared-types";
@@ -58,22 +59,46 @@ function verifyToken(token: string): JwtPayload | null {
   }
 }
 
-// ---- Password Hashing (SHA-256 with salt) ----
+// ---- Password Hashing (bcrypt, with transparent migration from legacy SHA-256) ----
+
+const BCRYPT_ROUNDS = 12;
 
 function hashPassword(password: string): string {
-  const salt = randomUUID();
-  const hash = createHash("sha256").update(salt + password).digest("hex");
-  return `${salt}:${hash}`;
+  return bcrypt.hashSync(password, BCRYPT_ROUNDS);
 }
 
-function verifyPassword(password: string, storedHash: string): boolean {
-  const [salt, hash] = storedHash.split(":");
-  const computed = createHash("sha256").update(salt + password).digest("hex");
-  try {
-    return timingSafeEqual(Buffer.from(computed), Buffer.from(hash));
-  } catch {
-    return false;
+/**
+ * Verify a password against a stored hash.
+ * Supports bcrypt ($2a$/$2b$ prefix) and legacy SHA-256 (salt:hash format).
+ * @returns { valid, needsUpgrade } — needsUpgrade is true if the hash uses the old format
+ */
+function verifyPassword(password: string, storedHash: string): { valid: boolean; needsUpgrade: boolean } {
+  // bcrypt format: starts with $2a$ or $2b$
+  if (storedHash.startsWith("$2")) {
+    return { valid: bcrypt.compareSync(password, storedHash), needsUpgrade: false };
   }
+
+  // Legacy SHA-256 format: salt:hash
+  const parts = storedHash.split(":");
+  if (parts.length === 2) {
+    const [salt, hash] = parts;
+    const computed = createHash("sha256").update(salt + password).digest("hex");
+    try {
+      const valid = timingSafeEqual(Buffer.from(computed), Buffer.from(hash));
+      return { valid, needsUpgrade: valid }; // Upgrade on successful legacy verification
+    } catch {
+      return { valid: false, needsUpgrade: false };
+    }
+  }
+
+  return { valid: false, needsUpgrade: false };
+}
+
+/**
+ * Check if a hash needs migration (legacy format or low bcrypt rounds)
+ */
+function needsRehash(storedHash: string): boolean {
+  return !storedHash.startsWith("$2");
 }
 
 // Hash a token/API key for storage (one-way)
@@ -122,8 +147,19 @@ export class AuthService {
       throw new Error("Invalid email or password");
     }
 
-    if (!verifyPassword(password, user.passwordHash)) {
+    const { valid, needsUpgrade } = verifyPassword(password, user.passwordHash);
+    if (!valid) {
       throw new Error("Invalid email or password");
+    }
+
+    // Transparently upgrade legacy SHA-256 hash to bcrypt
+    if (needsUpgrade) {
+      const newHash = hashPassword(password);
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: newHash },
+      });
+      logger.info({ userId: user.id }, "Password hash upgraded to bcrypt");
     }
 
     logger.info({ userId: user.id }, "User signed in");

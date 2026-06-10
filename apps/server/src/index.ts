@@ -44,6 +44,15 @@ async function main() {
     logger.warn({ error: (err as Error).message }, "Knowledge base seeding skipped");
   }
 
+  // 预热BM25索引（最佳effort，失败不影响服务启动）
+  try {
+    const { KnowledgeService } = await import("./services/knowledge.js");
+    const ks = new KnowledgeService();
+    await ks.warmupAll();
+  } catch (err) {
+    logger.warn({ error: (err as Error).message }, "BM25 warmup skipped");
+  }
+
   // 第三步：创建 Hono 应用并启动 HTTP 服务
   const app = createApp();
 

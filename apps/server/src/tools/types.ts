@@ -23,6 +23,7 @@ export interface RegisteredTool {
   timeout: number; // ms
   requireApproval: boolean;
   category: string; // e.g. "utility", "file", "network", "database"
+  parallelizable: boolean; // true if this tool can be executed in parallel with others
 }
 
 // Circuit breaker state for a tool

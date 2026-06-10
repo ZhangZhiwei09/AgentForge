@@ -180,12 +180,18 @@ export class ChatService {
     // 11. 工具调用循环：最多 MAX_TOOL_ROUNDS 轮
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       let roundContent = "";
+      // Collect tool calls first, execute after stream completes
+      const pendingToolCalls: Array<{
+        id: string;
+        name: string;
+        args: Record<string, unknown>;
+      }> = [];
       const executedTools: Array<{
         tc: { id: string; name: string; arguments: string };
         result: string;
       }> = [];
 
-      // 调用 LLM（流式）
+      // 调用 LLM（流式） — 收集token和tool_call，延迟执行
       for await (const chunk of provider.streamChat(
         conversationMessages,
         resolvedModel,
@@ -208,26 +214,64 @@ export class ChatService {
           const tc = chunk.tool_call;
           logger.debug({ tool: tc.name, args: tc.arguments.slice(0, 100) }, "Tool call");
 
-          // 解析参数
           let args: Record<string, unknown> = {};
           try {
             args = JSON.parse(tc.arguments);
           } catch {
             logger.warn({ arguments: tc.arguments }, "Failed to parse tool arguments");
           }
+          pendingToolCalls.push({ id: tc.id, name: tc.name, args });
+        } else if (chunk.type === "done") {
+          // 累积 token 用量
+          totalPromptTokens += chunk.usage?.prompt_tokens || 0;
+          totalCompletionTokens += chunk.usage?.completion_tokens || 0;
+        }
+      }
 
-          // 执行工具（立即执行，立即通知前端）
-          const result = await toolRegistry.execute(tc.name, args);
-          executedTools.push({ tc, result });
+      // Execute pending tool calls — parallel for parallelizable tools
+      if (pendingToolCalls.length > 0) {
+        const allTools = toolRegistry.getAll();
+        const toolMetaMap = new Map(allTools.map((t) => [t.definition.function.name, t]));
 
-          // 通知前端：工具调用
+        // Split into parallelizable and sequential
+        const parallel: typeof pendingToolCalls = [];
+        const sequential: typeof pendingToolCalls = [];
+        for (const ptc of pendingToolCalls) {
+          const meta = toolMetaMap.get(ptc.name);
+          if (meta?.parallelizable) {
+            parallel.push(ptc);
+          } else {
+            sequential.push(ptc);
+          }
+        }
+
+        // Execute parallelizable tools concurrently
+        if (parallel.length > 0) {
+          const parallelResults = await Promise.all(
+            parallel.map(async (ptc) => ({
+              tc: { id: ptc.id, name: ptc.name, arguments: JSON.stringify(ptc.args) },
+              result: await toolRegistry.execute(ptc.name, ptc.args),
+            })),
+          );
+          executedTools.push(...parallelResults);
+        }
+
+        // Execute sequential tools one by one
+        for (const ptc of sequential) {
+          const result = await toolRegistry.execute(ptc.name, ptc.args);
+          executedTools.push({
+            tc: { id: ptc.id, name: ptc.name, arguments: JSON.stringify(ptc.args) },
+            result,
+          });
+        }
+
+        // Yield tool_call and tool_result events to frontend
+        for (const { tc, result } of executedTools) {
           yield {
             type: "tool_call",
             tool_call: { id: tc.id, name: tc.name, arguments: tc.arguments },
             message_id: assistantMsgId,
           };
-
-          // 通知前端：工具结果
           yield {
             type: "tool_result",
             tool_result: {
@@ -237,10 +281,6 @@ export class ChatService {
             },
             message_id: assistantMsgId,
           };
-        } else if (chunk.type === "done") {
-          // 累积 token 用量
-          totalPromptTokens += chunk.usage?.prompt_tokens || 0;
-          totalCompletionTokens += chunk.usage?.completion_tokens || 0;
         }
       }
 

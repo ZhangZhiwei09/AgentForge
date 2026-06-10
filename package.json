@@ -26,8 +26,8 @@
     "start": "powershell -ExecutionPolicy Bypass -File start.ps1"
   },
   "devDependencies": {
-    "turbo": "^2.4.0",
     "prettier": "^3.4.2",
+    "turbo": "^2.4.0",
     "typescript": "^5.7.0"
   }
 }
