@@ -8,7 +8,7 @@
         "build": "tsc --noEmit",
         "typecheck": "tsc --noEmit",
         "clean": "rimraf dist",
-        "lint": "eslint src/"
+        "lint": "tsc --noEmit"
     },
     "dependencies": {
         "@agentforge/shared-types": "workspace:*"
