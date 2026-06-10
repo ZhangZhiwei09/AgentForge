@@ -167,8 +167,7 @@ export function MemoryPanel() {
                                         Quick Start:
                                     </p>
                                     <code className="block text-[10px] text-muted-foreground leading-relaxed">
-                                        cd apps/api<br />
-                                        python scripts/seed_demo.py
+                                        pnpm db:seed
                                     </code>
                                 </div>
                                 <p className="text-[10px] text-muted-foreground">
