@@ -1,72 +1,66 @@
-// Simple in-memory rate limiter middleware
-// Uses a sliding window with per-IP tracking
+// 限流中间件 —— 基于可插拔存储（内存 / Redis）的滑动窗口限流
+// 通过 getRateLimitStore() 自动选择存储后端：REDIS_URL 存在 → Redis，否则 → 内存
 import type { MiddlewareHandler } from "hono";
 import type { AppVariables } from "../app.js";
+import { getRateLimitStore, type RateLimitStore } from "../lib/rate-limit-store.js";
 
-interface RateLimitEntry {
-  count: number;
-  resetAt: number;
-}
+// 惰性初始化，首次请求时加载
+let storePromise: Promise<RateLimitStore> | null = null;
 
-const stores = new Map<string, Map<string, RateLimitEntry>>();
-
-function getStore(key: string, windowMs: number): Map<string, RateLimitEntry> {
-  const now = Date.now();
-  let store = stores.get(key);
-  if (!store) {
-    store = new Map();
-    stores.set(key, store);
+function getStore(): Promise<RateLimitStore> {
+  if (!storePromise) {
+    storePromise = getRateLimitStore();
   }
-  // Cleanup expired entries periodically
-  for (const [k, v] of store) {
-    if (now > v.resetAt) store.delete(k);
-  }
-  return store;
+  return storePromise;
 }
 
 export interface RateLimitConfig {
-  windowMs: number;   // Time window in milliseconds
-  max: number;         // Max requests per window
-  keyPrefix: string;   // Prefix for store isolation
+  windowMs: number;  // 时间窗口（毫秒）
+  max: number;        // 窗口内最大请求数
+  keyPrefix: string;  // 存储隔离前缀
 }
 
-export function createRateLimiter(config: RateLimitConfig): MiddlewareHandler<{ Variables: AppVariables }> {
+export function createRateLimiter(
+  config: RateLimitConfig,
+): MiddlewareHandler<{ Variables: AppVariables }> {
   return async (c, next) => {
-    const ip = c.req.header("X-Forwarded-For")?.split(",")[0]?.trim()
-      || c.req.header("X-Real-IP")
-      || "unknown";
-    const store = getStore(config.keyPrefix, config.windowMs);
+    const ip =
+      c.req.header("X-Forwarded-For")?.split(",")[0]?.trim() ||
+      c.req.header("X-Real-IP") ||
+      "unknown";
 
-    const now = Date.now();
-    const entry = store.get(ip);
+    const store = await getStore();
+    const key = `${config.keyPrefix}:${ip}`;
+    const result = await store.increment(key, config.windowMs, config.max);
 
-    if (entry && now < entry.resetAt && entry.count >= config.max) {
-      const retryAfter = Math.ceil((entry.resetAt - now) / 1000);
-      c.header("Retry-After", String(retryAfter));
-      return c.json({
-        detail: `Too many requests. Try again in ${retryAfter} seconds.`,
-      }, 429);
+    if (!result.allowed) {
+      const retryAfter = Math.ceil((result.resetAt - Date.now()) / 1000);
+      c.header("Retry-After", String(Math.max(retryAfter, 1)));
+      return c.json(
+        {
+          detail: `Too many requests. Try again in ${Math.max(retryAfter, 1)} seconds.`,
+        },
+        429,
+      );
     }
 
-    if (!entry || now >= entry.resetAt) {
-      store.set(ip, { count: 1, resetAt: now + config.windowMs });
-    } else {
-      entry.count++;
-    }
+    // 注入剩余配额到响应头
+    c.header("X-RateLimit-Remaining", String(result.remaining));
+    c.header("X-RateLimit-Reset", String(Math.ceil(result.resetAt / 1000)));
 
     await next();
   };
 }
 
-// Pre-configured rate limiters
+// 预配置的限流器
 export const globalRateLimiter = createRateLimiter({
-  windowMs: 60_000,  // 1 minute
-  max: 60,           // 60 requests per minute
+  windowMs: 60_000, // 1 分钟
+  max: 60,          // 每分钟 60 次
   keyPrefix: "global",
 });
 
 export const chatRateLimiter = createRateLimiter({
-  windowMs: 60_000,  // 1 minute
-  max: 20,           // 20 chat requests per minute
+  windowMs: 60_000, // 1 分钟
+  max: 20,          // 每分钟 20 次
   keyPrefix: "chat",
 });

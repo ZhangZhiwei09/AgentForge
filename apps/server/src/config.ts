@@ -27,4 +27,6 @@ export const settings = {
   // Embedding 模型名称
   embeddingModel: process.env.EMBEDDING_MODEL || "text-embedding-v2",
   port: parseInt(process.env.PORT || "8000", 10),
+  // Redis 连接 URL（可选，用于限流存储等场景）
+  redisUrl: process.env.REDIS_URL || "",
 };
