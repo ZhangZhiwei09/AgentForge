@@ -137,10 +137,12 @@ export class MemoryEngine {
   }
 
   // 搜索记忆：先查 PG 获取候选集 → Milvus 向量搜索 → 合并打分排序
+  // sessionId 可选：传入后只返回 metadata.sessionId 匹配的记忆（客服匿名会话场景）
   async search(
     query: string,
     userId: string,
     topK: number = 5,
+    sessionId?: string,
   ): Promise<MemorySearchResult[]> {
     // 兜底：从 PG 按重要度和时间排序取候选
     const memories = await prisma.memory.findMany({
@@ -215,7 +217,7 @@ export class MemoryEngine {
           }
 
           scoredMemories.sort((a, b) => b.score - a.score);
-          return scoredMemories.slice(0, topK);
+          return this.filterBySession(scoredMemories.slice(0, topK), sessionId);
         }
       }
     } catch (e) {
@@ -223,7 +225,7 @@ export class MemoryEngine {
     }
 
     // 纯 PG 回退：用重要度作为分数
-    return memories.map((m) => ({
+    const fallbackResults = memories.map((m) => ({
       id: m.id,
       userId: m.userId,
       type: m.type,
@@ -235,14 +237,29 @@ export class MemoryEngine {
       updatedAt: m.updatedAt,
       score: m.importance,
     }));
+    return this.filterBySession(fallbackResults, sessionId);
+  }
+
+  // 按 sessionId 过滤记忆（用于客服匿名会话场景）
+  private filterBySession<T extends { metadata: Record<string, unknown> | null }>(
+    results: T[],
+    sessionId?: string,
+  ): T[] {
+    if (!sessionId) return results;
+    return results.filter((r) => {
+      const meta = r.metadata as Record<string, unknown> | null;
+      return meta?.sessionId === sessionId;
+    });
   }
 
   // 从对话中提取记忆：取最近 6 条消息 → LLM 分析 → 逐条存储
+  // sessionId 可选：传入后存入 metadata.sessionId（客服匿名会话场景）
   async extractAndStore(
     messages: Array<{ role: string; content: string }>,
     userId: string,
     conversationId: string,
     providerName: string = "",
+    sessionId?: string,
   ): Promise<MemoryOut[]> {
     if (!messages || messages.length < 2) return []; // 至少一轮对话
 
@@ -309,6 +326,7 @@ export class MemoryEngine {
           content: item.content,
           importance: parseFloat(item.importance) || 0.5,
           conversationId,
+          metadata: sessionId ? { sessionId } : undefined,
         };
         const result = await this.store(memory, userId);
         results.push(result);

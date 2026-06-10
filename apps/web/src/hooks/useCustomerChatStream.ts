@@ -251,12 +251,11 @@ export function useCustomerChatStream() {
                         } else if (chunk.type === "error") {
                             console.error("Stream error:", chunk.content);
                         } else if (chunk.type === "done") {
-                            // Capture suggestions from done event
+                            // 服务端已完成校验，streamContent 已是干净的回答文本
                             if (chunk.suggestions && meta) {
                                 meta = { ...meta, suggestions: chunk.suggestions };
                                 setCurrentMeta(meta);
                             }
-                            // 将 __stream__ 占位消息替换为真实 messageId
                             if (chunk.message_id) {
                                 setMessages((prev) => {
                                     const last = prev[prev.length - 1];
