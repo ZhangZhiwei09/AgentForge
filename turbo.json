@@ -28,6 +28,7 @@
         "^build"
       ]
     },
+    "test": {},
     "clean": {
       "cache": false
     }
