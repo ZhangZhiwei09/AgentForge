@@ -1,5 +1,5 @@
 // KnowledgeService tests — BM25 computation, hybrid search scoring, KnowledgeService lifecycle
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import { BM25SparseEncoder } from "../bm25.js";
 
 // Mock prisma at module level

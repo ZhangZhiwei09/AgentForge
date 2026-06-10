@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ---- Mock all external dependencies ----
 // Use vi.hoisted to make mock refs available inside vi.mock factories
 const { mockChatSync, mockGetProvider } = vi.hoisted(() => ({
-  mockChatSync: vi.fn(async () => ({
+  mockChatSync: vi.fn<(...args: Array<unknown>) => Promise<{ content: string; usage: { prompt_tokens: number; completion_tokens: number } }>>(async () => ({
     content: JSON.stringify([
       { type: "semantic", content: "User works at Acme Corp", importance: 0.8 },
       { type: "preference", content: "User prefers Python", importance: 0.7 },

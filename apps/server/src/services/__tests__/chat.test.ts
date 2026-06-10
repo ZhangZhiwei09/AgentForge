@@ -10,9 +10,9 @@ const {
   mockToolExecute,
 } = vi.hoisted(() => ({
   mockProviderStreamChat: vi.fn(),
-  mockMemorySearch: vi.fn(async () => []),
+  mockMemorySearch: vi.fn<() => Promise<Array<Record<string, unknown>>>>(async () => []),
   mockMemoryExtract: vi.fn(async () => []),
-  mockKnowledgeSearch: vi.fn(async () => []),
+  mockKnowledgeSearch: vi.fn<() => Promise<Array<Record<string, unknown>>>>(async () => []),
   mockToolExecute: vi.fn(async () => "tool result"),
 }));
 
