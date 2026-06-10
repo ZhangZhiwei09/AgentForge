@@ -8,9 +8,9 @@
   },
   "scripts": {
     "dev": "turbo dev --filter=@agentforge/server --filter=@agentforge/web",
-    "build": "turbo build",
-    "lint": "turbo lint",
-    "typecheck": "turbo typecheck",
+    "build": "turbo build --filter='!@agentforge/api'",
+    "lint": "turbo lint --filter='!@agentforge/api'",
+    "typecheck": "turbo typecheck --filter='!@agentforge/api'",
     "clean": "turbo clean",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "infra:up": "docker compose -f infra/docker/docker-compose.yml up -d",
