@@ -2,6 +2,19 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Commit Conventions
+
+All commits must follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+- `feat:` — new feature
+- `fix:` — bug fix
+- `chore:` — maintenance, deps, config
+- `refactor:` — code restructuring without behavior change
+- `docs:` — documentation only
+- `test:` — adding or updating tests
+- `ci:` — CI/CD changes
+- `style:` — formatting, whitespace (not logic)
+
 ## Common Commands
 
 ```bash
