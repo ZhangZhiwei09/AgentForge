@@ -13,6 +13,9 @@ const PUBLIC_PATHS = [
   "/api/customer-chat",  // Anonymous customer chat
 ];
 
+// Prefix-based public paths (any path starting with these is public)
+const PUBLIC_PREFIXES = [];
+
 export const authMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
   // Skip auth for public routes
   if (PUBLIC_PATHS.some((p) => c.req.path === p)) {

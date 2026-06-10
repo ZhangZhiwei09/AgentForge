@@ -40,6 +40,12 @@ jobs:
         env:
           DATABASE_URL: "postgresql://test:test@localhost:5434/agentforge_test"
 
+      - name: Lint
+        run: pnpm lint
+
+      - name: Format Check
+        run: pnpm format --check
+
       - name: Typecheck
         run: pnpm typecheck
 
@@ -49,3 +55,6 @@ jobs:
           DATABASE_URL: "postgresql://test:test@localhost:5434/agentforge_test"
           JWT_SECRET: "ci-test-secret"
           LOG_LEVEL: "warn"
+
+      - name: Build
+        run: pnpm build

@@ -15,9 +15,9 @@ V3 RAG System         ✅
 ↓
 V4 Tool Calling       ✅
 ↓
-P0 Platform Foundation  ← 认证 / 测试 / 日志 / CI
+P0 Platform Foundation  ✅ 认证 / 测试 / 日志 / CI
 ↓
-P1 Agent Kernel         ← 推理 / 规划 / 工作内存
+P1 Agent Kernel         🔄 推理 / 规划 / 工作内存 (P1-3 ✅ P1-4 ✅ P1-6 ✅, P1-1/P1-2/P1-5 pending)
 ↓
 V5 Voice Agent
 ↓

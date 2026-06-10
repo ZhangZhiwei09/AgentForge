@@ -114,7 +114,7 @@ Browser (React) ←SSE/HTTP→ Hono (8000) → LLMProvider (abstract) → OpenAI
 
 2. **Prisma as shared package** (`packages/database/`): Single source of truth for the data model. All packages import `prisma` from `@agentforge/database`. Migrations are managed independently via `pnpm db:migrate`.
 
-3. **Single-tenant MVP (temporary):** A default user (`00000000-0000-0000-0000-000000000001`) is auto-seeded on startup. All conversations belong to this user. **This will be replaced by P0-1 (Auth & Multi-Tenancy)** — JWT-based authentication with per-user data isolation.
+3. **Auth & Multi-Tenancy (P0-1 ✅):** JWT-based authentication with refresh token rotation and API key support. Default users seeded for dev: `default@agentforge.local` and `customer@agentforge.local`. All routes validate per-user data isolation via auth middleware.
 
 4. **Conversation titles** are auto-generated from the first line of the first user message (max 80 chars).
 
@@ -130,7 +130,13 @@ Browser (React) ←SSE/HTTP→ Hono (8000) → LLMProvider (abstract) → OpenAI
 
 10. **DB schema is baseline-introspected** from the existing Python Alembic tables. The Prisma schema uses `@@map`/`@map` for snake_case column names. IDs are `@db.VarChar(36)` (not UUID type), so UUIDs are generated in application code.
 
-11. **Tool Calling** (`apps/server/src/tools/`): Server-side multi-round tool calling loop in `ChatService.streamChat()` (max 5 rounds). Tools are registered via `ToolRegistry` singleton and sent to LLM only when explicitly requested via `tools` param. The SSE protocol extends with `tool_call` and `tool_result` event types. Built-in tools include `get_current_time`, `calculator`, and `web_search` (stub). The `LLMProvider` interface was extended with `ChatMessage` type (supporting `tool_calls` and `tool_call_id` fields) and an optional `tools` parameter.
+11. **Tool Calling** (`apps/server/src/tools/`): Server-side multi-round tool calling loop in `ChatService.streamChat()` (max 5 rounds). Tools are registered via `ToolRegistry` singleton and sent to LLM only when explicitly requested via `tools` param. The SSE protocol extends with `tool_call` and `tool_result` event types. Built-in tools include `get_current_time`, `calculator`, `web_search` (Tavily API), `http_request`, `file_read`, `file_write`, `file_search`. Each tool has riskLevel, timeout, and optional approval requirement. Circuit breaker trips after 5 consecutive failures (60s cooldown). The `LLMProvider` interface was extended with `ChatMessage` type (supporting `tool_calls` and `tool_call_id` fields) and an optional `tools` parameter.
+
+12. **Agent Kernel (P1-3 ✅ + P1-4 ✅):** `AgentService` (`apps/server/src/services/agent.ts`) implements ReAct (Reasoning + Acting) loop with structured JSON decision output. Agent sessions are persisted in `agent_sessions` table with full scratchpad of reasoning steps. Agent panel in frontend shows reasoning chain (observation → analysis → plan → decision → result). SSE protocol extended with `agent_think`, `agent_act`, `agent_observe`, `agent_respond`, `agent_ask_user`, `agent_done` event types. Supports max iterations (default 10), ask_user pauses, and graceful error handling.
+
+13. **Testing (P0-3 ✅):** 36 tests across 3 test files — AuthService (20 tests, signUp/signIn/refresh/API keys), ToolRegistry (11 tests), BM25 (5 tests). Run via `pnpm test` in server package.
+
+14. **Content Safety (P0-5 ✅):** Prompt injection detection middleware with 20+ pattern rules, message length limits (16k chars), and Zod validation on all input routes.
 
 ### Python Backend (Retained)
 
@@ -150,17 +156,17 @@ This ensures CLAUDE.md always reflects the current state of the project, not jus
 The `plan.md` defines the full V1→V10 + P0-P2 roadmap. Completed phases are marked with ✅. When a new phase is completed, update both `plan.md` and this section.
 
 **Platform Foundation:**
-- **P0-1 Auth & Multi-Tenancy:** JWT authentication, API keys, per-user data isolation
-- **P0-2 Structured Logging:** pino-based structured logging with correlation IDs
-- **P0-3 Testing:** vitest unit + integration tests with CI enforcement
-- **P0-4 CI/CD:** GitHub Actions pipeline (typecheck → lint → test → build)
-- **P0-5 Security:** Rate limiting, Zod validation, content safety
-- **P1-1 Background Jobs:** BullMQ job queue for async memory extraction
-- **P1-2 Observability:** Prometheus metrics + OpenTelemetry tracing
-- **P1-3 Agent Reasoning:** ReAct loop with structured decision output
-- **P1-4 Working Memory:** Agent scratchpad for multi-step task context
-- **P1-5 Human-in-the-Loop:** Approval gates for high-risk tool operations
-- **P1-6 Tool Ecosystem:** Code sandbox, 10+ production tools with timeouts/circuit-breakers
+- **P0-1 Auth & Multi-Tenancy:** ✅ JWT authentication, API keys, per-user data isolation
+- **P0-2 Structured Logging:** ✅ pino-based structured logging with correlation IDs
+- **P0-3 Testing:** ✅ vitest unit + integration tests (36 tests, CI enforced)
+- **P0-4 CI/CD:** ✅ GitHub Actions pipeline (lint → format → typecheck → test → build)
+- **P0-5 Security:** ✅ Rate limiting, Zod validation, content safety (prompt injection detection)
+- **P1-1 Background Jobs:** ⬜ BullMQ job queue for async memory extraction
+- **P1-2 Observability:** ⬜ Prometheus metrics + OpenTelemetry tracing
+- **P1-3 Agent Reasoning:** ✅ ReAct loop with structured decision output
+- **P1-4 Working Memory:** ✅ Agent scratchpad for multi-step task context
+- **P1-5 Human-in-the-Loop:** ⬜ Approval gates for high-risk tool operations (risk levels defined, not wired)
+- **P1-6 Tool Ecosystem:** 🔄 7 production tools with timeouts/circuit-breakers (code sandbox pending)
 
 **Agent Capabilities:**
 - **V1 ChatGPT Clone:** Multi-turn chat, streaming, model switching, provider abstraction ✅
