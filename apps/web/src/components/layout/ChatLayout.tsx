@@ -4,7 +4,6 @@ import { DebugPanel } from "../debug/DebugPanel";
 import { MemoryPanel } from "../memory/MemoryPanel";
 import { KnowledgePanel } from "../knowledge/KnowledgePanel";
 import { AgentPanel } from "../agent/AgentPanel";
-import { CustomerChat } from "../customer-chat/CustomerChat";
 import { useChatStore } from "@/stores/chat";
 import { Braces, Brain, BookOpen, Bot } from "lucide-react";
 
@@ -15,7 +14,7 @@ export function ChatLayout() {
     const currentConversationId = useChatStore((s) => s.currentConversationId);
 
     return (
-        <div className="flex h-screen w-screen overflow-hidden">
+        <div className="flex flex-1 overflow-hidden">
             <ConversationList />
             <ChatArea />
             {isDebugOpen && (
@@ -78,7 +77,6 @@ export function ChatLayout() {
                     )}
                 </div>
             )}
-            <CustomerChat />
         </div>
     );
 }

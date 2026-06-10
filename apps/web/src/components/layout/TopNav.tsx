@@ -1,0 +1,94 @@
+import { NavLink, useNavigate } from "react-router-dom";
+import { MessageCircle, Bot, LogOut, User, BarChart3 } from "lucide-react";
+
+export function TopNav() {
+    const token = localStorage.getItem("accessToken");
+    const navigate = useNavigate();
+
+    function handleLogout() {
+        localStorage.removeItem("accessToken");
+        localStorage.removeItem("refreshToken");
+        navigate("/login");
+    }
+
+    return (
+        <nav className="flex h-12 items-center justify-between border-b border-[hsl(var(--border))] bg-[hsl(var(--background))] px-4 shrink-0">
+            {/* 左侧：Logo + Tab */}
+            <div className="flex items-center gap-6">
+                <span className="text-sm font-bold tracking-tight text-[hsl(var(--foreground))]">
+                    AgentForge
+                </span>
+                <div className="flex items-center gap-1">
+                    <NavLink
+                        to="/"
+                        end
+                        className={({ isActive }) =>
+                            `flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                                isActive
+                                    ? "bg-[hsl(var(--cs-primary))] text-white"
+                                    : "text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]"
+                            }`
+                        }
+                    >
+                        <MessageCircle className="h-4 w-4" />
+                        智能客服
+                    </NavLink>
+                    <NavLink
+                        to="/assistant"
+                        className={({ isActive }) =>
+                            `flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                                isActive
+                                    ? "bg-[hsl(var(--cs-primary))] text-white"
+                                    : "text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]"
+                            }`
+                        }
+                    >
+                        <Bot className="h-4 w-4" />
+                        AI 助手
+                    </NavLink>
+                    <NavLink
+                        to="/admin/cs"
+                        className={({ isActive }) =>
+                            `flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                                isActive
+                                    ? "bg-[hsl(var(--cs-primary))] text-white"
+                                    : "text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]"
+                            }`
+                        }
+                    >
+                        <BarChart3 className="h-4 w-4" />
+                        数据管理
+                    </NavLink>
+                </div>
+            </div>
+
+            {/* 右侧：用户状态 */}
+            <div className="flex items-center gap-3">
+                {token ? (
+                    <>
+                        <div className="flex items-center gap-1.5 text-xs text-[hsl(var(--muted-foreground))]">
+                            <User className="h-3.5 w-3.5" />
+                            <span>已登录</span>
+                        </div>
+                        <button
+                            onClick={handleLogout}
+                            className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[hsl(var(--muted-foreground))] transition-colors hover:text-red-500 hover:bg-red-50"
+                            title="退出登录"
+                        >
+                            <LogOut className="h-3.5 w-3.5" />
+                            退出
+                        </button>
+                    </>
+                ) : (
+                    <button
+                        onClick={() => navigate("/login")}
+                        className="flex items-center gap-1 rounded-md px-3 py-1.5 text-xs font-medium text-[hsl(var(--muted-foreground))] transition-colors hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]"
+                    >
+                        <User className="h-3.5 w-3.5" />
+                        登录
+                    </button>
+                )}
+            </div>
+        </nav>
+    );
+}

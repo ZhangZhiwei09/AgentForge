@@ -12,6 +12,17 @@
   --accent-foreground: 240 5.9% 10%;
   --primary: 240 5.9% 10%;
   --primary-foreground: 0 0% 98%;
+
+  /* 客服主题色 — 专业蓝 */
+  --cs-primary: 221 83% 53%;
+  --cs-primary-dark: 221 83% 45%;
+  --cs-primary-light: 221 83% 95%;
+  --cs-bg: 220 20% 97%;
+  --cs-surface: 0 0% 100%;
+  --cs-accent: 32 95% 55%;
+  --cs-success: 142 72% 45%;
+  --cs-danger: 0 84% 55%;
+  --cs-border: 220 13% 91%;
 }
 
 * {

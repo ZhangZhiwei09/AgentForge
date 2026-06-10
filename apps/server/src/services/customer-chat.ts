@@ -4,16 +4,23 @@
 //   - 需要自动搜索知识库获取参考答案
 //   - 基于 sessionId 管理匿名对话生命周期
 //   - 始终启用 get_current_time 工具，用于确认订单时间等场景
+//   - V2 增强：意图识别、工作时间感知、追问建议生成
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { getProvider, resolveModel } from "../providers/registry.js";
 import type { ChatMessage } from "../providers/types.js";
 import { logger } from "@agentforge/logger";
 import { toolRegistry } from "../tools/registry.js";
+import { intentDetector } from "./intent-detector.js";
 
 const CUSTOMER_USER_ID = "00000000-0000-0000-0000-000000000002"; // 客服系统专用用户
 const MAX_HISTORY_MESSAGES = 20; // 只取最近 20 条历史，控制 token 消耗
 const MAX_TOOL_ROUNDS = 3; // 客服场景工具调用最大轮数（比主聊天少）
+
+// 工作时间配置（可通过环境变量覆盖）
+const SERVICE_HOURS_START = parseInt(process.env.CS_SERVICE_HOURS_START || "9", 10);  // 默认 9:00
+const SERVICE_HOURS_END = parseInt(process.env.CS_SERVICE_HOURS_END || "18", 10);    // 默认 18:00
+const SERVICE_DAYS = (process.env.CS_SERVICE_DAYS || "1,2,3,4,5").split(",").map(Number); // 默认周一~周五
 
 // 客服系统提示词模板：{knowledge_context} 会被替换为知识库检索结果
 const CUSTOMER_SERVICE_PROMPT = `你是一个专业的客户服务代表，负责回答客户的问题和提供帮助。
@@ -30,6 +37,7 @@ const CUSTOMER_SERVICE_PROMPT = `你是一个专业的客户服务代表，负�
 2. 如果参考资料中找不到答案，请诚实告知客户你暂时无法回答，并建议其联系人工客服。
 3. 保持礼貌、专业和耐心的态度。
 4. 回答要简洁明了，直接回应客户问题，不要添加无关信息。
+5. 在回答的最后，根据对话内容生成 2-3 个客户可能关心的后续问题建议，以 JSON 数组格式放在回答末尾，格式为：{"suggestions": ["问题1", "问题2", "问题3"]}。请确保 JSON 是有效的且只占一行。
 
 {knowledge_context}`;
 
@@ -107,6 +115,20 @@ export class CustomerChatService {
     }
   }
 
+  // 检查当前是否在工作时间
+  private isWithinServiceHours(): boolean {
+    const now = new Date();
+    const dayOfWeek = now.getDay(); // 0=周日, 1=周一, ..., 6=周六
+    const hour = now.getHours();
+
+    // 周日=0，需要转换为 1=周一, 7=周日
+    const adjustedDay = dayOfWeek === 0 ? 7 : dayOfWeek;
+
+    if (!SERVICE_DAYS.includes(adjustedDay)) return false;
+    if (hour < SERVICE_HOURS_START || hour >= SERVICE_HOURS_END) return false;
+    return true;
+  }
+
   // 客服聊天主流程（含工具调用循环）
   async *streamChat(
     sessionId: string | null,
@@ -118,7 +140,14 @@ export class CustomerChatService {
     const [providerName, resolvedModel] = resolveModel(this.modelId);
     const provider = getProvider(providerName);
 
-    // 2. 加载最近历史消息（倒序取 → 再反转回正序）
+    // 2. 意图识别
+    const { intent } = intentDetector.detect(userMessage);
+    logger.debug({ intent, message: userMessage.slice(0, 50) }, "Intent detected");
+
+    // 3. 工作时间检查（非工作时间给出提示但不阻止）
+    const withinHours = this.isWithinServiceHours();
+
+    // 4. 加载最近历史消息（倒序取 → 再反转回正序）
     const history = await prisma.message.findMany({
       where: { conversationId: conversation.id },
       orderBy: { createdAt: "desc" },
@@ -126,7 +155,7 @@ export class CustomerChatService {
     });
     const reversed = history.reverse();
 
-    // 3. 保存用户消息
+    // 5. 保存用户消息
     await prisma.message.create({
       data: {
         id: randomUUID(),
@@ -137,24 +166,39 @@ export class CustomerChatService {
       },
     });
 
-    // 4. 搜索知识库
+    // 更新会话的意图标签（字段可能尚未迁移，静默失败）
+    if (intent !== "其他咨询") {
+      try {
+        await prisma.conversation.update({
+          where: { id: conversation.id },
+          data: { intent },
+        });
+      } catch {
+        // intent 列可能还未迁移，跳过
+      }
+    }
+
+    // 6. 搜索知识库
     const { context: knowledgeContext, results: knowledgeResults } =
       await this.fetchKnowledge(userMessage);
 
-    // 5. 构建消息列表：历史 + 当前用户消息
+    // 7. 构建消息列表：历史 + 当前用户消息
     const conversationMessages: ChatMessage[] = reversed.map((msg) => ({
       role: msg.role,
       content: msg.content,
     }));
     conversationMessages.push({ role: "user", content: userMessage });
 
-    // 6. 客服始终启用 get_current_time 工具
+    // 8. 客服始终启用 get_current_time 工具
     const toolDefs = toolRegistry.getDefinitions(["get_current_time"]);
 
-    // 7. 构建 system prompt（含知识库上下文）
+    // 9. 构建 system prompt（含知识库上下文 + 工作时间提示）
+    const hoursNote = withinHours
+      ? ""
+      : "\n\n注意：当前为非工作时间（工作日 9:00-18:00），请在回复开头礼貌提醒客户当前为非工作时间，消息将在工作时间处理。但还是要尽力回答客户的问题。";
     const systemPrompt = CUSTOMER_SERVICE_PROMPT.replace(
       "{knowledge_context}",
-      knowledgeContext,
+      knowledgeContext + hoursNote,
     );
 
     const assistantMsgId = randomUUID();
@@ -163,7 +207,7 @@ export class CustomerChatService {
     let totalPromptTokens = 0;
     let totalCompletionTokens = 0;
 
-    // 8. 发送 meta 事件
+    // 10. 发送 meta 事件（含意图信息）
     yield {
       type: "meta",
       message_id: assistantMsgId,
@@ -172,9 +216,11 @@ export class CustomerChatService {
       provider: providerName,
       knowledge: knowledgeResults,
       tools_enabled: ["get_current_time"],
+      intent,
+      within_service_hours: withinHours,
     };
 
-    // 9. 工具调用循环（同 ChatService 模式）
+    // 11. 工具调用循环（同 ChatService 模式）
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       let roundContent = "";
       const executedTools: Array<{
@@ -247,7 +293,23 @@ export class CustomerChatService {
       }
     }
 
-    // 10. 发送 done 事件
+    // 12. 从回答中提取追问建议
+    let suggestions: string[] = [];
+    try {
+      const jsonMatch = fullContent.match(/\{"suggestions"\s*:\s*\[(.*?)\]\}/s);
+      if (jsonMatch) {
+        const parsed = JSON.parse(jsonMatch[0]);
+        if (Array.isArray(parsed.suggestions)) {
+          suggestions = parsed.suggestions.slice(0, 3);
+        }
+        // 从 fullContent 中移除 JSON 块，避免展示给用户
+        fullContent = fullContent.replace(jsonMatch[0], "").trim();
+      }
+    } catch {
+      // 解析失败则忽略，suggestions 保持空数组
+    }
+
+    // 13. 发送 done 事件
     yield {
       type: "done",
       message_id: assistantMsgId,
@@ -257,9 +319,10 @@ export class CustomerChatService {
         total_tokens: totalPromptTokens + totalCompletionTokens,
       },
       tool_calls_count: totalToolCalls > 0 ? totalToolCalls : undefined,
+      suggestions: suggestions.length > 0 ? suggestions : undefined,
     };
 
-    // 11. 保存助手消息
+    // 14. 保存助手消息
     await prisma.message.create({
       data: {
         id: assistantMsgId,

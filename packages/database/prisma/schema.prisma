@@ -61,10 +61,15 @@ model Conversation {
   updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   type           String         @default("chat") @db.VarChar(32)
   sessionId      String?        @map("session_id") @db.VarChar(64)
+  intent         String?        @db.VarChar(100)
+  rating         String?        @db.VarChar(20)
+  status         String?        @default("active") @db.VarChar(20)
+  customerMeta   Json?          @map("customer_meta")
   user           User           @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   memories       Memory[]
   messages       Message[]
   agentSessions  AgentSession[]
+  ratings        SatisfactionRating[]
 
   @@index([sessionId], map: "ix_conversations_session_id")
   @@index([userId], map: "ix_conversations_user_id")
@@ -106,6 +111,7 @@ model KnowledgeBase {
   id          String              @id @db.VarChar(36)
   name        String              @db.VarChar(255)
   description String?
+  category    String?             @db.VarChar(100)
   enabled     Boolean             @default(true)
   createdAt   DateTime?           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime?           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -163,6 +169,19 @@ model AgentSession {
 
   @@index([conversationId], map: "ix_agent_sessions_conversation_id")
   @@map("agent_sessions")
+}
+
+model SatisfactionRating {
+  id             String       @id @db.VarChar(36)
+  conversationId String       @map("conversation_id") @db.VarChar(36)
+  messageId      String?      @map("message_id") @db.VarChar(36)
+  rating         String       @db.VarChar(20)
+  comment        String?
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId], map: "ix_satisfaction_ratings_conversation_id")
+  @@map("satisfaction_ratings")
 }
 
 model alembic_version {
