@@ -11,7 +11,7 @@ config({ path: resolve(__dirname, "../.env") });
 
 export const settings = {
   // PostgreSQL 连接字符串，端口 5434 避免和本地其他 PG 实例冲突
-  databaseUrl: process.env.DATABASE_URL || "postgresql://postgres:postgres@127.0.0.1:5434/agentforge",
+  databaseUrl: process.env.DATABASE_URL || "postgresql://postgres:postgres@localhost:5434/agentforge",
   // OpenAI API 配置（用于 LLM 对话 + Embedding）
   openaiApiKey: process.env.OPENAI_API_KEY || "",
   openaiBaseUrl: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
