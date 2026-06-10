@@ -2,7 +2,7 @@
 // 支持 token 流式输出 + function calling（tool calls）
 import OpenAI from "openai";
 import type { ToolDefinition } from "@agentforge/shared-types";
-import type { LLMProvider, StreamChunk, ChatMessage } from "./types.js";
+import type { LLMProvider, StreamChunk, ChatMessage, ChatSyncResult } from "./types.js";
 
 export class DeepSeekProvider implements LLMProvider {
   private client: OpenAI;
@@ -20,6 +20,43 @@ export class DeepSeekProvider implements LLMProvider {
       { id: "deepseek-chat", name: "DeepSeek Chat", provider: "deepseek", max_tokens: 65536 },
       { id: "deepseek-reasoner", name: "DeepSeek Reasoner", provider: "deepseek", max_tokens: 65536 },
     ];
+  }
+
+  // 非流式聊天：DeepSeek不支持原生JSON模式，通过prompt尾部追加指令实现
+  async chatSync(
+    messages: ChatMessage[],
+    model: string,
+    systemPrompt: string = "",
+    temperature: number = 0.7,
+    maxTokens: number = 4096,
+    jsonMode: boolean = false,
+  ): Promise<ChatSyncResult> {
+    const fullMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+    // jsonMode: 在system prompt尾部追加JSON格式指令
+    const effectivePrompt = jsonMode
+      ? systemPrompt + "\n\nYou must respond with a valid JSON object. No markdown, no explanation, just the JSON."
+      : systemPrompt;
+    if (effectivePrompt) {
+      fullMessages.push({ role: "system", content: effectivePrompt });
+    }
+    for (const m of messages) {
+      fullMessages.push({ role: m.role as any, content: m.content });
+    }
+
+    const response = await this.client.chat.completions.create({
+      model,
+      messages: fullMessages,
+      temperature,
+      max_tokens: maxTokens,
+    });
+
+    return {
+      content: response.choices[0].message.content?.trim() || "",
+      usage: {
+        prompt_tokens: response.usage?.prompt_tokens || 0,
+        completion_tokens: response.usage?.completion_tokens || 0,
+      },
+    };
   }
 
   // 核心流式聊天方法 —— 与 OpenAIProvider 逻辑一致，支持 tool calling

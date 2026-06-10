@@ -7,6 +7,7 @@ import type { ChatMessage } from "../providers/types.js";
 import { MemoryEngine } from "./memory-engine.js";
 import { toolRegistry } from "../tools/registry.js";
 import { logger } from "@agentforge/logger";
+import { truncateHistory } from "../lib/context-window.js";
 
 // 拼在 system prompt 后面的记忆上下文前缀
 const MEMORY_PROMPT_PREFIX = "\n\n# User Context (from memory)\nThe following is what you know about the user from past conversations:\n";
@@ -141,11 +142,13 @@ export class ChatService {
       orderBy: { createdAt: "asc" },
     });
 
-    // 7. 构建初始对话消息列表（用于 LLM 上下文）
-    const conversationMessages: ChatMessage[] = history.map((msg) => ({
+    // 7. 构建初始对话消息列表（用于 LLM 上下文），并截断以适应token预算
+    const rawMessages: ChatMessage[] = history.map((msg) => ({
       role: msg.role,
       content: msg.content,
     }));
+    // 8000 token预算：为system prompt + context + response留出空间
+    const conversationMessages = truncateHistory(rawMessages, 8000);
 
     // 8. 获取启用的工具定义（仅当显式指定 tools 参数时才发送工具）
     const toolDefs = enabledTools && enabledTools.length > 0

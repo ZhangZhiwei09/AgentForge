@@ -15,9 +15,8 @@ import { logger } from "@agentforge/logger";
 import { toolRegistry } from "../tools/registry.js";
 import { intentDetector } from "./intent-detector.js";
 import { MemoryEngine } from "./memory-engine.js";
-import { settings } from "../config.js";
-import OpenAI from "openai";
 import { z } from "zod";
+import { extractJSONFromLLMResponse } from "../lib/json-utils.js";
 
 const CUSTOMER_USER_ID = "00000000-0000-0000-0000-000000000002";
 const MAX_HISTORY_MESSAGES = 20;
@@ -31,13 +30,13 @@ const SERVICE_DAYS = (process.env.CS_SERVICE_DAYS || "1,2,3,4,5").split(",").map
 // ═══════════════════════════════════════════════════════
 // 固定话术（确定性，LLM 不能改）
 // ═══════════════════════════════════════════════════════
-const SORRY_TEMPLATE = "抱歉，我目前没有找到相关信息，建议您联系人工客服获取帮助。";
-const FALLBACK_PREFIX = "以下是可能相关的知识库内容，如需更多帮助请联系人工客服：\n\n";
+export const SORRY_TEMPLATE = "抱歉，我目前没有找到相关信息，建议您联系人工客服获取帮助。";
+export const FALLBACK_PREFIX = "以下是可能相关的知识库内容，如需更多帮助请联系人工客服：\n\n";
 
 // ═══════════════════════════════════════════════════════
 // Zod Schema：LLM 输出的结构化 JSON
 // ═══════════════════════════════════════════════════════
-const ChatResponseSchema = z.object({
+export const ChatResponseSchema = z.object({
   answer: z.string().min(1).max(2000),
   suggestions: z.array(z.string().max(50)).max(3).default([]),
 });
@@ -47,7 +46,7 @@ type ChatResponse = z.infer<typeof ChatResponseSchema>;
 // ═══════════════════════════════════════════════════════
 // 禁止行为扫描列表（Layer 3）
 // ═══════════════════════════════════════════════════════
-const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+export const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /根据(我司|公司|平台)规定/g, label: "虚假权威引用" },
   { pattern: /经查询[^，。]*[，。]/g, label: "虚假查询陈述" },
   { pattern: /可能是(因为|由于)/g, label: "无依据推测原因" },
@@ -204,15 +203,7 @@ export class CustomerChatService {
     // Layer 1: JSON 可解析
     let parsed: unknown;
     try {
-      // 清理可能的 Markdown 包裹
-      let clean = rawText.trim();
-      if (clean.startsWith("```")) {
-        const parts = clean.split("```");
-        clean = parts[1] || parts[0] || "";
-        if (clean.startsWith("json")) clean = clean.slice(4);
-        clean = clean.trim();
-      }
-      parsed = JSON.parse(clean);
+      parsed = JSON.parse(extractJSONFromLLMResponse(rawText));
     } catch {
       return { valid: false, errors: ["Layer1: JSON 不可解析"], layer: 1 };
     }
@@ -282,45 +273,15 @@ export class CustomerChatService {
     temperature: number,
   ): Promise<string> {
     const provider = getProvider(providerName);
-
-    // 使用 OpenAI SDK 直接调用（支持 JSON 模式）
-    let client: OpenAI;
-    let actualModel = model;
-
-    if (providerName === "openai" && settings.openaiApiKey) {
-      client = new OpenAI({ apiKey: settings.openaiApiKey, baseURL: settings.openaiBaseUrl });
-    } else if (settings.deepseekApiKey) {
-      client = new OpenAI({ apiKey: settings.deepseekApiKey, baseURL: settings.deepseekBaseUrl });
-      if (providerName === "deepseek") actualModel = model;
-    } else {
-      throw new Error("No LLM provider available");
-    }
-
-    const fullMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
-    if (systemPrompt) {
-      fullMessages.push({ role: "system", content: systemPrompt });
-    }
-    for (const m of messages) {
-      fullMessages.push({ role: m.role as any, content: m.content });
-    }
-
-    const params: Record<string, unknown> = {
-      model: actualModel,
-      messages: fullMessages,
+    const result = await provider.chatSync(
+      messages,
+      model,
+      systemPrompt,
       temperature,
-      max_tokens: 1024,
-    };
-
-    // OpenAI 支持 JSON 模式
-    if (providerName === "openai") {
-      params.response_format = { type: "json_object" };
-    }
-
-    const response = await client.chat.completions.create(
-      params as any,
+      1024,
+      true, // jsonMode — provider handles OpenAI's response_format or DeepSeek's prompt suffix
     );
-
-    return response.choices[0].message.content?.trim() || "";
+    return result.content;
   }
 
   // ── 带重试的 LLM 调用 ──
@@ -412,14 +373,7 @@ export class CustomerChatService {
   // ── 解析 LLM 响应为 ChatResponse ──
   private parseResponse(rawText: string): ChatResponse | null {
     try {
-      let clean = rawText.trim();
-      if (clean.startsWith("```")) {
-        const parts = clean.split("```");
-        clean = parts[1] || parts[0] || "";
-        if (clean.startsWith("json")) clean = clean.slice(4);
-        clean = clean.trim();
-      }
-      const parsed = JSON.parse(clean);
+      const parsed = JSON.parse(extractJSONFromLLMResponse(rawText));
       const result = ChatResponseSchema.safeParse(parsed);
       return result.success ? result.data : null;
     } catch {

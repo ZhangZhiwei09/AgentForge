@@ -4,10 +4,9 @@ import { prisma } from "../db.js";
 import { getMilvusClient, MILVUS_KNOWLEDGE_COLLECTION, EMBEDDING_DIM, ensureKnowledgeCollection } from "./milvus.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
 import { BM25SparseEncoder } from "./bm25.js";
-import { settings } from "../config.js";
 import { getProvider } from "../providers/registry.js";
-import OpenAI from "openai";
 import { logger } from "@agentforge/logger";
+import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
 
 const DENSE_WEIGHT = 0.6;  // 语义向量权重
 const SPARSE_WEIGHT = 0.4; // 关键词匹配权重
@@ -255,43 +254,20 @@ export class KnowledgeService {
 
     const userMessage = `查询：${query}\n\n候选文档：\n${candidateTexts.join("\n\n")}`;
 
-    // 直接使用 OpenAI SDK（兼容 DeepSeek），不走 Provider 流式接口
-    let client: OpenAI;
-    let model: string;
+    // 通过provider抽象层调用，不直接依赖具体厂商SDK
+    const model = providerName === "openai" ? "gpt-4o-mini" : "deepseek-chat";
 
-    if (providerName === "openai" && settings.openaiApiKey) {
-      client = new OpenAI({
-        apiKey: settings.openaiApiKey,
-        baseURL: settings.openaiBaseUrl,
-      });
-      model = "gpt-4o-mini"; // Rerank 用便宜模型即可
-    } else {
-      client = new OpenAI({
-        apiKey: settings.deepseekApiKey,
-        baseURL: settings.deepseekBaseUrl,
-      });
-      model = "deepseek-chat";
-    }
-
-    const response = await client.chat.completions.create({
+    const result = await provider.chatSync(
+      [{ role: "user", content: userMessage }],
       model,
-      messages: [
-        { role: "system", content: RERANK_SYSTEM_PROMPT },
-        { role: "user", content: userMessage },
-      ],
-      temperature: 0.1,  // 低温度保证打分稳定
-      max_tokens: 500,
-    });
+      RERANK_SYSTEM_PROMPT,
+      0.1, // 低温度保证打分稳定
+      500,
+      true, // jsonMode — rerank结果必须是JSON
+    );
 
     // 解析 LLM 返回的 JSON（可能被 markdown 代码块包裹）
-    let raw = response.choices[0].message.content?.trim() || "";
-    if (raw.startsWith("```")) {
-      raw = raw.split("```")[1];
-      if (raw.startsWith("json")) raw = raw.slice(4);
-      raw = raw.trim();
-    }
-
-    const scores = JSON.parse(raw);
+    const scores = parseJSONFromLLMResponse(result.content);
     if (!Array.isArray(scores)) return null;
 
     // 按 LLM 打分重新构造结果

@@ -8,9 +8,9 @@ import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { getMilvusClient, MILVUS_MEMORY_COLLECTION, EMBEDDING_DIM, ensureMemoryCollection } from "./milvus.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
-import { settings } from "../config.js";
-import OpenAI from "openai";
 import { logger } from "@agentforge/logger";
+import { getProvider, listProviders } from "../providers/registry.js";
+import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
 
 // 记忆创建参数
 export interface MemoryCreate {
@@ -263,31 +263,25 @@ export class MemoryEngine {
   ): Promise<MemoryOut[]> {
     if (!messages || messages.length < 2) return []; // 至少一轮对话
 
-    // 选择 LLM：OpenAI > DeepSeek > 放弃
-    let client: OpenAI;
+    // 选择 LLM：通过provider抽象层，避免直接依赖具体厂商SDK
+    let actualProvider = providerName;
     let model: string;
 
-    if (providerName === "openai" && settings.openaiApiKey) {
-      client = new OpenAI({
-        apiKey: settings.openaiApiKey,
-        baseURL: settings.openaiBaseUrl,
-      });
+    if (providerName === "openai") {
       model = "gpt-4o-mini"; // 记忆提取是后台任务，用便宜模型
-    } else if (settings.deepseekApiKey) {
-      client = new OpenAI({
-        apiKey: settings.deepseekApiKey,
-        baseURL: settings.deepseekBaseUrl,
-      });
-      model = "deepseek-chat";
-    } else if (settings.openaiApiKey) {
-      client = new OpenAI({
-        apiKey: settings.openaiApiKey,
-        baseURL: settings.openaiBaseUrl,
-      });
-      model = "gpt-4o-mini";
     } else {
-      return []; // 没有可用的 LLM，静默跳过
+      model = "deepseek-chat";
     }
+
+    // 如果指定的provider不可用，尝试任何可用的provider
+    if (!actualProvider) {
+      const providers = listProviders();
+      if (providers.length === 0) return []; // 没有可用的LLM
+      actualProvider = providers[0].type;
+      model = providers[0].models[0]?.id || model;
+    }
+
+    const provider = getProvider(actualProvider);
 
     // 只取最近 6 条消息（控制 token 消耗）
     const convText = messages
@@ -296,25 +290,20 @@ export class MemoryEngine {
       .join("\n");
 
     try {
-      const response = await client.chat.completions.create({
-        model,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT_EXTRACT },
+      const result = await provider.chatSync(
+        [
           { role: "user", content: `Extract memories from:\n\n${convText}` },
         ],
-        temperature: 0.1,
-        max_tokens: 500,
-      });
+        model,
+        SYSTEM_PROMPT_EXTRACT,
+        0.1,
+        500,
+        true, // jsonMode for structured memory extraction
+      );
+      const content = result.content;
 
       // 解析 LLM 返回的 JSON（可能被 markdown 代码块包裹）
-      let content = response.choices[0].message.content?.trim() || "";
-      if (content.startsWith("```")) {
-        content = content.split("```")[1];
-        if (content.startsWith("json")) content = content.slice(4);
-        content = content.trim();
-      }
-
-      const items = JSON.parse(content);
+      const items = parseJSONFromLLMResponse(content);
       if (!Array.isArray(items)) return [];
 
       // 逐条存储提取的记忆

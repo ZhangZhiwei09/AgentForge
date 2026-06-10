@@ -93,8 +93,11 @@ export const contentSafetyMiddleware: MiddlewareHandler<{ Variables: AppVariable
   }
 
   // Try to parse and check the body
+  // Clone the request before reading — Hono request bodies are single-consumption
+  // ReadableStreams. Without cloning, downstream route handlers get an empty body.
   try {
-    const body = await c.req.json().catch(() => null);
+    const cloned = c.req.raw.clone();
+    const body = await cloned.json().catch(() => null);
     if (!body) return next();
 
     const message = body.message || body.task || "";

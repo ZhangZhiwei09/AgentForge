@@ -110,6 +110,12 @@ export interface AgentErrorEvent {
   step: number;
 }
 
+export interface AgentClearStreamEvent {
+  type: "agent_clear_stream";
+  message_id: string;
+  step: number;
+}
+
 export interface AgentDoneEvent {
   type: "agent_done";
   total_steps: number;
@@ -135,5 +141,6 @@ export type AgentStreamEvent =
   | AgentTokenEvent
   | AgentRespondEvent
   | AgentAskUserEvent
+  | AgentClearStreamEvent
   | AgentErrorEvent
   | AgentDoneEvent;

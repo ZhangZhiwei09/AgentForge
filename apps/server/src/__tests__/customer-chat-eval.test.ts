@@ -4,20 +4,13 @@
 // 集成测试部分（需 LLM，标记 .skip，手动运行）
 
 import { describe, it, expect } from "vitest";
-
-// ═══════════════════════════════════════════════════
-// 复制被测试的常量和逻辑（避免 import 私有方法）
-// ═══════════════════════════════════════════════════
-const SORRY_TEMPLATE = "抱歉，我目前没有找到相关信息，建议您联系人工客服获取帮助。";
-const FALLBACK_PREFIX = "以下是可能相关的知识库内容，如需更多帮助请联系人工客服：\n\n";
-
-const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
-  { pattern: /根据(我司|公司|平台)规定/g, label: "虚假权威引用" },
-  { pattern: /经查询[^，。]*[，。]/g, label: "虚假查询陈述" },
-  { pattern: /可能是(因为|由于)/g, label: "无依据推测原因" },
-  { pattern: /您的(订单|物流|快递)[^，。]{0,10}(可能|应该)/g, label: "推测客户信息" },
-  { pattern: /建议您(自行|自己)[^，。]*[，。]/g, label: "推卸责任式建议" },
-];
+import {
+  SORRY_TEMPLATE,
+  FALLBACK_PREFIX,
+  FORBIDDEN_PATTERNS,
+  ChatResponseSchema,
+} from "../services/customer-chat.js";
+import { extractJSONFromLLMResponse } from "../lib/json-utils.js";
 
 // ═══════════════════════════════════════════════════
 // 评测工具函数
@@ -60,37 +53,19 @@ function checkMustNotContain(text: string, keywords: string[]): string[] {
 function validateResponseJSON(rawText: string): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
 
-  // Layer 1: JSON parse
-  let clean = rawText.trim();
-  if (clean.startsWith("```")) {
-    const parts = clean.split("```");
-    clean = parts[1] || parts[0] || "";
-    if (clean.startsWith("json")) clean = clean.slice(4);
-    clean = clean.trim();
-  }
+  // Layer 1: JSON parse using shared utility
   let parsed: unknown;
   try {
-    parsed = JSON.parse(clean);
+    parsed = JSON.parse(extractJSONFromLLMResponse(rawText));
   } catch {
     return { valid: false, errors: ["JSON不可解析"] };
   }
 
-  // Layer 2: Schema check
-  if (!parsed || typeof parsed !== "object") {
-    return { valid: false, errors: ["不是有效的JSON对象"] };
-  }
-  const obj = parsed as Record<string, unknown>;
-  if (typeof obj.answer !== "string" || obj.answer.length < 1) {
-    errors.push("answer字段缺失或为空");
-  }
-  if (obj.answer && typeof obj.answer === "string" && obj.answer.length > 2000) {
-    errors.push("answer超过2000字符限制");
-  }
-  if (obj.suggestions !== undefined) {
-    if (!Array.isArray(obj.suggestions)) {
-      errors.push("suggestions不是数组");
-    } else if (obj.suggestions.length > 3) {
-      errors.push("suggestions超过3个");
+  // Layer 2: Schema check using the real Zod schema
+  const result = ChatResponseSchema.safeParse(parsed);
+  if (!result.success) {
+    for (const issue of result.error.issues) {
+      errors.push(`${issue.path.join(".")}: ${issue.message}`);
     }
   }
 

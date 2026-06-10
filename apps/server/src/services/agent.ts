@@ -7,6 +7,8 @@ import type { ChatMessage } from "../providers/types.js";
 import { toolRegistry } from "../tools/registry.js";
 import { logger } from "@agentforge/logger";
 import { react_system_prompt } from "@agentforge/shared-prompts";
+import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
+import { truncateHistory } from "../lib/context-window.js";
 import type {
   AgentDecision,
   AgentStep,
@@ -87,10 +89,12 @@ export class AgentService {
       orderBy: { createdAt: "asc" },
     });
 
-    const conversationMessages: ChatMessage[] = history.map((msg) => ({
+    // 6000 token预算：需为system prompt + scratchpad + tool results留空间
+    const rawMessages: ChatMessage[] = history.map((msg) => ({
       role: msg.role,
       content: msg.content,
     }));
+    const conversationMessages = truncateHistory(rawMessages, 6000);
 
     // 7. Add the user's task as the first user message (save to DB)
     const taskMsgId = randomUUID();
@@ -139,7 +143,9 @@ export class AgentService {
         ...conversationMessages,
       ];
 
-      // 9b. Call LLM with structured output instruction
+      // 9b. Call LLM — stream tokens in real time for responsive UX
+      // Pre-generate message ID so tokens can be yielded immediately
+      const streamMsgId = randomUUID();
       let llmResponse = "";
       try {
         for await (const chunk of provider.streamChat(
@@ -152,6 +158,13 @@ export class AgentService {
         )) {
           if (chunk.type === "token" && chunk.content) {
             llmResponse += chunk.content;
+            // Real streaming: yield every token immediately to the frontend
+            // (for tool_call decisions, these will be cleared via agent_clear_stream)
+            yield {
+              type: "agent_token",
+              content: chunk.content,
+              message_id: streamMsgId,
+            };
           }
         }
       } catch (err) {
@@ -171,11 +184,11 @@ export class AgentService {
           { sessionId, response: llmResponse.slice(0, 200) },
           "Failed to parse agent decision — treating as respond",
         );
-        // If we can't parse, just output the raw response as text
-        const msgId = randomUUID();
+        // Parsing failed: the raw text was already streamed to the frontend.
+        // Save it as the assistant message.
         await prisma.message.create({
           data: {
-            id: msgId,
+            id: streamMsgId,
             conversationId,
             role: "assistant",
             content: llmResponse,
@@ -187,7 +200,7 @@ export class AgentService {
           type: "agent_respond",
           content: llmResponse,
           summary: "Agent completed (unstructured)",
-          message_id: msgId,
+          message_id: streamMsgId,
         };
 
         await this.saveSession(sessionRecord, scratchpad, "completed", "Task completed");
@@ -213,32 +226,20 @@ export class AgentService {
       const decision = step.decision;
 
       if (decision.action === "respond") {
-        // Agent decides task is complete
+        // Agent decides task is complete — content was already streamed
+        // as agent_token events during the LLM call (real streaming)
         yield {
           type: "agent_act",
           step: totalSteps,
           decision,
         };
 
-        // Stream the response as tokens
-        const msgId = randomUUID();
-        const words = decision.content.split(/(\s+)/);
-        for (const word of words) {
-          if (word) {
-            yield {
-              type: "agent_token",
-              content: word,
-              message_id: msgId,
-            };
-          }
-        }
-
         finalContent = decision.content;
 
-        // Save assistant message
+        // Save assistant message (ID matches the streamed tokens)
         await prisma.message.create({
           data: {
-            id: msgId,
+            id: streamMsgId,
             conversationId,
             role: "assistant",
             content: decision.content,
@@ -254,7 +255,7 @@ export class AgentService {
           type: "agent_respond",
           content: decision.content,
           summary: decision.summary,
-          message_id: msgId,
+          message_id: streamMsgId,
         };
 
         // Save session as completed
@@ -274,7 +275,14 @@ export class AgentService {
         return;
 
       } else if (decision.action === "tool_call") {
-        // Agent wants to use a tool
+        // Agent wants to use a tool — clear the streamed JSON tokens
+        // since they contain structural data, not user-facing text
+        yield {
+          type: "agent_clear_stream",
+          message_id: streamMsgId,
+          step: totalSteps,
+        };
+
         yield {
           type: "agent_act",
           step: totalSteps,
@@ -401,30 +409,20 @@ export class AgentService {
     stepNumber: number,
   ): AgentStep | null {
     try {
-      // Try to extract JSON from the response (might be wrapped in markdown code blocks)
-      let jsonStr = response.trim();
-
-      // Strip markdown code fences if present
-      const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-      if (jsonMatch) {
-        jsonStr = jsonMatch[1].trim();
-      }
-
-      // Find the outermost JSON object
-      const objMatch = jsonStr.match(/\{[\s\S]*\}/);
-      if (!objMatch) {
+      const parsed = parseJSONFromLLMResponse(response);
+      if (!parsed || typeof parsed !== "object") {
         logger.warn({ response: response.slice(0, 200) }, "No JSON object found in agent response");
         return null;
       }
 
-      const parsed = JSON.parse(objMatch[0]);
+      const obj = parsed as Record<string, unknown>;
 
-      if (!parsed.observation || !parsed.analysis || !parsed.plan || !parsed.decision) {
-        logger.warn({ parsed }, "Missing required fields in agent decision");
+      if (!obj.observation || !obj.analysis || !obj.plan || !obj.decision) {
+        logger.warn({ obj }, "Missing required fields in agent decision");
         return null;
       }
 
-      const decision = parsed.decision as AgentDecision;
+      const decision = obj.decision as AgentDecision;
 
       // Validate decision type
       if (
@@ -436,9 +434,9 @@ export class AgentService {
 
       return {
         step: stepNumber,
-        observation: String(parsed.observation),
-        analysis: String(parsed.analysis),
-        plan: String(parsed.plan),
+        observation: String(obj.observation),
+        analysis: String(obj.analysis),
+        plan: String(obj.plan),
         decision,
         timestamp: new Date().toISOString(),
       };
@@ -470,30 +468,34 @@ export class AgentService {
     finalSummary: string | null,
   ): Promise<void> {
     try {
+      const completedAt =
+        status === "completed" || status === "failed" ? new Date() : null;
+
+      await prisma.agentSession.upsert({
+        where: { id: record.id },
+        create: {
+          id: record.id,
+          conversationId: record.conversationId,
+          task: record.task,
+          status,
+          scratchpad: scratchpad as unknown as object,
+          finalSummary,
+          startedAt: record.startedAt,
+          completedAt,
+        },
+        update: {
+          status,
+          scratchpad: scratchpad as unknown as object,
+          finalSummary,
+          completedAt,
+        },
+      });
+
+      // Sync the in-memory record for external tracking
       record.status = status;
       record.scratchpad = scratchpad;
       record.finalSummary = finalSummary;
-      record.completedAt =
-        status === "completed" || status === "failed" ? new Date() : null;
-
-      // Upsert: create if not exists, update if exists
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO agent_sessions (id, conversation_id, task, status, scratchpad, final_summary, started_at, completed_at)
-         VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7, $8)
-         ON CONFLICT (id) DO UPDATE SET
-           status = EXCLUDED.status,
-           scratchpad = EXCLUDED.scratchpad,
-           final_summary = EXCLUDED.final_summary,
-           completed_at = EXCLUDED.completed_at`,
-        record.id,
-        record.conversationId,
-        record.task,
-        record.status,
-        JSON.stringify(scratchpad),
-        finalSummary,
-        record.startedAt,
-        record.completedAt,
-      );
+      record.completedAt = completedAt;
     } catch (err) {
       // Table might not exist yet (before migration) — gracefully degrade
       logger.warn(
@@ -519,23 +521,20 @@ export class AgentService {
     }>
   > {
     try {
-      const rows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
-        `SELECT id, conversation_id, task, status, scratchpad, final_summary, started_at, completed_at
-         FROM agent_sessions
-         WHERE conversation_id = $1
-         ORDER BY started_at DESC`,
-        conversationId,
-      );
+      const sessions = await prisma.agentSession.findMany({
+        where: { conversationId },
+        orderBy: { startedAt: "desc" },
+      });
 
-      return rows.map((row) => ({
-        id: row.id as string,
-        conversationId: row.conversation_id as string,
-        task: row.task as string,
-        status: row.status as string,
-        scratchpad: (row.scratchpad as AgentStep[]) || [],
-        finalSummary: (row.final_summary as string) || null,
-        startedAt: row.started_at as Date,
-        completedAt: (row.completed_at as Date) || null,
+      return sessions.map((s) => ({
+        id: s.id,
+        conversationId: s.conversationId,
+        task: s.task,
+        status: s.status,
+        scratchpad: (s.scratchpad as unknown as AgentStep[]) || [],
+        finalSummary: s.finalSummary,
+        startedAt: s.startedAt,
+        completedAt: s.completedAt,
       }));
     } catch {
       // Table might not exist yet
@@ -557,24 +556,18 @@ export class AgentService {
     completedAt: Date | null;
   } | null> {
     try {
-      const rows = await prisma.$queryRawUnsafe<Array<Record<string, unknown>>>(
-        `SELECT id, conversation_id, task, status, scratchpad, final_summary, started_at, completed_at
-         FROM agent_sessions
-         WHERE id = $1`,
-        id,
-      );
+      const s = await prisma.agentSession.findUnique({ where: { id } });
+      if (!s) return null;
 
-      if (rows.length === 0) return null;
-      const row = rows[0];
       return {
-        id: row.id as string,
-        conversationId: row.conversation_id as string,
-        task: row.task as string,
-        status: row.status as string,
-        scratchpad: (row.scratchpad as AgentStep[]) || [],
-        finalSummary: (row.final_summary as string) || null,
-        startedAt: row.started_at as Date,
-        completedAt: (row.completed_at as Date) || null,
+        id: s.id,
+        conversationId: s.conversationId,
+        task: s.task,
+        status: s.status,
+        scratchpad: (s.scratchpad as unknown as AgentStep[]) || [],
+        finalSummary: s.finalSummary,
+        startedAt: s.startedAt,
+        completedAt: s.completedAt,
       };
     } catch {
       return null;
