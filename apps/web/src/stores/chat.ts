@@ -3,6 +3,17 @@ import type { Conversation, DebugInfo, Message, MemoryInfo, ProviderType, ToolCa
 
 type PanelMode = "debug" | "memory" | "knowledge" | "agent";
 
+export interface PendingApproval {
+  approvalId: string;
+  sessionId: string;
+  step: number;
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+  riskLevel: string;
+  reason: string;
+  timeoutMs: number;
+}
+
 interface ChatState {
     conversations: Conversation[];
     currentConversationId: string | null;
@@ -16,6 +27,8 @@ interface ChatState {
     panelMode: PanelMode;
     toolCalls: ToolCallRecord[];
     enabledTools: string[];
+    // P1-5 Approval state
+    pendingApproval: PendingApproval | null;
 
     setConversations: (convs: Conversation[]) => void;
     setCurrentConversation: (id: string | null) => void;
@@ -34,6 +47,9 @@ interface ChatState {
     setToolResult: (id: string, result: string) => void;
     toggleTool: (name: string) => void;
     setEnabledTools: (tools: string[]) => void;
+    // P1-5 Approval actions
+    setPendingApproval: (approval: PendingApproval | null) => void;
+    clearPendingApproval: () => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -49,6 +65,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
     panelMode: "debug",
     toolCalls: [],
     enabledTools: [],
+    pendingApproval: null,
 
     setConversations: (convs) => set({ conversations: convs }),
     setCurrentConversation: (id) => set({ currentConversationId: id }),
@@ -93,4 +110,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 tc.id === id ? { ...tc, result, status: "done" as const } : tc,
             ),
         })),
+    setPendingApproval: (approval) => set({ pendingApproval: approval }),
+    clearPendingApproval: () => set({ pendingApproval: null }),
 }));

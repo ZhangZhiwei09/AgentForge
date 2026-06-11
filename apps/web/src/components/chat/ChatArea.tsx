@@ -6,6 +6,7 @@ import { MessageBubble } from "./MessageBubble";
 import { ModelSelector } from "./ModelSelector";
 import { MessageSquare, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ApprovalCard } from "../agent/ApprovalCard";
 
 const AVAILABLE_TOOLS = [
     { name: "calculator", label: "Calculator" },
@@ -106,6 +107,9 @@ export function ChatArea() {
                     <ChatInput />
                 </div>
             </div>
+
+            {/* P1-5 Approval Card — renders as overlay when pending approval exists */}
+            <ApprovalCard />
         </main>
     );
 }

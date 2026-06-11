@@ -70,6 +70,7 @@ model Conversation {
   messages       Message[]
   agentSessions  AgentSession[]
   ratings        SatisfactionRating[]
+  approvals      AgentApproval[]
 
   @@index([sessionId], map: "ix_conversations_session_id")
   @@index([userId], map: "ix_conversations_user_id")
@@ -186,9 +187,34 @@ model AgentSession {
   startedAt      DateTime     @default(now()) @map("started_at") @db.Timestamptz(6)
   completedAt    DateTime?    @map("completed_at") @db.Timestamptz(6)
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  approvals      AgentApproval[]
 
   @@index([conversationId], map: "ix_agent_sessions_conversation_id")
   @@map("agent_sessions")
+}
+
+model AgentApproval {
+  id              String        @id @db.VarChar(36)
+  sessionId       String        @map("session_id") @db.VarChar(36)
+  conversationId  String        @map("conversation_id") @db.VarChar(36)
+  stepNumber      Int           @map("step_number")
+  toolName        String        @map("tool_name") @db.VarChar(128)
+  toolArgs        Json          @map("tool_args")
+  riskLevel       String        @map("risk_level") @db.VarChar(20)
+  reason          String        @db.VarChar(500)
+  status          String        @default("pending") @db.VarChar(20)
+  approvedBy      String?       @map("approved_by") @db.VarChar(36)
+  modifiedArgs    Json?         @map("modified_args")
+  rejectionReason String?       @map("rejection_reason") @db.VarChar(500)
+  timeoutMs       Int           @default(300000) @map("timeout_ms")
+  requestedAt     DateTime      @default(now()) @map("requested_at") @db.Timestamptz(6)
+  decidedAt       DateTime?     @map("decided_at") @db.Timestamptz(6)
+  session         AgentSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  conversation    Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId], map: "ix_agent_approvals_session_id")
+  @@index([status], map: "ix_agent_approvals_status")
+  @@map("agent_approvals")
 }
 
 model SatisfactionRating {

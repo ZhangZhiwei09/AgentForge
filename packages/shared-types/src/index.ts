@@ -39,5 +39,9 @@ export type {
   AgentErrorEvent,
   AgentDoneEvent,
   AgentMetaEvent,
+  AgentApprovalRequiredEvent,
+  AgentApprovalResultEvent,
+  AgentApprovalDTO,
+  AgentApprovalRequest,
   AgentStreamEvent,
 } from "./agent";

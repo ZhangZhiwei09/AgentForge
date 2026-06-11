@@ -147,7 +147,7 @@ Browser (React) ←SSE/HTTP→ Hono (8000) → LLMProvider (abstract) → OpenAI
 
 12. **Agent Kernel (P1-3 ✅ + P1-4 ✅):** `AgentService` (`apps/server/src/services/agent.ts`) implements ReAct (Reasoning + Acting) loop with structured JSON decision output. Agent sessions are persisted in `agent_sessions` table with full scratchpad of reasoning steps. Agent panel in frontend shows reasoning chain (observation → analysis → plan → decision → result). SSE protocol extended with `agent_think`, `agent_act`, `agent_observe`, `agent_respond`, `agent_ask_user`, `agent_done` event types. Supports max iterations (default 10), ask_user pauses, and graceful error handling.
 
-13. **Testing (P0-3 ✅):** 36 tests across 3 test files — AuthService (20 tests, signUp/signIn/refresh/API keys), ToolRegistry (11 tests), BM25 (5 tests). Run via `pnpm test` in server package.
+13. **Testing (P0-3 ✅):** 42 tests across 6 test files — AuthService (20 tests), AgentService (12 tests), AgentService Approval/P1-5 (6 tests), ToolRegistry (11 tests), BM25 (5 tests). Run via `pnpm test` in server package. (Auth tests require test DB config.)
 
 14. **Content Safety (P0-5 ✅):** Prompt injection detection middleware with 20+ pattern rules, message length limits (16k chars), and Zod validation on all input routes.
 
@@ -175,7 +175,7 @@ The `plan.md` defines the full V1→V10 + P0-P2 roadmap. Completed phases are ma
 - **P1-2 Observability:** ⬜ Prometheus metrics + OpenTelemetry tracing
 - **P1-3 Agent Reasoning:** ✅ ReAct loop with structured decision output
 - **P1-4 Working Memory:** ✅ Agent scratchpad for multi-step task context
-- **P1-5 Human-in-the-Loop:** ⬜ Approval gates for high-risk tool operations (risk levels defined, not wired)
+- **P1-5 Human-in-the-Loop:** ✅ Approval gates for high-risk tool operations with 5-min timeout auto-reject, audit log
 - **P1-6 Tool Ecosystem:** 🔄 7 production tools with timeouts/circuit-breakers (code sandbox pending)
 
 **Agent Capabilities:**

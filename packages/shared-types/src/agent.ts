@@ -132,6 +132,55 @@ export interface AgentMetaEvent {
   tools_enabled?: string[];
 }
 
+// ---- P1-5 Approval Event Types ----
+
+export interface AgentApprovalRequiredEvent {
+  type: "agent_approval_required";
+  approval_id: string;
+  session_id: string;
+  step: number;
+  tool_name: string;
+  tool_args: Record<string, unknown>;
+  risk_level: string;
+  reason: string;
+  timeout_ms: number;
+}
+
+export interface AgentApprovalResultEvent {
+  type: "agent_approval_result";
+  approval_id: string;
+  session_id: string;
+  step: number;
+  status: "approved" | "rejected" | "timed_out";
+  modified_args?: Record<string, unknown>;
+  rejection_reason?: string;
+  result?: string;
+}
+
+export interface AgentApprovalDTO {
+  id: string;
+  sessionId: string;
+  stepNumber: number;
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+  riskLevel: string;
+  reason: string;
+  status: "pending" | "approved" | "rejected" | "timed_out";
+  approvedBy?: string | null;
+  modifiedArgs?: Record<string, unknown> | null;
+  rejectionReason?: string | null;
+  requestedAt: string;
+  decidedAt?: string | null;
+}
+
+export interface AgentApprovalRequest {
+  session_id: string;
+  approval_id: string;
+  action: "approve" | "reject";
+  modified_args?: Record<string, unknown>;
+  rejection_reason?: string;
+}
+
 // Union type for all agent stream events
 export type AgentStreamEvent =
   | AgentMetaEvent
@@ -143,4 +192,6 @@ export type AgentStreamEvent =
   | AgentAskUserEvent
   | AgentClearStreamEvent
   | AgentErrorEvent
-  | AgentDoneEvent;
+  | AgentDoneEvent
+  | AgentApprovalRequiredEvent
+  | AgentApprovalResultEvent;
