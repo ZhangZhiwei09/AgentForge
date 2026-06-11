@@ -6,6 +6,7 @@ import { getDefaultEmbeddingProvider } from "./embeddings.js";
 import { tokenize } from "./tokenizer.js";
 import { getProvider } from "../providers/registry.js";
 import { logger } from "@agentforge/logger";
+import { milvusSearchDurationMs } from "../observability/metrics.js";
 import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
 
 const DENSE_WEIGHT = 0.6;  // 语义向量权重
@@ -169,6 +170,7 @@ export class KnowledgeService {
       const client = getMilvusClient();
 
       // 5. 在 Milvus 中执行向量相似度搜索（只搜索 dense_vector 字段）
+      const milvusSearchStart = Date.now();
       const results = await client.search({
         collection_name: MILVUS_KNOWLEDGE_COLLECTION,
         vector: denseVec,
@@ -178,6 +180,7 @@ export class KnowledgeService {
         output_fields: ["chunk_id", "kb_id", "content"], // 返回这些字段的值
         params: { nprobe: 16 }, // 搜索的聚类数，值越大越精确但越慢
       });
+      milvusSearchDurationMs.observe({ operation: "knowledge" }, Date.now() - milvusSearchStart);
 
       if (!results.results || results.results.length === 0) {
         return [];

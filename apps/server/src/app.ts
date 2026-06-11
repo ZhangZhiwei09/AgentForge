@@ -1,6 +1,7 @@
 // Hono 应用工厂 —— 组装中间件和路由，创建完整的 HTTP 应用实例
 // 使用工厂函数而非全局 app，方便测试（每个测试可创建独立实例）
 import { Hono } from "hono";
+import { metricsMiddleware } from "./middleware/metrics.js";
 import { corsMiddleware } from "./middleware/cors.js";
 import { errorHandler } from "./middleware/error.js";
 import { requestIdMiddleware } from "./middleware/request-id.js";
@@ -16,6 +17,7 @@ import { customerChatRoutes } from "./routes/customer-chat.js";
 import { knowledgeRoutes } from "./routes/knowledge.js";
 import { toolRoutes } from "./routes/tools.js";
 import { agentRoutes } from "./routes/agent.js";
+import { registerMetricsEndpoint } from "./observability/metrics.js";
 import type { AuthUser } from "@agentforge/shared-types";
 
 // Hono context variables — all middleware and routes share this type
@@ -27,6 +29,8 @@ export type AppVariables = {
 export async function createApp() {
   const app = new Hono<{ Variables: AppVariables }>();
 
+  // 全局中间件：指标采集（排第一，确保所有请求都被计数）
+  app.use("*", metricsMiddleware);
   // 全局中间件：请求 ID 追踪（优先于 CORS，确保所有日志都有 reqId）
   app.use("*", requestIdMiddleware);
   // 全局中间件：CORS 应用于所有路径
@@ -44,6 +48,10 @@ export async function createApp() {
 
   // 健康检查端点
   app.get("/api/health", (c) => c.json({ status: "ok" }));
+
+  // Prometheus 指标端点 — 注册在 auth 中间件应用的同一层级
+  // （metricsMiddleware 本身捕捉了所有请求，但 /api/metrics 自身需要显式路由）
+  registerMetricsEndpoint(app);
 
   // 注册所有业务路由（每个路由模块内部定义各自的路径前缀）
   app.route("/", authRoutes);            // /api/auth/* (public)

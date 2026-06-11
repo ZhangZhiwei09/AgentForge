@@ -77,6 +77,17 @@ services:
       timeout: 5s
       retries: 5
 
+  # ── Jaeger Tracing ──────────────────────────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4318:4318"     # OTLP HTTP receiver
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    volumes:
+      - jaeger_data:/tmp
+
   server:
     build:
       context: ../../
@@ -102,3 +113,4 @@ volumes:
   minio_data:
   milvus_data:
   redis_data:
+  jaeger_data:

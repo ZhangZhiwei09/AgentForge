@@ -151,6 +151,8 @@ Browser (React) ←SSE/HTTP→ Hono (8000) → LLMProvider (abstract) → OpenAI
 
 14. **Content Safety (P0-5 ✅):** Prompt injection detection middleware with 20+ pattern rules, message length limits (16k chars), and Zod validation on all input routes.
 
+15. **Observability (P1-2 ✅):** Prometheus metrics at `GET /api/metrics` (HTTP request count/duration, LLM call/token counts, tool execution, memory extraction, Milvus search latency). OpenTelemetry tracing with conditional OTLP export to Jaeger (enable via `OTEL_ENABLED=true`). Grafana dashboard template at `apps/server/dashboards/agentforge.json`.
+
 
 ### Keeping CLAUDE.md in Sync with plan.md
 
@@ -172,7 +174,7 @@ The `plan.md` defines the full V1→V10 + P0-P2 roadmap. Completed phases are ma
 - **P0-4 CI/CD:** ✅ GitHub Actions pipeline (lint → format → typecheck → test → build)
 - **P0-5 Security:** ✅ Rate limiting, Zod validation, content safety (prompt injection detection)
 - **P1-1 Background Jobs:** ✅ BullMQ job queue for async memory extraction + knowledge ingestion with Redis
-- **P1-2 Observability:** ⬜ Prometheus metrics + OpenTelemetry tracing
+- **P1-2 Observability:** ✅ Prometheus metrics + OpenTelemetry tracing
 - **P1-3 Agent Reasoning:** ✅ ReAct loop with structured decision output
 - **P1-4 Working Memory:** ✅ Agent scratchpad for multi-step task context
 - **P1-5 Human-in-the-Loop:** ✅ Approval gates for high-risk tool operations with 5-min timeout auto-reject, audit log

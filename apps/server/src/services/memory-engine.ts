@@ -9,6 +9,7 @@ import { prisma } from "../db.js";
 import { getMilvusClient, MILVUS_MEMORY_COLLECTION, EMBEDDING_DIM, ensureMemoryCollection } from "./milvus.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
 import { logger } from "@agentforge/logger";
+import { milvusSearchDurationMs, memoryExtractionsTotal } from "../observability/metrics.js";
 import { getProvider, listProviders } from "../providers/registry.js";
 import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
 
@@ -155,6 +156,7 @@ export class MemoryEngine {
         const client = getMilvusClient();
 
         // 搜索更宽候选集（topK×3），避免遗漏低importance但高语义相关的记忆
+        const milvusSearchStart = Date.now();
         const results = await client.search({
           collection_name: MILVUS_MEMORY_COLLECTION,
           vector: vector,
@@ -163,6 +165,7 @@ export class MemoryEngine {
           output_fields: ["memory_id"],
           params: { nprobe: 16 },
         });
+        milvusSearchDurationMs.observe({ operation: "memory" }, Date.now() - milvusSearchStart);
 
         if (results.results && results.results.length > 0) {
           // 提取Milvus结果中的memory_id和分数
@@ -318,6 +321,7 @@ export class MemoryEngine {
 
       if (results.length > 0) {
         logger.info({ count: results.length }, "Memories extracted from conversation");
+        memoryExtractionsTotal.inc(results.length);
       }
       return results;
     } catch (e) {

@@ -6,6 +6,7 @@ import type { RegisteredTool, ToolExecutor, CircuitBreakerState } from "./types.
 import { builtinTools } from "./builtins.js";
 import { fileTools } from "./file-tools.js";
 import { logger } from "@agentforge/logger";
+import { toolCallsTotal } from "../observability/metrics.js";
 
 // Circuit breaker config
 const CIRCUIT_BREAKER_THRESHOLD = 5; // consecutive failures
@@ -104,6 +105,7 @@ class ToolRegistry {
         },
         "Tool executed",
       );
+      toolCallsTotal.inc({ tool_name: name, status: "success" });
       return result;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -137,6 +139,11 @@ class ToolRegistry {
       }
 
       logger.error({ tool: name, error: msg }, "Tool execution failed");
+
+      // Record timeout vs error
+      const isTimeout = msg.includes("timed out");
+      toolCallsTotal.inc({ tool_name: name, status: isTimeout ? "timeout" : "error" });
+
       return `Error executing tool "${name}": ${msg}`;
     }
   }

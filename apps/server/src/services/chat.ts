@@ -8,6 +8,7 @@ import { MemoryEngine } from "./memory-engine.js";
 import { toolRegistry } from "../tools/registry.js";
 import { logger } from "@agentforge/logger";
 import { truncateHistory } from "../lib/context-window.js";
+import { chatMessagesTotal, chatTokensTotal } from "../observability/metrics.js";
 
 // 拼在 system prompt 后面的记忆上下文前缀
 const MEMORY_PROMPT_PREFIX = "\n\n# User Context (from memory)\nThe following is what you know about the user from past conversations:\n";
@@ -365,7 +366,12 @@ export class ChatService {
     const latencyMs = Date.now() - startTs;
     const firstTokenMs = firstTokenTs ? firstTokenTs - startTs : latencyMs;
 
-    // 16. 发送 done 事件：携带用量统计、工具调用统计和记忆处理结果
+    // 16. 记录指标
+    chatMessagesTotal.inc({ provider: providerName, model: resolvedModel });
+    chatTokensTotal.inc({ provider: providerName, type: "prompt" }, totalPromptTokens);
+    chatTokensTotal.inc({ provider: providerName, type: "completion" }, totalCompletionTokens);
+
+    // 17. 发送 done 事件：携带用量统计、工具调用统计和记忆处理结果
     yield {
       type: "done",
       message_id: assistantMsgId,

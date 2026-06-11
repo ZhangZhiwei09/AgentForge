@@ -17,7 +17,7 @@ V4 Tool Calling       ✅
 ↓
 P0 Platform Foundation  ✅ 认证 / 测试 / 日志 / CI
 ↓
-P1 Agent Kernel         🔄 推理 / 规划 / 工作内存 (P1-3 ✅ P1-4 ✅ P1-5 ✅ P1-6 ✅, P1-1 ✅, P1-2 pending)
+P1 Agent Kernel         ✅ 推理 / 规划 / 工作内存 (P1-3 ✅ P1-4 ✅ P1-5 ✅ P1-6 ✅, P1-1 ✅, P1-2 ✅)
 ↓
 V5 Voice Agent
 ↓
@@ -1293,11 +1293,11 @@ await memoryQueue.add("extract", {
 
 ### 验收标准
 
-- [ ] `GET /api/metrics` 端点完成，暴露 Prometheus 格式指标
-- [ ] 核心指标埋点完成（HTTP、Chat、Tool、Memory）
-- [ ] OpenTelemetry SDK 集成，自动插桩 HTTP + 手动插桩 Chat/Memory
-- [ ] Jaeger 容器添加到 infra（可选，或直接用 Grafana Cloud 免费层）
-- [ ] Grafana Dashboard JSON 模板创建
+- [x] `GET /api/metrics` 端点完成，暴露 Prometheus 格式指标
+- [x] 核心指标埋点完成（HTTP、Chat、Tool、Memory）
+- [x] OpenTelemetry SDK 集成，自动插桩 HTTP + 手动插桩 Chat/Memory
+- [x] Jaeger 容器添加到 infra（可选，或直接用 Grafana Cloud 免费层）
+- [x] Grafana Dashboard JSON 模板创建
 
 ---
 
