@@ -91,7 +91,7 @@ This way each component is independently controllable — restart the backend wi
 
 AgentForge is a **pnpm + Turborepo monorepo** building a ChatGPT clone as the foundation (V1) for a progressive AI agent platform. The roadmap spans platform engineering (P0-P2) and agent capability phases (V5-V10). Completed phases are marked with ✅ in both this file and `plan.md`.
 
-**Evolution path:** V1 ChatGPT Clone → V2 Memory → V3 RAG → V4 Tool Calling → P0 Platform Foundation → P1 Agent Kernel → V5 Voice → V6 Workflow → V7-V8 Browser Agent → V9 Multi-Agent → V10 MCP
+**Evolution path:** V1 ChatGPT Clone → V2 Memory → V3 RAG → V4 Tool Calling → P0 Platform Foundation → P1 Agent Kernel → V5 Voice → V6 Workflow → V9 Multi-Agent → V10 MCP
 
 ### Package Layout
 
@@ -185,8 +185,6 @@ The `plan.md` defines the full V1→V10 + P0-P2 roadmap. Completed phases are ma
 - **V4 Tool Calling:** Tool registry and execution engine ✅
 - **V5 Voice Agent:** WebSocket real-time audio, ASR/TTS, interruption handling
 - **V6 Workflow Engine:** DAG-based orchestration, checkpoint/resume, human approval nodes
-- **V7 Browser Extension:** Chrome extension companion with page context awareness
-- **V8 Browser Agent:** Playwright sandbox, DOM understanding, web automation
 - **V9 Multi-Agent:** Role-based agent teams, message bus, 3 collaboration patterns
 - **V10 MCP Ecosystem:** MCP Server + Client, dynamic tool discovery, hot-reload
 

@@ -115,8 +115,9 @@ model KnowledgeBase {
   enabled     Boolean             @default(true)
   createdAt   DateTime?           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime?           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  chunks      KnowledgeChunk[]
-  documents   KnowledgeDocument[]
+  chunks               KnowledgeChunk[]
+  documents            KnowledgeDocument[]
+  invertedIndexEntries KnowledgeInvertedIndex[]
 
   @@map("knowledge_bases")
 }
@@ -148,12 +149,31 @@ model KnowledgeChunk {
   milvusId        BigInt?           @map("milvus_id")
   enabled         Boolean           @default(true)
   created_at      DateTime?         @default(now()) @db.Timestamptz(6)
-  document        KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  knowledgeBase   KnowledgeBase     @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  document             KnowledgeDocument         @relation(fields: [documentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  knowledgeBase        KnowledgeBase             @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  invertedIndexEntries KnowledgeInvertedIndex[]
 
   @@index([documentId], map: "ix_knowledge_chunks_doc_id")
   @@index([knowledgeBaseId], map: "ix_knowledge_chunks_kb_id")
   @@map("knowledge_chunks")
+}
+
+model KnowledgeInvertedIndex {
+  id       String   @id @db.VarChar(36)
+  term     String   @db.VarChar(255)
+  chunkId  String   @map("chunk_id") @db.VarChar(36)
+  kbId     String   @map("kb_id") @db.VarChar(36)
+  termFreq Int      @default(1) @map("term_freq")
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  chunk        KnowledgeChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+  knowledgeBase KnowledgeBase @relation(fields: [kbId], references: [id], onDelete: Cascade)
+
+  @@index([term], map: "ix_inverted_index_term")
+  @@index([chunkId], map: "ix_inverted_index_chunk")
+  @@index([kbId, term], map: "ix_inverted_index_kb_term")
+
+  @@map("knowledge_inverted_index")
 }
 
 model AgentSession {

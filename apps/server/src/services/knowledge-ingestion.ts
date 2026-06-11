@@ -6,17 +6,8 @@ import { prisma } from "../db.js";
 import { getMilvusClient, MILVUS_KNOWLEDGE_COLLECTION, ensureKnowledgeCollection } from "./milvus.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
 import { RecursiveCharacterTextSplitter } from "./text-splitter.js";
-import { BM25SparseEncoder } from "./bm25.js";
+import { tokenize, getTokenCount } from "./tokenizer.js";
 import { logger } from "@agentforge/logger";
-
-let bm25Encoder: BM25SparseEncoder | null = null;
-
-function getBM25(): BM25SparseEncoder {
-  if (!bm25Encoder) {
-    bm25Encoder = new BM25SparseEncoder();
-  }
-  return bm25Encoder;
-}
 
 export class KnowledgeIngestionService {
   private splitter: RecursiveCharacterTextSplitter;
@@ -145,10 +136,30 @@ export class KnowledgeIngestionService {
           knowledgeBaseId: kbId,
           chunkIndex: i,
           content: chunkTexts[i],
-          tokenCount: chunkTexts[i].length,
+          tokenCount: getTokenCount(chunkTexts[i]),
           milvusId: milvusIds[i] ? BigInt(milvusIds[i]) : null,
         },
       });
+    }
+
+    // 4. 构建倒排索引: jieba 分词 → 统计 term freq → 批量写入
+    for (let i = 0; i < chunkTexts.length; i++) {
+      const tokens = tokenize(chunkTexts[i]);
+      const termFreqMap = new Map<string, number>();
+      for (const t of tokens) {
+        termFreqMap.set(t, (termFreqMap.get(t) ?? 0) + 1);
+      }
+      if (termFreqMap.size > 0) {
+        await prisma.knowledgeInvertedIndex.createMany({
+          data: Array.from(termFreqMap.entries()).map(([term, freq]) => ({
+            id: randomUUID(),
+            term,
+            chunkId: chunkIds[i],
+            kbId,
+            termFreq: freq,
+          })),
+        });
+      }
     }
   }
 
@@ -160,7 +171,7 @@ export class KnowledgeIngestionService {
     // 查出所有 chunk 的 milvus ID
     const chunks = await prisma.knowledgeChunk.findMany({
       where: { documentId: docId },
-      select: { milvusId: true },
+      select: { id: true, milvusId: true },
     });
     const milvusIds = chunks.filter((c) => c.milvusId !== null).map((c) => Number(c.milvusId));
 
@@ -179,7 +190,11 @@ export class KnowledgeIngestionService {
       }
     }
 
-    // 从 PG 删除（CASCADE 会自动删关联的 chunks）
+    // 清理倒排索引（用 chunk ID 精确删除）
+    const chunkIds = chunks.map((c) => c.id);
+    await prisma.knowledgeInvertedIndex.deleteMany({ where: { chunkId: { in: chunkIds } } });
+
+    // 从 PG 删除（CASCADE 会自动删关联的 chunks 和 inverted_index）
     await prisma.knowledgeChunk.deleteMany({ where: { documentId: docId } });
     await prisma.knowledgeDocument.delete({ where: { id: docId } });
 
@@ -187,29 +202,60 @@ export class KnowledgeIngestionService {
     return true;
   }
 
-  // 重建 BM25 索引：从 PG 读取所有 chunk 文本，重新训练 BM25 编码器
-  static async rebuildBM25Index(kbId: string): Promise<void> {
-    // 清除 KnowledgeService 中的 BM25 缓存（触发下次搜索时重新训练）
-    try {
-      const { KnowledgeService } = await import("./knowledge.js");
-      // 通过实例化临时对象来触发缓存失效
-      const tempService = new KnowledgeService();
-      await tempService.invalidateBM25Cache(kbId);
-    } catch {
-      // 静默失败，BM25 不是关键路径
+  // 重建倒排索引：清空旧索引 → 重新分词 → 写入
+  static async rebuildInvertedIndex(kbId?: string): Promise<void> {
+    const whereClause: any = { enabled: true };
+    if (kbId) whereClause.knowledgeBaseId = kbId;
+
+    const chunks = await prisma.knowledgeChunk.findMany({
+      where: whereClause,
+      select: { id: true, content: true, knowledgeBaseId: true },
+    });
+
+    if (chunks.length === 0) {
+      logger.info("No chunks to rebuild inverted index");
+      return;
     }
 
-    // 同时在本服务的 BM25 实例上训练
-    const chunks = await prisma.knowledgeChunk.findMany({
-      where: { knowledgeBaseId: kbId, enabled: true },
-      select: { content: true },
-    });
-    const corpus = chunks.map((c) => c.content);
-    if (corpus.length > 0) {
-      const bm25 = getBM25();
-      bm25.fit(corpus);
-      logger.info({ kbId, corpus: corpus.length }, "BM25 index rebuilt");
+    // 清空目标 KB 的旧索引
+    if (kbId) {
+      await prisma.knowledgeInvertedIndex.deleteMany({ where: { kbId } });
+    } else {
+      const kbIds = [...new Set(chunks.map((c) => c.knowledgeBaseId))];
+      await prisma.knowledgeInvertedIndex.deleteMany({
+        where: { kbId: { in: kbIds } },
+      });
     }
+
+    // 逐 chunk 重建分词和倒排索引
+    for (const chunk of chunks) {
+      const tokens = tokenize(chunk.content);
+      const termFreqMap = new Map<string, number>();
+      for (const t of tokens) {
+        termFreqMap.set(t, (termFreqMap.get(t) ?? 0) + 1);
+      }
+
+      // 更新 tokenCount
+      await prisma.knowledgeChunk.update({
+        where: { id: chunk.id },
+        data: { tokenCount: tokens.length },
+      });
+
+      // 写入倒排索引
+      if (termFreqMap.size > 0) {
+        await prisma.knowledgeInvertedIndex.createMany({
+          data: Array.from(termFreqMap.entries()).map(([term, freq]) => ({
+            id: randomUUID(),
+            term,
+            chunkId: chunk.id,
+            kbId: chunk.knowledgeBaseId,
+            termFreq: freq,
+          })),
+        });
+      }
+    }
+
+    logger.info({ chunks: chunks.length }, "Inverted index rebuilt");
   }
 }
 

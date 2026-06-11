@@ -19,6 +19,7 @@
     "@agentforge/shared-types": "workspace:*",
     "@hono/node-server": "^1.13",
     "@hono/zod-validator": "^0.4",
+    "@node-rs/jieba": "^2.0.1",
     "@zilliz/milvus2-sdk-node": "^2.4",
     "bcryptjs": "^3.0.3",
     "dotenv": "^16.4",

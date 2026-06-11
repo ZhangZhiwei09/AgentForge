@@ -3,7 +3,7 @@
 import { prisma } from "../db.js";
 import { getMilvusClient, MILVUS_KNOWLEDGE_COLLECTION, EMBEDDING_DIM, ensureKnowledgeCollection } from "./milvus.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
-import { BM25SparseEncoder } from "./bm25.js";
+import { tokenize } from "./tokenizer.js";
 import { getProvider } from "../providers/registry.js";
 import { logger } from "@agentforge/logger";
 import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
@@ -33,8 +33,10 @@ export interface KnowledgeSearchResult {
 
 export class KnowledgeService {
   private collectionLoaded = false;
-  private bm25Encoder: BM25SparseEncoder | null = null;
-  private bm25FittedKbIds = new Set<string>(); // 记录已训练 BM25 的知识库
+
+  // BM25 参数
+  private static readonly BM25_K1 = 1.2;
+  private static readonly BM25_B = 0.75;
 
   // 惰性加载 Milvus Collection
   private async ensureCollection() {
@@ -44,94 +46,92 @@ export class KnowledgeService {
     }
   }
 
-  private getBM25(): BM25SparseEncoder {
-    if (!this.bm25Encoder) {
-      this.bm25Encoder = new BM25SparseEncoder();
-    }
-    return this.bm25Encoder;
-  }
-
-  // 确保 BM25 已在知识库语料上训练（惰性，只训练一次）
-  async ensureBM25Fitted(kbId?: string): Promise<void> {
-    const bm25 = this.getBM25();
-    const targetKbId = kbId || "__all__";
-
-    if (this.bm25FittedKbIds.has(targetKbId)) return;
-
-    try {
-      const where: any = { enabled: true };
-      if (kbId) where.knowledgeBaseId = kbId;
-
-      const chunks = await prisma.knowledgeChunk.findMany({
-        where,
-        select: { content: true },
-        take: 5000, // 最多训练 5000 个 chunk
-      });
-
-      if (chunks.length > 0) {
-        const corpus = chunks.map((c) => c.content);
-        bm25.fit(corpus);
-        this.bm25FittedKbIds.add(targetKbId);
-        logger.info({ kbId: targetKbId, corpus: corpus.length }, "BM25 fitted");
-      }
-    } catch (e) {
-      logger.warn(e, "BM25 fit failed");
-    }
-  }
-
-  // 使 BM25 缓存失效（文档增删后调用，触发下次搜索时重新训练）
-  async invalidateBM25Cache(kbId?: string): Promise<void> {
-    const targetKbId = kbId || "__all__";
-    this.bm25FittedKbIds.delete(targetKbId);
-    logger.info({ kbId: targetKbId }, "BM25 cache invalidated");
-  }
-
-  // 启动时预热：预先训练所有启用的知识库BM25，避免首次搜索的冷启动延迟
-  async warmupAll(): Promise<void> {
-    try {
-      const kbs = await prisma.knowledgeBase.findMany({
-        where: { enabled: true },
-        select: { id: true },
-      });
-      for (const kb of kbs) {
-        await this.ensureBM25Fitted(kb.id);
-      }
-      // Also warm up the global (all-KB) index
-      await this.ensureBM25Fitted();
-      logger.info({ kbCount: kbs.length }, "BM25 warmup complete");
-    } catch (e) {
-      logger.warn(e, "BM25 warmup failed — will train lazily on first search");
-    }
-  }
-
-  // 计算查询与候选文本之间的 BM25 关键词相似度分数
-  // 使用稀疏向量点积作为相似度度量
-  private computeBM25Scores(query: string, candidates: string[]): number[] {
-    const bm25 = this.getBM25();
-    const queryVecs = bm25.encodeQueries([query]);
-    const queryVec = queryVecs[0] ?? {};
-
-    if (Object.keys(queryVec).length === 0) {
-      return candidates.map(() => 0); // 无词汇匹配，全返回 0
+  // 从 PostgreSQL 倒排索引表计算 BM25 关键词匹配分数
+  // 查询分词 → 查倒排索引 → 计算 IDF/TF → Okapi BM25 → 归一化到 [0,1]
+  private async computeBM25FromIndex(
+    query: string,
+    candidateChunks: { chunkId: string; content: string }[],
+    kbId?: string,
+  ): Promise<number[]> {
+    const queryTokens = [...new Set(tokenize(query))];
+    if (queryTokens.length === 0 || candidateChunks.length === 0) {
+      return candidateChunks.map(() => 0);
     }
 
-    const docVecs = bm25.encodeDocuments(candidates);
-    return docVecs.map((docVec) => {
-      let dotProduct = 0;
-      for (const [idx, qWeight] of Object.entries(queryVec)) {
-        const dWeight = docVec[idx] ?? 0;
-        dotProduct += qWeight * dWeight;
-      }
-      // 归一化：除以 sqrt(查询L2 * 文档L2) 得到余弦相似度
-      const queryNorm = Math.sqrt(
-        Object.values(queryVec).reduce((sum, v) => sum + v * v, 0),
-      );
-      const docNorm = Math.sqrt(
-        Object.values(docVec).reduce((sum, v) => sum + v * v, 0),
-      );
-      if (queryNorm === 0 || docNorm === 0) return 0;
-      return dotProduct / (queryNorm * docNorm);
+    // 1. 查询倒排索引：获取所有 query term 对应的 chunk 条目
+    const indexEntries = await prisma.knowledgeInvertedIndex.findMany({
+      where: {
+        term: { in: queryTokens },
+        ...(kbId ? { kbId } : {}),
+      },
+      select: { term: true, chunkId: true, termFreq: true },
     });
+
+    // 2. 构建内存 lookup: term → { df, chunks: Map<chunkId, tf> }
+    const termInfo = new Map<string, { df: number; chunks: Map<string, number> }>();
+    for (const entry of indexEntries) {
+      let info = termInfo.get(entry.term);
+      if (!info) {
+        info = { df: 0, chunks: new Map() };
+        termInfo.set(entry.term, info);
+      }
+      info.chunks.set(entry.chunkId, (info.chunks.get(entry.chunkId) ?? 0) + entry.termFreq);
+      info.df = info.chunks.size; // 包含该 term 的 chunk 数量
+    }
+
+    if (termInfo.size === 0) {
+      return candidateChunks.map(() => 0);
+    }
+
+    // 3. 获取候选 chunk 的文档长度（用于 BM25 归一化）
+    const candidateIds = candidateChunks.map((c) => c.chunkId);
+    const candidateMetas = await prisma.knowledgeChunk.findMany({
+      where: { id: { in: candidateIds } },
+      select: { id: true, tokenCount: true },
+    });
+    const docLenMap = new Map(candidateMetas.map((c) => [c.id, c.tokenCount]));
+
+    // 获取 corpus 统计量：总文档数 N 和平均文档长度
+    const chunkWhere: any = { enabled: true };
+    if (kbId) chunkWhere.knowledgeBaseId = kbId;
+
+    const N = await prisma.knowledgeChunk.count({ where: chunkWhere });
+    if (N === 0) return candidateChunks.map(() => 0);
+
+    const aggResult = await prisma.knowledgeChunk.aggregate({
+      where: chunkWhere,
+      _avg: { tokenCount: true },
+    });
+    const avgdl = aggResult._avg.tokenCount ?? 1;
+
+    // 4. 对每个候选 chunk 计算 BM25 分数
+    const k1 = KnowledgeService.BM25_K1;
+    const b = KnowledgeService.BM25_B;
+    const scores: number[] = [];
+
+    for (const candidate of candidateChunks) {
+      let score = 0;
+      const docLen = docLenMap.get(candidate.chunkId) ?? avgdl;
+
+      for (const term of queryTokens) {
+        const info = termInfo.get(term);
+        if (!info || !info.chunks.has(candidate.chunkId)) continue;
+
+        const tf = info.chunks.get(candidate.chunkId)!;
+        const df = info.df;
+        const idf = Math.log((N - df + 0.5) / (df + 0.5) + 1);
+
+        const numerator = tf * (k1 + 1);
+        const denominator = tf + k1 * (1 - b + b * (docLen / avgdl));
+        score += idf * (numerator / denominator);
+      }
+
+      scores.push(score);
+    }
+
+    // 5. 归一化到 [0, 1] 区间（与 dense COSINE 分数兼容）
+    const maxScore = Math.max(...scores, 0.0001);
+    return scores.map((s) => s / maxScore);
   }
 
   // 基础搜索：dense embedding → Milvus 向量搜索 → 返回结果
@@ -155,9 +155,8 @@ export class KnowledgeService {
     const denseVec = await provider.embedSingle(query);
     if (!denseVec) return [];
 
-    // 3. 确保 BM25 已在知识库语料上训练
+    // 3. 记录目标知识库（用于倒排索引查询优化）
     const targetKbId = kbIds && kbIds.length === 1 ? kbIds[0] : undefined;
-    await this.ensureBM25Fitted(targetKbId);
 
     // 4. 构建过滤表达式：限定知识库范围
     let filter = "";
@@ -188,9 +187,13 @@ export class KnowledgeService {
       const chunkIds = results.results.map((h) => h.chunk_id as string);
       const chunkMetaMap = await this.getChunkMetas(chunkIds);
 
-      // 7. 计算 BM25 关键词匹配分数（混合搜索）
+      // 7. 从倒排索引计算 BM25 关键词匹配分数（混合搜索）
       const contents = results.results.map((h) => (h.content as string) || "");
-      const bm25Scores = this.computeBM25Scores(query, contents);
+      const candidateChunks = results.results.map((h, i) => ({
+        chunkId: h.chunk_id as string,
+        content: contents[i] || "",
+      }));
+      const bm25Scores = await this.computeBM25FromIndex(query, candidateChunks, targetKbId);
 
       const searchResults: KnowledgeSearchResult[] = [];
       for (let i = 0; i < results.results.length; i++) {

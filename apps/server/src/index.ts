@@ -44,13 +44,17 @@ async function main() {
     logger.warn({ error: (err as Error).message }, "Knowledge base seeding skipped");
   }
 
-  // 预热BM25索引（最佳effort，失败不影响服务启动）
+  // 检查并构建倒排索引（已有 chunk 但无索引时自动重建）
   try {
-    const { KnowledgeService } = await import("./services/knowledge.js");
-    const ks = new KnowledgeService();
-    await ks.warmupAll();
+    const chunkCount = await prisma.knowledgeChunk.count({ where: { enabled: true } });
+    const indexCount = await prisma.knowledgeInvertedIndex.count();
+    if (chunkCount > 0 && indexCount === 0) {
+      logger.info({ chunks: chunkCount }, "Building initial inverted index for existing chunks");
+      const { KnowledgeIngestionService } = await import("./services/knowledge-ingestion.js");
+      await KnowledgeIngestionService.rebuildInvertedIndex();
+    }
   } catch (err) {
-    logger.warn({ error: (err as Error).message }, "BM25 warmup skipped");
+    logger.warn({ error: (err as Error).message }, "Inverted index build skipped");
   }
 
   // 第三步：创建 Hono 应用并启动 HTTP 服务
