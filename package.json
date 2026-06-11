@@ -18,6 +18,7 @@
     "infra:down": "docker compose -f infra/docker/docker-compose.yml down",
     "infra:restart": "docker compose -f infra/docker/docker-compose.yml down && docker compose -f infra/docker/docker-compose.yml up -d",
     "server:dev": "pnpm --filter @agentforge/server dev",
+    "server:worker": "pnpm --filter @agentforge/server worker",
     "web:dev": "pnpm --filter @agentforge/web dev",
     "db:migrate": "pnpm --filter @agentforge/database db:migrate",
     "db:seed": "pnpm --filter @agentforge/database db:seed",

@@ -58,7 +58,7 @@ async function main() {
   }
 
   // 第三步：创建 Hono 应用并启动 HTTP 服务
-  const app = createApp();
+  const app = await createApp();
 
   logger.info({ port: settings.port }, "AgentForge TS backend starting");
   serve({

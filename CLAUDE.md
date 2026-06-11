@@ -171,7 +171,7 @@ The `plan.md` defines the full V1→V10 + P0-P2 roadmap. Completed phases are ma
 - **P0-3 Testing:** ✅ vitest unit + integration tests (36 tests, CI enforced)
 - **P0-4 CI/CD:** ✅ GitHub Actions pipeline (lint → format → typecheck → test → build)
 - **P0-5 Security:** ✅ Rate limiting, Zod validation, content safety (prompt injection detection)
-- **P1-1 Background Jobs:** ⬜ BullMQ job queue for async memory extraction
+- **P1-1 Background Jobs:** ✅ BullMQ job queue for async memory extraction + knowledge ingestion with Redis
 - **P1-2 Observability:** ⬜ Prometheus metrics + OpenTelemetry tracing
 - **P1-3 Agent Reasoning:** ✅ ReAct loop with structured decision output
 - **P1-4 Working Memory:** ✅ Agent scratchpad for multi-step task context

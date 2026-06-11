@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "worker": "tsx watch src/worker.ts",
     "clean": "rimraf dist"
   },
   "dependencies": {
@@ -17,14 +18,17 @@
     "@agentforge/logger": "workspace:*",
     "@agentforge/shared-prompts": "workspace:*",
     "@agentforge/shared-types": "workspace:*",
+    "@bull-board/api": "^8.0.0",
+    "@bull-board/hono": "^8.0.0",
     "@hono/node-server": "^1.13",
     "@hono/zod-validator": "^0.4",
     "@node-rs/jieba": "^2.0.1",
     "@zilliz/milvus2-sdk-node": "^2.4",
     "bcryptjs": "^3.0.3",
+    "bullmq": "^5.78.0",
     "dotenv": "^16.4",
     "hono": "^4.6",
-    "ioredis": "^5.11.1",
+    "ioredis": "^5.10.1",
     "openai": "^4.70",
     "zod": "^3.23"
   },

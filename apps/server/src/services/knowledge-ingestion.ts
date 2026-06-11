@@ -90,6 +90,49 @@ export class KnowledgeIngestionService {
     return results;
   }
 
+  // P1-1: Worker 专用方法 — 处理已创建的文档（文档由路由预创建为 status: "pending"）
+  // 与 ingestDocument() 的区别：不创建新文档记录，只做切片→向量化→双写→更新状态
+  async processExistingDocument(docId: string, kbId: string): Promise<void> {
+    const doc = await prisma.knowledgeDocument.findUnique({ where: { id: docId } });
+    if (!doc) throw new Error(`Document ${docId} not found`);
+
+    try {
+      // 状态转换: pending → processing
+      await prisma.knowledgeDocument.update({
+        where: { id: docId },
+        data: { status: "processing" },
+      });
+
+      // 文本切分
+      const chunks = this.splitter.splitText(doc.content);
+      if (!chunks.length) {
+        await prisma.knowledgeDocument.update({
+          where: { id: docId },
+          data: { status: "completed", chunkCount: 0 },
+        });
+        return;
+      }
+
+      // 向量化 + 双写
+      await this.ingestChunks(docId, kbId, chunks);
+
+      // 标记完成
+      await prisma.knowledgeDocument.update({
+        where: { id: docId },
+        data: { chunkCount: chunks.length, status: "completed" },
+      });
+
+      logger.info({ docId, chunks: chunks.length }, "Document processed by worker");
+    } catch (e) {
+      logger.error({ docId, error: (e as Error).message }, "Worker document processing failed");
+      await prisma.knowledgeDocument.update({
+        where: { id: docId },
+        data: { status: "failed" },
+      });
+      throw e; // 重新抛出让 BullMQ 重试
+    }
+  }
+
   // Chunk 向量化 + 双写核心逻辑
   private async ingestChunks(
     docId: string,

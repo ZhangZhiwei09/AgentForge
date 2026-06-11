@@ -332,21 +332,33 @@ export class ChatService {
       });
     }
 
-    // 14. 阶段三：从对话中提取新的长期记忆
+    // 14. 阶段三：异步投递记忆提取任务（P1-1 BullMQ 后台队列）
     let newMemoryCount = 0;
     try {
-      const engine = new MemoryEngine();
-      const extracted = await engine.extractAndStore(
-        conversationMessages
-          .filter((m) => m.role === "user" || m.role === "assistant")
-          .map((m) => ({ role: m.role, content: m.content || "" })),
-        userId,
-        conversationId,
-        providerName,
-      );
-      newMemoryCount = extracted.length;
+      const { getMemoryQueue } = await import("../jobs/queues.js");
+      const queue = getMemoryQueue();
+      const msgs = conversationMessages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role, content: m.content || "" }));
+      if (queue) {
+        // 投递到 BullMQ 后台队列，立即返回
+        await queue.add("extract", {
+          messages: msgs,
+          userId,
+          conversationId,
+          providerName,
+        });
+        logger.debug({ conversationId }, "Memory extraction job dispatched");
+      } else {
+        // 优雅降级：Redis 不可用，回退同步提取
+        const engine = new MemoryEngine();
+        const extracted = await engine.extractAndStore(
+          msgs, userId, conversationId, providerName,
+        );
+        newMemoryCount = extracted.length;
+      }
     } catch (e) {
-      logger.warn(e, "Memory extraction failed");
+      logger.warn(e, "Memory extraction dispatch failed");
     }
 
     // 15. 延迟统计

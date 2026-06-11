@@ -24,7 +24,7 @@ export type AppVariables = {
   requestId: string;
 };
 
-export function createApp() {
+export async function createApp() {
   const app = new Hono<{ Variables: AppVariables }>();
 
   // 全局中间件：请求 ID 追踪（优先于 CORS，确保所有日志都有 reqId）
@@ -55,6 +55,17 @@ export function createApp() {
   app.route("/", knowledgeRoutes);       // /api/knowledge/*
   app.route("/", toolRoutes);            // /api/tools
   app.route("/", agentRoutes);           // /api/agent/*, /api/agent-sessions/*
+
+  // P1-1 Bull Board 监控面板 — 仅在 Redis 可用时挂载
+  try {
+    const { getBullBoardHandler } = await import("./jobs/bull-board.js");
+    const handler = getBullBoardHandler();
+    if (handler) {
+      app.route("/admin/queues", handler as any);
+    }
+  } catch {
+    // Bull Board not available (e.g., missing deps or Redis down) — skip gracefully
+  }
 
   return app;
 }

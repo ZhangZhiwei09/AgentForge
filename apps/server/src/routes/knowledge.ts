@@ -192,13 +192,34 @@ knowledgeRoutes.post("/api/knowledge/bases/:kbId/documents", zValidator("json", 
     return c.json({ detail: "知识库不存在" }, 404);
   }
 
-  const ingestion = new KnowledgeIngestionService();
-  const doc = await ingestion.ingestDocument(kbId, title, content);
+  // P1-1: 预创建文档（status: pending），投递异步 ingestion job
+  const doc = await prisma.knowledgeDocument.create({
+    data: {
+      id: randomUUID(),
+      knowledgeBaseId: kbId,
+      title,
+      content,
+      chunkCount: 0,
+      status: "pending",
+    },
+  });
 
-  return c.json(doc, 201);
+  const { getIngestionQueue } = await import("../jobs/queues.js");
+  const queue = getIngestionQueue();
+  if (queue) {
+    await queue.add("ingest", { docId: doc.id, kbId });
+    logger.info({ docId: doc.id, title }, "Ingestion job dispatched");
+  } else {
+    // 优雅降级：Redis 不可用，回退同步摄取
+    const ingestion = new KnowledgeIngestionService();
+    await ingestion.processExistingDocument(doc.id, kbId);
+  }
+
+  const updatedDoc = await prisma.knowledgeDocument.findUnique({ where: { id: doc.id } });
+  return c.json(updatedDoc, 201);
 });
 
-// POST /api/knowledge/bases/:kbId/documents/batch —— 批量上传文档
+// POST /api/knowledge/bases/:kbId/documents/batch —— 批量上传文档 (P1-1 async)
 knowledgeRoutes.post("/api/knowledge/bases/:kbId/documents/batch", zValidator("json", batchDocCreateSchema), async (c) => {
   const kbId = c.req.param("kbId");
   const { documents } = c.req.valid("json");
@@ -208,15 +229,38 @@ knowledgeRoutes.post("/api/knowledge/bases/:kbId/documents/batch", zValidator("j
     return c.json({ detail: "知识库不存在" }, 404);
   }
 
-  const ingestion = new KnowledgeIngestionService();
-  const docsData = documents.map((d) => ({ title: d.title, content: d.content }));
-  const docs = await ingestion.batchIngest(kbId, docsData);
+  // P1-1: 预创建文档（status: pending），逐文档投递异步 ingestion job
+  const { getIngestionQueue } = await import("../jobs/queues.js");
+  const queue = getIngestionQueue();
+  const docIds: string[] = [];
+
+  for (const d of documents) {
+    const doc = await prisma.knowledgeDocument.create({
+      data: {
+        id: randomUUID(),
+        knowledgeBaseId: kbId,
+        title: d.title,
+        content: d.content,
+        chunkCount: 0,
+        status: "pending",
+      },
+    });
+    docIds.push(doc.id);
+
+    if (queue) {
+      await queue.add("ingest", { docId: doc.id, kbId });
+    } else {
+      // 优雅降级：同步摄取
+      const ingestion = new KnowledgeIngestionService();
+      await ingestion.processExistingDocument(doc.id, kbId);
+    }
+  }
 
   return c.json({
     kb_id: kbId,
-    doc_ids: docs.filter((d): d is NonNullable<typeof d> => d !== null).map((d) => d.id),
-    status: "completed",
-    message: `成功摄入 ${docs.length} 篇文档`,
+    doc_ids: docIds,
+    status: queue ? "pending" : "completed",
+    message: `成功接收 ${docIds.length} 篇文档${queue ? "，正在后台处理" : ""}`,
   });
 });
 
@@ -267,11 +311,31 @@ knowledgeRoutes.post("/api/knowledge/bases/:kbId/documents/upload", async (c) =>
     // 使用文件名（去掉扩展名）作为文档标题
     const title = fileName.replace(/\.[^/.]+$/, "");
 
-    const ingestion = new KnowledgeIngestionService();
-    const doc = await ingestion.ingestDocument(kbId, title, content);
+    // P1-1: 预创建文档（status: pending），投递异步 ingestion job
+    const doc = await prisma.knowledgeDocument.create({
+      data: {
+        id: randomUUID(),
+        knowledgeBaseId: kbId,
+        title,
+        content,
+        chunkCount: 0,
+        status: "pending",
+      },
+    });
 
+    const { getIngestionQueue } = await import("../jobs/queues.js");
+    const queue = getIngestionQueue();
+    if (queue) {
+      await queue.add("ingest", { docId: doc.id, kbId });
+      logger.info({ docId: doc.id, title }, "Ingestion job dispatched");
+    } else {
+      const ingestion = new KnowledgeIngestionService();
+      await ingestion.processExistingDocument(doc.id, kbId);
+    }
+
+    const updatedDoc = await prisma.knowledgeDocument.findUnique({ where: { id: doc.id } });
     return c.json({
-      ...doc,
+      ...updatedDoc,
       file_name: fileName,
       file_size: file.size,
     }, 201);
