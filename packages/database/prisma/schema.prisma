@@ -19,6 +19,8 @@ model User {
   memories      Memory[]
   refreshTokens RefreshToken[]
   apiKeys       ApiKey[]
+  workflows     Workflow[]
+  workflowRuns  WorkflowRun[]
 
   @@map("users")
 }
@@ -246,6 +248,73 @@ model VoiceSession {
 
   @@index([conversationId], map: "ix_voice_sessions_conversation_id")
   @@map("voice_sessions")
+}
+
+model Workflow {
+  id          String   @id @db.VarChar(36)
+  userId      String   @map("user_id") @db.VarChar(36)
+  name        String   @db.VarChar(200)
+  description String?
+  definition  Json
+  version     Int      @default(1)
+  status      String   @default("draft") @db.VarChar(20)
+  tags        String[] @default([])
+  runCount    Int      @default(0) @map("run_count")
+  lastRunAt   DateTime? @map("last_run_at") @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  runs        WorkflowRun[]
+
+  @@index([userId, status], map: "ix_workflows_user_status")
+  @@index([userId], map: "ix_workflows_user_id")
+  @@map("workflows")
+}
+
+model WorkflowRun {
+  id            String    @id @db.VarChar(36)
+  workflowId    String    @map("workflow_id") @db.VarChar(36)
+  userId        String    @map("user_id") @db.VarChar(36)
+  status        String    @default("running") @db.VarChar(20)
+  input         Json      @default("{}")
+  output        Json?
+  checkpoint    Json?
+  currentStepId String?   @map("current_step_id") @db.VarChar(100)
+  progress      Json      @default("{}")
+  error         String?
+  durationMs    Int?      @map("duration_ms")
+  startedAt     DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz(6)
+  workflow      Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  stepLogs      WorkflowStepLog[]
+
+  @@index([workflowId], map: "ix_workflow_runs_workflow")
+  @@index([userId, status], map: "ix_workflow_runs_user_status")
+  @@index([startedAt], map: "ix_workflow_runs_started")
+  @@map("workflow_runs")
+}
+
+model WorkflowStepLog {
+  id          String    @id @db.VarChar(36)
+  runId       String    @map("run_id") @db.VarChar(36)
+  stepId      String    @map("step_id") @db.VarChar(100)
+  stepType    String    @map("step_type") @db.VarChar(50)
+  status      String    @default("pending") @db.VarChar(20)
+  input       Json?
+  output      Json?
+  error       String?
+  retryCount  Int       @default(0) @map("retry_count")
+  durationMs  Int?      @map("duration_ms")
+  tokensUsed  Int       @default(0) @map("tokens_used")
+  events      Json      @default("[]")
+  startedAt   DateTime? @map("started_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  run         WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId], map: "ix_workflow_step_logs_run")
+  @@index([runId, stepId], map: "ix_workflow_step_logs_run_step")
+  @@map("workflow_step_logs")
 }
 
 model alembic_version {

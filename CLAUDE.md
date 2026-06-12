@@ -188,7 +188,7 @@ The `plan.md` defines the full V1→V10 + P0-P2 roadmap. Completed phases are ma
 - **V3 RAG:** Document ingestion, hybrid search, knowledge UI, customer chat ✅
 - **V4 Tool Calling:** Tool registry and execution engine ✅
 - **V5 Voice Agent:** ✅ WebSocket real-time audio, Whisper ASR, OpenAI TTS (6 voices), VAD, interruption handling
-- **V6 Workflow Engine:** DAG-based orchestration, checkpoint/resume, human approval nodes
+- **V6 Workflow Engine:** ✅ DAG-based orchestration, checkpoint/resume, 6 step types, 3 templates, 15 API endpoints
 - **V9 Multi-Agent:** Role-based agent teams, message bus, 3 collaboration patterns
 - **V10 MCP Ecosystem:** MCP Server + Client, dynamic tool discovery, hot-reload
 

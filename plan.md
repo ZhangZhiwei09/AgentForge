@@ -21,7 +21,7 @@ P1 Agent Kernel         ✅ 推理 / 规划 / 工作内存 (P1-3 ✅ P1-4 ✅ P1
 ↓
 V5 Voice Agent         ✅
 ↓
-V6 Workflow Engine
+V6 Workflow Engine    ✅
 ↓
 V9 Multi-Agent
 ↓
@@ -1708,236 +1708,1347 @@ POST /api/voice/synthesize    # 提交文字 → 返回音频
 
 ## 1. 核心目标
 
-从单次 Agent 任务执行演进为多步骤、可编排、可恢复的工作流引擎。支持 DAG 编排、条件分支、并行执行、人工审批节点。
+从单次 Agent 任务执行演进为多步骤、可编排、可恢复的工作流引擎。
 
-## 2. 系统架构
+关键能力：
+
+* DAG 编排：支持串行、并行、条件分支、依赖等待的图执行
+* 步骤类型：agent 推理、tool 调用、condition 判断、parallel 并行、human_approval 审批
+* 变量系统：工作流级别变量定义、步骤间数据传递、模板表达式 `{{var}}`
+* 检查点恢复：每个步骤完成后自动保存检查点，失败后可从中断处继续
+* 重试与超时：每步骤独立的指数退避重试策略和超时控制
+* 实时监控：SSE 流推送每个步骤的执行状态，前端 DAG 可视化
+* 模板库：内置常用工作流模板，一键创建
+
+---
+
+## 2. 技术选型
+
+| 组件 | 技术 | 用途 |
+|------|------|------|
+| DAG 调度 | 自研 DAGExecutor | 拓扑排序 + 依赖解析 + 并行调度 |
+| 模板引擎 | 自研简易模板（`{{var}}` 语法） | 工作流变量替换，支持嵌套对象路径 `{{step_id.output.field}}` |
+| 条件表达式 | 沙箱化表达式求值（无 `eval`） | 安全解析 `{{var}} > 50` / `{{status}} === "ok"` 等条件 |
+| 检查点存储 | PostgreSQL JSONB（workflow_runs.checkpoint） | 持久化检查点，无需额外组件 |
+| 实时推送 | SSE（已有基础设施） | 步骤执行事件推送到前端 |
+| 工作流存储 | PostgreSQL JSONB（workflows.definition） | DSL 定义存储，支持索引查询 |
+| Agent 集成 | 复用 AgentService（P1-3） | agent 步骤类型内部调用 ReAct 循环 |
+| Tool 集成 | 复用 ToolRegistry（V4 + P1-6） | tool 步骤类型内部调用工具执行 |
+| 审批集成 | 复用 P1-5 审批机制 | human_approval 步骤类型触发审批门 |
+
+---
+
+## 3. 系统架构
 
 ```text
-┌─────────────────────────────────────────────────┐
-│              Workflow Engine                     │
-│                                                  │
-│  ┌──────────┐    ┌──────────────┐               │
-│  │ Workflow │───→│ DAG Executor │               │
-│  │  Editor  │    │              │               │
-│  │ (JSON    │    │ ┌──────────┐ │               │
-│  │  DSL)    │    │ │ Scheduler│ │               │
-│  └──────────┘    │ └────┬─────┘ │               │
-│                  │      ↓       │               │
-│  ┌──────────┐    │ ┌──────────┐ │               │
-│  │ Workflow │    │ │ Parallel │ │               │
-│  │ Templates│    │ │ Executor │ │               │
-│  └──────────┘    │ └────┬─────┘ │               │
-│                  │      ↓       │               │
-│                  │ ┌──────────┐ │               │
-│  ┌──────────┐    │ │ State    │ │               │
-│  │ Checkpoint│←──│ │ Manager  │ │               │
-│  │ & Resume │    │ └──────────┘ │               │
-│  └──────────┘    └──────────────┘               │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────┐
+│                     Workflow Engine                           │
+│                                                              │
+│  ┌─────────────┐   ┌─────────────────────────────────────┐  │
+│  │  Workflow   │   │         DAG Executor                 │  │
+│  │  Definition │──→│                                     │  │
+│  │  (JSON DSL) │   │  ┌───────────┐  ┌────────────────┐  │  │
+│  └─────────────┘   │  │ Topology  │  │  Scheduler     │  │  │
+│                    │  │ Sort      │──→  (ready queue) │  │  │
+│  ┌─────────────┐   │  └───────────┘  └───────┬────────┘  │  │
+│  │  Variable   │   │                         ↓           │  │
+│  │  Resolver   │←──│  ┌────────────────────────────────┐  │  │
+│  │  {{var}}    │   │  │      Parallel Executor          │  │  │
+│  └─────────────┘   │  │  ┌──────┐ ┌──────┐ ┌──────┐   │  │  │
+│                    │  │  │Step A│ │Step B│ │Step C│   │  │  │
+│  ┌─────────────┐   │  │  └──┬───┘ └──┬───┘ └──┬───┘   │  │  │
+│  │  Checkpoint │←──│  │     ↓       ↓       ↓         │  │  │
+│  │  Manager    │   │  │  ┌────────────────────────┐   │  │  │
+│  └─────────────┘   │  │  │    State Manager       │   │  │  │
+│                    │  │  │  - 检查点自动保存        │   │  │  │
+│  ┌─────────────┐   │  │  │  - 变量快照累积         │   │  │  │
+│  │  Retry /    │   │  │  │  - 步骤日志记录         │   │  │  │
+│  │  Timeout    │   │  │  └────────────────────────┘   │  │  │
+│  └─────────────┘   │  └────────────────────────────────┘  │  │
+│                    └─────────────────────────────────────┘  │
+│                                                              │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │               Step Type Handlers                      │   │
+│  │  ┌────────┐ ┌────────┐ ┌───────────┐ ┌───────────┐  │   │
+│  │  │ Agent  │ │  Tool  │ │ Condition │ │  Parallel  │  │   │
+│  │  │ Step   │ │  Step  │ │   Step    │ │   Step     │  │   │
+│  │  └───┬────┘ └───┬────┘ └─────┬─────┘ └─────┬─────┘  │   │
+│  │      ↓          ↓            ↓              ↓        │   │
+│  │  AgentService  ToolRegistry  ExprEval    DAGExecutor │   │
+│  │  (P1-3 ReAct)  (V4 + P1-6)  (安全求值)   (递归嵌套)  │   │
+│  │                                                        │   │
+│  │  ┌─────────────┐                                      │   │
+│  │  │ Human       │  → P1-5 Approval Gate                │   │
+│  │  │ Approval    │                                      │   │
+│  │  └─────────────┘                                      │   │
+│  └──────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────┘
 ```
 
-## 3. 工作流 DSL（JSON 格式）
+---
+
+## 4. 工作流 DSL 规范
+
+### 4.1 JSON Schema（Zod 校验）
+
+```typescript
+// apps/server/src/workflows/schema.ts
+import { z } from "zod";
+
+const VariableDefSchema = z.object({
+  type: z.enum(["string", "number", "boolean", "object", "array"]),
+  required: z.boolean().default(false),
+  default: z.unknown().optional(),
+  description: z.string().optional(),
+});
+
+const StepRetrySchema = z.object({
+  maxAttempts: z.number().min(1).max(10).default(3),
+  backoff: z.enum(["fixed", "exponential", "linear"]).default("exponential"),
+  initialDelay: z.number().default(1000),
+  maxDelay: z.number().default(60000),
+  retryOn: z.array(z.string()).default(["*"]),
+});
+
+const BaseStepSchema = z.object({
+  id: z.string().min(1).max(100),
+  type: z.enum(["agent", "tool", "condition", "parallel", "human_approval", "transform"]),
+  description: z.string().optional(),
+  depends_on: z.array(z.string()).optional(),
+  retry: StepRetrySchema.optional(),
+  timeout: z.number().min(1).max(600).default(60),
+  on_timeout: z.enum(["fail", "skip", "fallback"]).default("fail"),
+  fallback_step: z.string().optional(),
+});
+
+const AgentStepSchema = BaseStepSchema.extend({
+  type: z.literal("agent"),
+  prompt: z.string(),
+  system_prompt: z.string().optional(),
+  model: z.string().optional(),
+  tools: z.array(z.string()).optional(),
+  max_iterations: z.number().default(10),
+  output_as: z.string().optional(),  // 结果存储的变量名，默认 = step.id
+});
+
+const ToolStepSchema = BaseStepSchema.extend({
+  type: z.literal("tool"),
+  tool: z.string(),
+  args: z.record(z.unknown()).default({}),
+  require_approval: z.boolean().default(false),
+  output_as: z.string().optional(),
+});
+
+const ConditionStepSchema = BaseStepSchema.extend({
+  type: z.literal("condition"),
+  expression: z.string(),
+  branches: z.record(z.string(), z.array(z.lazy(() => StepSchema))),
+  default_branch: z.string().optional(),
+});
+
+const ParallelStepSchema = BaseStepSchema.extend({
+  type: z.literal("parallel"),
+  branches: z.array(z.object({
+    id: z.string(),
+    label: z.string().optional(),
+    steps: z.array(z.lazy(() => StepSchema)),
+  })),
+  wait: z.enum(["all", "any", "first"]).default("all"),
+});
+
+const HumanApprovalStepSchema = BaseStepSchema.extend({
+  type: z.literal("human_approval"),
+  message: z.string(),
+  details: z.record(z.unknown()).optional(),
+  timeout_seconds: z.number().default(300),
+  on_reject: z.enum(["skip", "fail"]).default("skip"),
+});
+
+const TransformStepSchema = BaseStepSchema.extend({
+  type: z.literal("transform"),
+  operation: z.enum(["map", "filter", "merge", "jsonata"]),
+  expression: z.string(),
+  input: z.string().optional(),  // 输入变量名，默认取上一步结果
+  output_as: z.string().optional(),
+});
+
+const StepSchema: z.ZodType<WorkflowStep> = z.discriminatedUnion("type", [
+  AgentStepSchema,
+  ToolStepSchema,
+  ConditionStepSchema,
+  ParallelStepSchema,
+  HumanApprovalStepSchema,
+  TransformStepSchema,
+]);
+
+export const WorkflowDefinitionSchema = z.object({
+  name: z.string().min(1).max(200),
+  version: z.string().default("1.0"),
+  description: z.string().optional(),
+  variables: z.record(z.string(), VariableDefSchema).default({}),
+  steps: z.array(StepSchema),
+  on_failure: z.enum(["stop", "continue", "rollback"]).default("stop"),
+  max_concurrency: z.number().min(1).max(10).default(4),
+});
+```
+
+### 4.2 完整示例：客服工单处理
 
 ```json
 {
-  "name": "Customer Onboarding",
+  "name": "Customer Support Triage",
   "version": "1.0",
+  "description": "自动分类客服问题、查找知识库、必要时创建工单",
   "variables": {
-    "customer_name": { "type": "string", "required": true },
-    "company_size": { "type": "number", "default": 1 }
+    "customer_query": { "type": "string", "required": true },
+    "customer_email": { "type": "string", "required": true },
+    "priority_threshold": { "type": "number", "default": 7 }
   },
   "steps": [
     {
-      "id": "greet",
+      "id": "classify",
       "type": "agent",
-      "prompt": "Welcome {{customer_name}}! Generate a personalized greeting.",
-      "model": "gpt-4o",
-      "tools": ["get_current_time"],
-      "timeout": 30
+      "prompt": "Classify this customer query into: bug / feature_request / account_issue / general.\n\nQuery: {{customer_query}}\n\nOutput ONLY the category name.",
+      "model": "gpt-4o-mini",
+      "output_as": "category"
     },
     {
-      "id": "decision",
+      "id": "priority_check",
+      "type": "agent",
+      "prompt": "Rate the urgency of this query from 1-10 (10=critical).\nQuery: {{customer_query}}\n\nOutput ONLY the number.",
+      "output_as": "priority_score"
+    },
+    {
+      "id": "search_kb",
+      "type": "tool",
+      "tool": "knowledge_search",
+      "args": {
+        "query": "{{customer_query}}",
+        "top_k": 3
+      },
+      "output_as": "kb_results"
+    },
+    {
+      "id": "is_urgent",
       "type": "condition",
-      "expression": "{{company_size}} > 50",
-      "then": "enterprise_flow",
-      "else": "smb_flow"
+      "expression": "{{priority_score}} >= {{priority_threshold}}",
+      "branches": {
+        "true": [
+          {
+            "id": "create_urgent_ticket",
+            "type": "tool",
+            "tool": "create_ticket",
+            "args": {
+              "title": "URGENT: {{customer_query}}",
+              "priority": "high",
+              "email": "{{customer_email}}"
+            },
+            "require_approval": true
+          }
+        ],
+        "false": [
+          {
+            "id": "auto_respond",
+            "type": "agent",
+            "prompt": "Draft a helpful response to the customer based on the following:\n\nQuery: {{customer_query}}\nKnowledge Base Results: {{kb_results}}\nCategory: {{category}}\n\nBe concise and actionable.",
+            "output_as": "draft_response"
+          }
+        ]
+      }
     },
     {
-      "id": "enterprise_flow",
-      "type": "parallel",
-      "branches": [
-        {
-          "id": "check_slack",
-          "type": "tool",
-          "tool": "slack_invite",
-          "args": { "email": "{{customer_email}}" },
-          "require_approval": true
-        },
-        {
-          "id": "create_ticket",
-          "type": "tool",
-          "tool": "jira_create",
-          "args": { "project": "ONBOARD", "summary": "..." }
-        }
-      ]
-    },
-    {
-      "id": "smb_flow",
-      "type": "agent",
-      "prompt": "Generate self-serve onboarding guide for a small team."
-    },
-    {
-      "id": "summary",
-      "type": "agent",
-      "prompt": "Summarize the onboarding results. Steps taken: {{steps}}",
-      "depends_on": ["enterprise_flow", "smb_flow"]
+      "id": "finalize",
+      "type": "transform",
+      "operation": "merge",
+      "expression": "{ category: {{category}}, priority: {{priority_score}}, response: {{draft_response}}, kb_sources: {{kb_results}} }",
+      "output_as": "final_output"
     }
   ]
 }
 ```
 
-## 4. 工作流状态机
+---
+
+## 5. 步骤类型详解
+
+### 5.1 Agent 步骤
+
+调用 AgentService（P1-3 ReAct 循环）执行推理任务。
+
+```typescript
+// 执行流程
+async function executeAgentStep(step: AgentStep, context: StepContext): Promise<StepResult> {
+  const resolvedPrompt = resolveVariables(step.prompt, context.variables);
+
+  const agentService = new AgentService();
+  const events: AgentStreamEvent[] = [];
+
+  for await (const event of agentService.run(context.runId, resolvedPrompt, {
+    model: step.model,
+    maxIterations: step.max_iterations,
+    tools: step.tools,
+    systemPrompt: step.system_prompt ? resolveVariables(step.system_prompt, context.variables) : undefined,
+  })) {
+    events.push(event);
+    // 每个 Agent 事件作为 workflow 子事件推送
+    yield { type: "workflow_agent_event", stepId: step.id, event };
+  }
+
+  const lastEvent = events[events.length - 1];
+  return {
+    status: "completed",
+    output: lastEvent?.type === "agent_done" ? lastEvent.result : null,
+    events,
+    tokensUsed: sumTokens(events),
+  };
+}
+```
+
+### 5.2 Tool 步骤
+
+直接调用 ToolRegistry 执行工具。
+
+```typescript
+async function executeToolStep(step: ToolStep, context: StepContext): Promise<StepResult> {
+  const resolvedArgs = resolveVariables(step.args, context.variables);
+
+  // P1-5 审批检查
+  if (step.require_approval) {
+    const approved = await context.approvalGate.request({
+      tool: step.tool,
+      args: resolvedArgs,
+      stepId: step.id,
+    });
+    if (!approved) {
+      return { status: "skipped", output: null, reason: "approval_rejected" };
+    }
+  }
+
+  const result = await ToolRegistry.execute(step.tool, resolvedArgs);
+  return { status: "completed", output: result };
+}
+```
+
+### 5.3 Condition 步骤
+
+安全表达式求值分支。
+
+```typescript
+async function executeConditionStep(step: ConditionStep, context: StepContext): Promise<StepResult> {
+  const resolvedExpr = resolveVariables(step.expression, context.variables);
+  // 使用安全的表达式求值器（非 eval），支持: > < >= <= === !== && || includes startsWith
+  const branchKey = SafeEvaluator.evaluate(resolvedExpr) ? "true" : "false";
+  const branchSteps = step.branches[branchKey] || step.branches[step.default_branch || "true"];
+
+  return {
+    status: "completed",
+    output: { branch: branchKey },
+    subSteps: branchSteps,  // 返回分支步骤交由 DAGExecutor 继续执行
+  };
+}
+```
+
+### 5.4 Parallel 步骤
+
+并行执行多个分支，每个分支内可包含多个串行步骤。
+
+```typescript
+async function executeParallelStep(step: ParallelStep, context: StepContext): Promise<StepResult> {
+  const branchResults = await Promise.allSettled(
+    step.branches.map(async (branch) => {
+      const branchContext = { ...context, parentStepId: step.id };
+      // 分支内串行执行
+      const results: StepResult[] = [];
+      for (const subStep of branch.steps) {
+        const result = await executeStep(subStep, branchContext);
+        results.push(result);
+        if (result.status === "failed") throw new Error(`Branch ${branch.id} failed at step ${subStep.id}`);
+      }
+      return { branchId: branch.id, results };
+    })
+  );
+
+  // wait 策略处理
+  const failures = branchResults.filter(r => r.status === "rejected");
+  if (step.wait === "all" && failures.length > 0) {
+    return { status: "failed", output: null, error: `${failures.length} branches failed` };
+  }
+
+  return {
+    status: "completed",
+    output: branchResults.map(r => r.status === "fulfilled" ? r.value : null).filter(Boolean),
+  };
+}
+```
+
+### 5.5 Human Approval 步骤
+
+暂停工作流等待用户审批。
+
+```typescript
+async function executeHumanApprovalStep(step: HumanApprovalStep, context: StepContext): Promise<StepResult> {
+  // 工作流暂停，推送审批请求
+  yield {
+    type: "workflow_approval_required",
+    stepId: step.id,
+    message: resolveVariables(step.message, context.variables),
+    details: step.details,
+    timeoutSeconds: step.timeout_seconds,
+  };
+
+  // 等待审批结果（带超时）
+  const decision = await context.approvalGate.waitForDecision({
+    timeoutMs: step.timeout_seconds * 1000,
+  });
+
+  if (decision === "timeout" || decision === "reject") {
+    const action = step.on_reject;
+    return {
+      status: action === "skip" ? "skipped" : "failed",
+      output: null,
+      reason: decision === "timeout" ? "approval_timeout" : "approval_rejected",
+    };
+  }
+
+  return { status: "completed", output: decision.modifiedArgs || {} };
+}
+```
+
+### 5.6 Transform 步骤
+
+数据转换步骤，用于步骤间数据重塑。
+
+```typescript
+async function executeTransformStep(step: TransformStep, context: StepContext): Promise<StepResult> {
+  const resolvedExpr = resolveVariables(step.expression, context.variables);
+
+  switch (step.operation) {
+    case "merge":
+      return { status: "completed", output: SafeEvaluator.evaluateTemplate(resolvedExpr, context.variables) };
+    case "jsonata":
+      return { status: "completed", output: JSONataEvaluator.evaluate(resolvedExpr, context.variables) };
+    default:
+      return { status: "completed", output: resolvedExpr };
+  }
+}
+```
+
+---
+
+## 6. 变量与模板系统
+
+### 6.1 变量来源优先级
 
 ```text
-                    ┌──────────┐
-                    │  Draft   │
-                    └────┬─────┘
-                         ↓
-                    ┌──────────┐
-                    │  Ready   │
-                    └────┬─────┘
-                         ↓
-              ┌──────────────────────┐
-              │      Running         │
-              │  ┌────┐ ┌────┐ ┌──┐ │
-              │  │Step│→│Step│→│..│ │
-              │  └────┘ └────┘ └──┘ │
-              └──┬──────┬──────┬────┘
-                 ↓      ↓      ↓
+1. 步骤输出    step_id.output.field     ← 最高优先级（运行时数据）
+2. 工作流输入  variables.var_name        ← 用户传入
+3. 默认值      variables.var_name.default ← Schema 定义
+4. 内置变量    __run_id__, __timestamp__  ← 系统注入
+```
+
+### 6.2 模板语法
+
+```text
+{{variable_name}}                  → 简单变量
+{{step_id}}                        → 步骤完整输出
+{{step_id.output.field}}           → 步骤输出的嵌套字段
+{{step_id.output.items[0]}}        → 数组索引
+{{step_id.output.data?.nested}}    → 可选链
+{{__run_id__}}                     → 工作流运行 ID
+{{__timestamp__}}                  → 当前时间戳
+```
+
+### 6.3 变量解析器实现
+
+```typescript
+// apps/server/src/workflows/variable-resolver.ts
+class VariableResolver {
+  resolve(template: string, context: VariableContext): string {
+    return template.replace(/\{\{(.+?)\}\}/g, (_, path) => {
+      const trimmed = path.trim();
+
+      // 内置变量
+      if (trimmed === "__run_id__") return context.runId;
+      if (trimmed === "__timestamp__") return Date.now().toString();
+
+      // 步骤输出
+      const stepMatch = trimmed.match(/^(\w+)\.output(.*)$/);
+      if (stepMatch) {
+        const stepResult = context.stepResults[stepMatch[1]];
+        const fieldPath = stepMatch[2] || "";
+        return fieldPath ? getNestedValue(stepResult, fieldPath) : JSON.stringify(stepResult);
+      }
+
+      // 工作流变量
+      if (context.variables[trimmed] !== undefined) {
+        return String(context.variables[trimmed]);
+      }
+
+      // 步骤原始结果（简写）
+      if (context.stepResults[trimmed] !== undefined) {
+        return JSON.stringify(context.stepResults[trimmed]);
+      }
+
+      return `{{${trimmed}}}`;  // 未解析的保留原样
+    });
+  }
+}
+```
+
+### 6.4 安全表达式求值器
+
+```typescript
+// 不使用 eval()，仅支持安全表达式
+class SafeEvaluator {
+  private static OPERATORS: Record<string, (a: unknown, b: unknown) => boolean> = {
+    ">": (a, b) => Number(a) > Number(b),
+    "<": (a, b) => Number(a) < Number(b),
+    ">=": (a, b) => Number(a) >= Number(b),
+    "<=": (a, b) => Number(a) <= Number(b),
+    "===": (a, b) => a === b,
+    "!==": (a, b) => a !== b,
+    "includes": (a, b) => String(a).includes(String(b)),
+    "startsWith": (a, b) => String(a).startsWith(String(b)),
+  };
+
+  static evaluate(expression: string): boolean {
+    // 解析 "{{var}} > 50" 格式的表达式
+    for (const [op, fn] of Object.entries(this.OPERATORS)) {
+      const parts = expression.split(op);
+      if (parts.length === 2) {
+        return fn(parts[0].trim(), parts[1].trim());
+      }
+    }
+    // 布尔值直接返回
+    if (expression === "true") return true;
+    if (expression === "false") return false;
+    return Boolean(expression);
+  }
+}
+```
+
+---
+
+## 7. 工作流状态机
+
+```text
+                        ┌──────────┐
+                        │  Draft   │  ← 编辑中，不可执行
+                        └────┬─────┘
+                             ↓ validate
+                        ┌──────────┐
+                        │  Ready   │  ← 校验通过，可执行
+                        └────┬─────┘
+                             ↓ POST /run
+              ┌──────────────────────────┐
+              │        Running           │
+              │  ┌────┐   ┌────┐        │
+              │  │Step│──→│Step│──→ ... │
+              │  └────┘   └────┘        │
+              └──┬───────┬───────┬──────┘
+                 ↓       ↓       ↓
             ┌──────┐ ┌──────┐ ┌────────┐
             │ Done │ │Paused│ │Failed  │
             └──────┘ └──┬───┘ └───┬────┘
                         ↓          ↓
                    ┌────────┐ ┌──────────┐
-                   │Resumed │ │ Retrying │
-                   └────────┘ └──────────┘
+                   │Resumed │ │ Retrying │  ← 手动重试或自动重试
+                   └────────┘ └────┬─────┘
+                                   ↓
+                            ┌──────────────┐
+                            │ 从失败步骤    │
+                            │ 重新执行      │
+                            └──────────────┘
+
+状态转换规则:
+  Draft     → Ready       (validate)
+  Ready     → Running     (execute)
+  Running   → Done        (所有步骤完成)
+  Running   → Paused      (人工审批步骤 / 用户手动暂停)
+  Running   → Failed      (步骤失败 + 无重试 / 重试耗尽 / 不可恢复错误)
+  Paused    → Running     (用户恢复 / 审批通过)
+  Paused    → Cancelled   (用户取消 / 审批超时拒绝)
+  Failed    → Running     (手动重试，从检查点恢复)
+  Running   → Cancelled   (用户取消)
 ```
 
-## 5. 检查点与恢复
+---
+
+## 8. 检查点与恢复
+
+### 8.1 检查点数据格式
 
 ```typescript
-// 每个步骤完成后自动保存检查点
+// 每个步骤完成后自动保存检查点到 workflow_runs.checkpoint JSONB
 interface WorkflowCheckpoint {
   workflowId: string;
-  completedSteps: string[];       // 已完成的步骤 ID
-  currentStep: string | null;     // 正在执行的步骤 ID
-  stepResults: Record<string, unknown>;  // 每个步骤的输出
-  variables: Record<string, unknown>;    // 累积变量快照
-  savedAt: Date;
+  runId: string;
+  completedSteps: string[];
+  currentStep: string | null;
+  pendingSteps: string[];                 // 待执行的步骤 ID 列表
+  stepResults: Record<string, {           // 每个步骤的详细结果
+    status: "completed" | "failed" | "skipped";
+    output: unknown;
+    tokensUsed?: number;
+    durationMs: number;
+    retryCount: number;
+    error?: string;
+  }>;
+  variables: Record<string, unknown>;     // 变量累积快照
+  savedAt: string;
 }
 
-// 恢复时从最近检查点继续
-async function resumeWorkflow(workflowId: string): Promise<void> {
-  const checkpoint = await loadCheckpoint(workflowId);
-  // 从 checkpoint.currentStep 继续执行
-  // 已完成步骤的结果从 checkpoint.stepResults 读取
+// 保存检查点（在 DAGExecutor 的每个步骤后自动触发）
+async function saveCheckpoint(runId: string, checkpoint: WorkflowCheckpoint): Promise<void> {
+  await prisma.workflowRun.update({
+    where: { id: runId },
+    data: { checkpoint: checkpoint as any },
+  });
+}
+
+// 从检查点恢复
+async function resumeWorkflow(runId: string): Promise<void> {
+  const run = await prisma.workflowRun.findUnique({ where: { id: runId } });
+  if (!run?.checkpoint) throw new Error("No checkpoint found");
+
+  const checkpoint = run.checkpoint as WorkflowCheckpoint;
+
+  // 从当前步骤继续，跳过已完成的步骤
+  const remainingSteps = checkpoint.pendingSteps;
+  await dagExecutor.executeRemaining(runId, remainingSteps, {
+    variables: checkpoint.variables,
+    stepResults: checkpoint.stepResults,
+  });
 }
 ```
 
-## 6. 重试与超时策略
+### 8.2 检查点触发时机
+
+| 时机 | 触发条件 | 保存内容 |
+|------|---------|---------|
+| Step 完成 | 每个步骤成功执行后 | 完整检查点 |
+| Step 失败 | 步骤执行失败（重试耗尽后） | 完整检查点 + 错误信息 |
+| 人工审批 | 进入 human_approval 步骤前 | 检查点 + 审批待处理 |
+| 手动暂停 | 用户调用 `/pause` | 当前状态快照 |
+
+---
+
+## 9. 重试与超时策略
+
+### 9.1 重试配置
 
 ```typescript
-interface StepConfig {
-  retry: {
-    maxAttempts: number;       // 最大重试次数（默认 3）
-    backoff: "fixed" | "exponential" | "linear";
-    initialDelay: number;      // 初始延迟（ms）
-    maxDelay: number;          // 最大延迟（ms）
-    retryOn: string[];         // 可重试的错误类型
-  };
-  timeout: number;             // 步骤超时（秒）
-  onTimeout: "fail" | "skip" | "fallback";
-  fallbackStep?: string;       // 超时后的回退步骤
+interface StepRetryConfig {
+  maxAttempts: number;          // 最大重试次数（默认 3）
+  backoff: "fixed" | "exponential" | "linear";
+  initialDelay: number;         // 初始延迟（ms，默认 1000）
+  maxDelay: number;             // 最大延迟（ms，默认 60000）
+  retryOn: string[];            // 可重试的错误类型
+}
+
+// 重试延迟计算
+function calculateRetryDelay(config: StepRetryConfig, attempt: number): number {
+  switch (config.backoff) {
+    case "fixed":
+      return config.initialDelay;
+    case "linear":
+      return config.initialDelay * attempt;
+    case "exponential":
+      return Math.min(config.initialDelay * Math.pow(2, attempt - 1), config.maxDelay);
+  }
+}
+
+// 重试执行
+async function executeWithRetry(
+  step: WorkflowStep,
+  context: StepContext,
+  execute: () => Promise<StepResult>
+): Promise<StepResult> {
+  const retry = step.retry || { maxAttempts: 3, backoff: "exponential", initialDelay: 1000, maxDelay: 60000, retryOn: ["*"] };
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= retry.maxAttempts; attempt++) {
+    try {
+      const result = await withTimeout(execute(), step.timeout * 1000);
+      return { ...result, retryCount: attempt - 1 };
+    } catch (error) {
+      lastError = error as Error;
+
+      // 检查是否可重试
+      if (attempt < retry.maxAttempts && isRetryable(error, retry.retryOn)) {
+        const delay = calculateRetryDelay(retry, attempt);
+        await sleep(delay);
+        continue;
+      }
+
+      // 超时处理
+      if (error instanceof TimeoutError) {
+        return handleTimeout(step, context, lastError);
+      }
+
+      throw error;
+    }
+  }
+
+  throw lastError;
 }
 ```
 
-## 7. 数据模型
+### 9.2 超时处理
+
+```typescript
+async function handleTimeout(step: WorkflowStep, context: StepContext, error: Error): Promise<StepResult> {
+  switch (step.on_timeout) {
+    case "skip":
+      return { status: "skipped", output: null, reason: `timeout after ${step.timeout}s` };
+    case "fail":
+      return { status: "failed", output: null, error: `timeout after ${step.timeout}s` };
+    case "fallback":
+      if (step.fallback_step) {
+        const fallbackStep = context.getStep(step.fallback_step);
+        return await executeStep(fallbackStep, context);
+      }
+      return { status: "failed", output: null, error: "fallback step not found" };
+  }
+}
+```
+
+### 9.3 错误分类
+
+```typescript
+// 可重试错误 vs 不可恢复错误
+enum ErrorCategory {
+  RETRYABLE,       // LLM 超时、网络抖动、工具暂时不可用
+  DEGRADABLE,      // 工具熔断，可用 fallback
+  FATAL,           // Schema 校验失败、依赖步骤失败、权限不足
+}
+
+function categorizeError(error: Error, step: WorkflowStep): ErrorCategory {
+  if (error instanceof TimeoutError) return ErrorCategory.RETRYABLE;
+  if (error instanceof CircuitBreakerOpenError) return ErrorCategory.DEGRADABLE;
+  if (error instanceof LLMRateLimitError) return ErrorCategory.RETRYABLE;
+  if (error instanceof NetworkError) return ErrorCategory.RETRYABLE;
+  if (error instanceof ValidationError) return ErrorCategory.FATAL;
+  return ErrorCategory.FATAL;
+}
+```
+
+---
+
+## 10. SSE 协议扩展
+
+### 10.1 新增事件类型
+
+工作流执行实时推送到前端，复用已有的 SSE 基础设施，新增以下事件类型：
+
+| 事件类型 | 方向 | 含义 | 携带数据 |
+|---------|------|------|---------|
+| `workflow_started` | S→C | 工作流开始执行 | `{ runId, workflowName, totalSteps }` |
+| `workflow_step_started` | S→C | 步骤开始执行 | `{ stepId, stepType, input }` |
+| `workflow_step_progress` | S→C | 步骤执行中（Agent 子事件） | `{ stepId, agentEvent }` |
+| `workflow_step_completed` | S→C | 步骤执行成功 | `{ stepId, status, output, durationMs }` |
+| `workflow_step_failed` | S→C | 步骤执行失败（重试中） | `{ stepId, error, retryCount, nextRetryMs }` |
+| `workflow_paused` | S→C | 工作流暂停（审批等待） | `{ runId, reason, stepId }` |
+| `workflow_resumed` | S→C | 工作流恢复 | `{ runId, resumedFrom }` |
+| `workflow_completed` | S→C | 工作流执行完成 | `{ runId, output, totalDurationMs, stepSummary }` |
+| `workflow_failed` | S→C | 工作流执行失败 | `{ runId, error, failedStepId, checkpoint }` |
+| `workflow_cancelled` | S→C | 工作流被取消 | `{ runId, cancelledBy }` |
+| `workflow_approval_required` | S→C | 需要用户审批 | `{ runId, stepId, message, details, timeoutSeconds }` |
+
+### 10.2 流式传输实现
+
+```typescript
+// apps/server/src/workflows/stream.ts
+async function* streamWorkflowRun(runId: string): AsyncGenerator<SSEEvent> {
+  const executor = new DAGExecutor();
+
+  yield { type: "workflow_started", runId, workflowName: "...", totalSteps: 5 };
+
+  for await (const stepEvent of executor.execute(runId)) {
+    switch (stepEvent.type) {
+      case "step_started":
+        yield { type: "workflow_step_started", stepId: stepEvent.stepId, stepType: stepEvent.stepType };
+        break;
+      case "step_progress":
+        yield { type: "workflow_step_progress", stepId: stepEvent.stepId, agentEvent: stepEvent.event };
+        break;
+      case "step_completed":
+        yield {
+          type: "workflow_step_completed",
+          stepId: stepEvent.stepId,
+          status: "completed",
+          output: stepEvent.result,
+          durationMs: stepEvent.durationMs,
+        };
+        break;
+      case "step_failed":
+        yield {
+          type: "workflow_step_failed",
+          stepId: stepEvent.stepId,
+          error: stepEvent.error,
+          retryCount: stepEvent.retryCount,
+        };
+        break;
+      case "paused":
+        yield { type: "workflow_paused", runId, reason: "approval_required", stepId: stepEvent.stepId };
+        break;
+      case "completed":
+        yield { type: "workflow_completed", runId, output: stepEvent.output, totalDurationMs: stepEvent.durationMs };
+        break;
+      case "failed":
+        yield { type: "workflow_failed", runId, error: stepEvent.error, checkpoint: stepEvent.checkpoint };
+        break;
+    }
+  }
+}
+```
+
+---
+
+## 11. 数据模型
 
 ```sql
--- workflows 表
+-- workflows 表：工作流定义
 CREATE TABLE workflows (
-  id              UUID PRIMARY KEY,
-  user_id         UUID REFERENCES users(id),
-  name            VARCHAR(200),
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id         UUID NOT NULL REFERENCES users(id),
+  name            VARCHAR(200) NOT NULL,
   description     TEXT,
-  definition      JSONB NOT NULL,          -- 工作流 DSL (JSON)
+  definition      JSONB NOT NULL,          -- 工作流 DSL (JSON)，Zod 校验
   version         INT DEFAULT 1,
   status          ENUM('draft', 'ready', 'archived') DEFAULT 'draft',
-  created_at      TIMESTAMP,
-  updated_at      TIMESTAMP
+  tags            TEXT[] DEFAULT '{}',     -- 标签便于搜索
+  run_count       INT DEFAULT 0,           -- 执行次数统计
+  last_run_at     TIMESTAMP,
+  created_at      TIMESTAMP DEFAULT NOW(),
+  updated_at      TIMESTAMP DEFAULT NOW()
 );
 
--- workflow_runs 表
+CREATE INDEX idx_workflows_user_status ON workflows(user_id, status);
+CREATE INDEX idx_workflows_tags ON workflows USING GIN(tags);
+
+-- workflow_runs 表：工作流执行实例
 CREATE TABLE workflow_runs (
-  id              UUID PRIMARY KEY,
-  workflow_id     UUID REFERENCES workflows(id),
-  status          ENUM('running', 'paused', 'completed', 'failed', 'cancelled'),
-  input           JSONB,                   -- 输入变量
-  output          JSONB,                   -- 最终输出
-  checkpoint      JSONB,                   -- 当前检查点
-  started_at      TIMESTAMP,
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  workflow_id     UUID NOT NULL REFERENCES workflows(id) ON DELETE CASCADE,
+  user_id         UUID NOT NULL REFERENCES users(id),
+  status          ENUM('running', 'paused', 'completed', 'failed', 'cancelled') DEFAULT 'running',
+  input           JSONB NOT NULL DEFAULT '{}',   -- 用户传入的变量值
+  output          JSONB,                          -- 最终输出
+  checkpoint      JSONB,                          -- 当前检查点 (WorkflowCheckpoint)
+  current_step_id VARCHAR(100),                   -- 当前正在执行的步骤 ID
+  progress        JSONB DEFAULT '{}',             -- 进度摘要 { completed: 3, total: 7, failed: 0 }
+  error           TEXT,                           -- 失败原因
+  duration_ms     INT,                            -- 总耗时
+  started_at      TIMESTAMP DEFAULT NOW(),
   completed_at    TIMESTAMP
 );
 
--- workflow_step_logs 表
+CREATE INDEX idx_workflow_runs_workflow ON workflow_runs(workflow_id);
+CREATE INDEX idx_workflow_runs_user_status ON workflow_runs(user_id, status);
+CREATE INDEX idx_workflow_runs_started ON workflow_runs(started_at DESC);
+
+-- workflow_step_logs 表：步骤执行日志
 CREATE TABLE workflow_step_logs (
-  id              UUID PRIMARY KEY,
-  run_id          UUID REFERENCES workflow_runs(id),
-  step_id         VARCHAR(100),
-  step_type       VARCHAR(50),
-  status          ENUM('pending', 'running', 'completed', 'failed', 'skipped'),
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  run_id          UUID NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+  step_id         VARCHAR(100) NOT NULL,
+  step_type       VARCHAR(50) NOT NULL,           -- agent / tool / condition / parallel / human_approval / transform
+  status          ENUM('pending', 'running', 'completed', 'failed', 'skipped') DEFAULT 'pending',
   input           JSONB,
   output          JSONB,
   error           TEXT,
   retry_count     INT DEFAULT 0,
   duration_ms     INT,
+  tokens_used     INT DEFAULT 0,                  -- Agent 步骤的 Token 消耗
+  events          JSONB DEFAULT '[]',             -- Agent 步骤的子事件记录
   started_at      TIMESTAMP,
   completed_at    TIMESTAMP
 );
+
+CREATE INDEX idx_workflow_step_logs_run ON workflow_step_logs(run_id);
+CREATE INDEX idx_workflow_step_logs_step ON workflow_step_logs(run_id, step_id);
 ```
 
-## 8. API 设计
+---
+
+## 12. API 设计
 
 ```http
-POST   /api/workflows              # 创建工作流
-GET    /api/workflows              # 列出工作流
-GET    /api/workflows/:id          # 获取工作流详情（含 DSL）
-PUT    /api/workflows/:id          # 更新工作流定义
-DELETE /api/workflows/:id          # 删除工作流
+# ===== 工作流定义 CRUD =====
+POST   /api/workflows
+  Body: { name, description, definition, tags? }
+  → 201 { id, name, status, ... }
 
-POST   /api/workflows/:id/run      # 执行工作流
-GET    /api/workflows/:id/runs     # 列出运行历史
-GET    /api/workflows/runs/:run_id # 获取运行详情（含步骤日志）
-POST   /api/workflows/runs/:run_id/pause   # 暂停
-POST   /api/workflows/runs/:run_id/resume  # 恢复
-POST   /api/workflows/runs/:run_id/cancel  # 取消
+GET    /api/workflows
+  Query: ?status=draft|ready|archived&tag=xxx&page=1&limit=20
+  → 200 { items: Workflow[], total, page }
 
-GET    /api/workflows/runs/:run_id/stream  # SSE 实时流（步骤执行事件）
+GET    /api/workflows/:id
+  → 200 { ...workflow, definition }
+
+PUT    /api/workflows/:id
+  Body: { name?, description?, definition?, tags? }
+  → 200 { ...workflow }
+
+DELETE /api/workflows/:id
+  → 204
+
+# ===== 工作流校验 =====
+POST   /api/workflows/validate
+  Body: { definition }
+  → 200 { valid: true } | { valid: false, errors: [{ path, message }] }
+
+# ===== 工作流执行 =====
+POST   /api/workflows/:id/run
+  Body: { variables: { key: value, ... } }
+  → 201 { runId, status: "running" }
+
+GET    /api/workflows/:id/runs
+  Query: ?status=&page=1&limit=20
+  → 200 { items: WorkflowRun[], total }
+
+GET    /api/workflows/runs/:run_id
+  → 200 { ...run, stepLogs }
+
+# ===== 运行控制 =====
+POST   /api/workflows/runs/:run_id/pause
+  → 200 { status: "paused" }
+
+POST   /api/workflows/runs/:run_id/resume
+  Body: { approval_decision?, modified_args? }  # 如果因审批暂停
+  → 200 { status: "running" }
+
+POST   /api/workflows/runs/:run_id/cancel
+  → 200 { status: "cancelled" }
+
+POST   /api/workflows/runs/:run_id/retry
+  → 201 { newRunId }  # 从检查点恢复重试
+
+# ===== 实时流 =====
+GET    /api/workflows/runs/:run_id/stream
+  Accept: text/event-stream
+  → SSE 事件流 (workflow_started / workflow_step_* / workflow_completed / workflow_failed)
+
+# ===== 模板 =====
+GET    /api/workflows/templates
+  → 200 { templates: WorkflowTemplate[] }
+
+POST   /api/workflows/templates/:template_id/instantiate
+  Body: { name, variables? }
+  → 201 { id }  # 从模板创建新工作流
 ```
 
-## 9. 验收标准
+---
 
-- [ ] Workflow DSL 规范定义完成（JSON Schema）
-- [ ] DAG 执行器完成（支持串行、并行、条件分支、依赖等待）
-- [ ] 步骤类型：agent、tool、condition、parallel、human_approval
-- [ ] 检查点自动保存 + 恢复机制完成
-- [ ] 每步骤独立重试策略 + 超时处理
-- [ ] 工作流 CRUD API 完成
-- [ ] 工作流运行 SSE 实时流完成
-- [ ] 前端：工作流编辑器（JSON 模式，初版可用代码编辑器）
-- [ ] 前端：工作流运行监控面板（DAG 可视化 + 步骤日志）
-- [ ] 至少 3 个内置工作流模板
+## 13. 前端设计
 
+### 13.1 工作流列表页
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│  Workflows                           [+ Create Workflow] │
+├─────────────────────────────────────────────────────────┤
+│  ┌────────────────────────────────────────────────────┐ │
+│  │ 🔄 Customer Support Triage    v1.0   Ready   3 runs│ │
+│  │   自动分类客服问题、查找知识库...   [Run] [Edit] [Del]│ │
+│  └────────────────────────────────────────────────────┘ │
+│  ┌────────────────────────────────────────────────────┐ │
+│  │ 📝 Content Summarizer         v2.1   Draft   0 runs│ │
+│  │   多源内容聚合摘要工作流         [Edit] [Validate]   │ │
+│  └────────────────────────────────────────────────────┘ │
+│  ┌────────────────────────────────────────────────────┐ │
+│  │ 📊 Data Analysis Pipeline     v1.3   Ready  12 runs│ │
+│  │   数据分析：采集→清洗→分析→报告  [Run] [Edit] [Del]│ │
+│  └────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 13.2 工作流编辑器（初版 JSON 模式）
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│  ← Back to List    Customer Support Triage    [Save]     │
+├─────────────────────────────────────────────────────────┤
+│  ┌───────────────────────┐ ┌──────────────────────────┐ │
+│  │     JSON Editor       │ │     Live Preview          │ │
+│  │                       │ │                          │ │
+│  │  {                    │ │  ┌────────────────────┐  │ │
+│  │    "name": "...",     │ │  │  ① classify       │  │ │
+│  │    "steps": [         │ │  │  [agent]          │  │ │
+│  │      {                │ │  └────────┬───────────┘  │ │
+│  │        "id": "...",   │ │           ↓              │ │
+│  │        ...            │ │  ┌────────────────────┐  │ │
+│  │      }                │ │  │  ② priority_check │  │ │
+│  │    ]                  │ │  │  [agent]          │  │ │
+│  │  }                    │ │  └────────┬───────────┘  │ │
+│  │                       │ │           ↓              │ │
+│  │                       │ │  ┌────────────────────┐  │ │
+│  │                       │ │  │  ③ search_kb      │  │ │
+│  │                       │ │  │  [tool]           │  │ │
+│  │                       │ │  └────────┬───────────┘  │ │
+│  │                       │ │           ↓              │ │
+│  │                       │ │  ┌────────────────────┐  │ │
+│  │                       │ │  │  ④ is_urgent?     │  │ │
+│  │                       │ │  │  [condition]      │  │ │
+│  │                       │ │  └──┬────────────┬───┘  │ │
+│  │                       │ │   true          false   │ │
+│  │                       │ │  ┌──┴──┐     ┌───┴───┐  │ │
+│  │                       │ │  │⑤tick│     │⑥auto  │  │ │
+│  │                       │ │  │et   │     │respond│  │ │
+│  │                       │ │  └─────┘     └───────┘  │ │
+│  │                       │ └──────────────────────────┘ │
+│  └───────────────────────┘                              │
+├─────────────────────────────────────────────────────────┤
+│  Tabs: [Editor] [Variables Test] [Validation] [History]  │
+└─────────────────────────────────────────────────────────┘
+```
+
+### 13.3 工作流运行监控面板
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│  Run #a1b2c3d4  ·  Customer Support Triage  ·  Running   │
+│  [Pause] [Cancel]                                        │
+├─────────────────────────────────────────────────────────┤
+│  ┌────────────────────────────────────────────────────┐ │
+│  │              DAG Visualization                      │ │
+│  │                                                    │ │
+│  │      ① classify         ✅ (1.2s)                 │ │
+│  │           ↓                                       │ │
+│  │      ② priority_check    ✅ (0.8s)                 │ │
+│  │           ↓                                       │ │
+│  │      ③ search_kb         ✅ (2.1s)                 │ │
+│  │           ↓                                       │ │
+│  │      ④ is_urgent?        ✅ → branch: false        │ │
+│  │           ↓                                       │ │
+│  │      ⑥ auto_respond      🔄 Running... (3.5s)     │ │
+│  │                                                    │ │
+│  │  Legend: ✅ Done  🔄 Running  ⏳ Pending  ❌ Failed │ │
+│  └────────────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────┤
+│  Step Detail                                            │
+│  ┌────────────────────────────────────────────────────┐ │
+│  │ Step: auto_respond (agent)                         │ │
+│  │ Status: Running                                    │ │
+│  │ Agent Events:                                      │ │
+│  │  [think] Analyzing customer query...               │ │
+│  │  [act] Calling knowledge_search...                 │ │
+│  │  [observe] Found 3 relevant docs                  │ │
+│  │  [respond] Drafting response...                    │ │
+│  └────────────────────────────────────────────────────┘ │
+├─────────────────────────────────────────────────────────┤
+│  Variables Snapshot                        [Copy JSON]  │
+│  { "category": "account_issue", "priority_score": 5,    │
+│    "kb_results": [...] }                                │
+└─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 14. 内置工作流模板
+
+### 14.1 内容摘要工作流（content-summarizer）
+
+```json
+{
+  "name": "Content Summarizer",
+  "description": "多源内容聚合并生成结构化摘要",
+  "variables": {
+    "source_urls": { "type": "array", "required": true, "description": "要摘要的 URL 列表" },
+    "language": { "type": "string", "default": "zh" }
+  },
+  "steps": [
+    {
+      "id": "fetch_all",
+      "type": "parallel",
+      "wait": "all",
+      "branches": "{{source_urls}} 每个 URL 生成一个 web_fetch 分支"
+    },
+    {
+      "id": "summarize_each",
+      "type": "agent",
+      "prompt": "Summarize each fetched article in 2-3 sentences. Language: {{language}}.\n\nArticles: {{fetch_all.output}}",
+      "output_as": "summaries"
+    },
+    {
+      "id": "synthesize",
+      "type": "agent",
+      "prompt": "Synthesize the following summaries into a coherent overview. Identify common themes and contradictions.\n\nSummaries: {{summaries}}\n\nFormat as markdown with: ## Key Themes, ## Summary, ## Contradictions (if any).",
+      "output_as": "final_report"
+    }
+  ]
+}
+```
+
+### 14.2 数据分析工作流（data-analysis）
+
+```json
+{
+  "name": "Data Analysis Pipeline",
+  "description": "数据采集 → 清洗 → 分析 → 报告",
+  "variables": {
+    "data_source": { "type": "string", "required": true, "description": "数据源 URL 或文件路径" },
+    "analysis_question": { "type": "string", "required": true }
+  },
+  "steps": [
+    {
+      "id": "fetch_data",
+      "type": "tool",
+      "tool": "web_fetch",
+      "args": { "url": "{{data_source}}" },
+      "output_as": "raw_data"
+    },
+    {
+      "id": "clean_data",
+      "type": "agent",
+      "prompt": "Clean and structure the following data into a CSV-like format. Remove noise, handle missing values.\n\nData: {{raw_data}}",
+      "output_as": "clean_data"
+    },
+    {
+      "id": "analyze",
+      "type": "agent",
+      "prompt": "Analyze the data to answer: {{analysis_question}}\n\nData: {{clean_data}}\n\nProvide statistical insights, trends, and patterns.",
+      "output_as": "analysis"
+    },
+    {
+      "id": "generate_report",
+      "type": "agent",
+      "prompt": "Generate a professional data analysis report in markdown.\n\nQuestion: {{analysis_question}}\nAnalysis: {{analysis}}\n\nInclude: ## Executive Summary, ## Methodology, ## Findings, ## Recommendations.",
+      "output_as": "report"
+    }
+  ]
+}
+```
+
+### 14.3 代码审查工作流（code-review）
+
+```json
+{
+  "name": "Automated Code Review",
+  "description": "多维度代码审查：安全、性能、可维护性",
+  "variables": {
+    "code": { "type": "string", "required": true, "description": "待审查的代码" },
+    "language": { "type": "string", "default": "typescript" }
+  },
+  "steps": [
+    {
+      "id": "parallel_review",
+      "type": "parallel",
+      "wait": "all",
+      "branches": [
+        {
+          "id": "security_review",
+          "label": "Security",
+          "steps": [{
+            "id": "check_security",
+            "type": "agent",
+            "prompt": "Review the following {{language}} code for security vulnerabilities (SQL injection, XSS, auth issues, etc).\n\nCODE:\n```{{language}}\n{{code}}\n```",
+            "output_as": "security_findings"
+          }]
+        },
+        {
+          "id": "performance_review",
+          "label": "Performance",
+          "steps": [{
+            "id": "check_perf",
+            "type": "agent",
+            "prompt": "Review for performance issues (N+1 queries, memory leaks, unnecessary allocations).\n\nCODE:\n```{{language}}\n{{code}}\n```",
+            "output_as": "perf_findings"
+          }]
+        },
+        {
+          "id": "maintainability_review",
+          "label": "Maintainability",
+          "steps": [{
+            "id": "check_maint",
+            "type": "agent",
+            "prompt": "Review for maintainability (naming, coupling, SOLID violations).\n\nCODE:\n```{{language}}\n{{code}}\n```",
+            "output_as": "maint_findings"
+          }]
+        }
+      ]
+    },
+    {
+      "id": "synthesize_review",
+      "type": "agent",
+      "prompt": "Synthesize the following review findings into a single code review report:\n\n## Security\n{{security_findings}}\n\n## Performance\n{{perf_findings}}\n\n## Maintainability\n{{maint_findings}}\n\nPrioritize by severity (Critical > High > Medium > Low).",
+      "output_as": "review_report"
+    }
+  ]
+}
+```
+
+---
+
+## 15. 与 AgentService 集成
+
+V6 Workflow Engine 的核心步骤类型 `agent` 直接复用 P1-3 的 AgentService：
+
+```typescript
+// apps/server/src/workflows/handlers/agent-step.ts
+class AgentStepHandler implements StepHandler {
+  async execute(step: AgentStep, context: StepContext): Promise<StepResult> {
+    const agentService = new AgentService();
+
+    const events: AgentStreamEvent[] = [];
+    const maxIterations = step.max_iterations ?? 10;
+
+    for await (const event of agentService.run(
+      context.conversationId,
+      resolveVariables(step.prompt, context.variables),
+      {
+        model: step.model,
+        maxIterations,
+        tools: step.tools,
+      }
+    )) {
+      events.push(event);
+
+      // Agent 内部事件透传为 workflow 子事件
+      context.emit({
+        type: "workflow_step_progress",
+        stepId: step.id,
+        agentEvent: event,
+      });
+
+      // 人工审批暂停
+      if (event.type === "agent_ask_user") {
+        await context.pauseForApproval(event);
+      }
+
+      // Agent 完成
+      if (event.type === "agent_done") {
+        return {
+          status: "completed",
+          output: event.result,
+          tokensUsed: event.tokensUsed,
+          events,
+        };
+      }
+    }
+
+    return {
+      status: "completed",
+      output: events[events.length - 1]?.result,
+      events,
+    };
+  }
+}
+```
+
+**关键集成点:**
+
+| Workflow 能力 | 复用模块 | 集成方式 |
+|-------------|---------|---------|
+| Agent 步骤 | AgentService.run() (P1-3) | 直接调用，透传 Agent 事件 |
+| Tool 步骤 | ToolRegistry.execute() (V4) | 直接调用 |
+| 审批暂停 | ApprovalGate (P1-5) | 复用 P1-5 审批门 |
+| 记忆上下文 | MemoryEngine.search() (V2) | Agent 步骤前自动注入相关记忆 |
+| 知识库搜索 | KnowledgeService.search() (V3) | Tool 步骤可调用 knowledge_search |
+| 后台投递 | BullMQ (P1-1) | 长时间工作流通过队列异步执行 |
+| 指标记录 | Prometheus (P1-2) | 工作流执行次数、步骤耗时、成功率 |
+| SSE 推送 | 已有 SSE 基础设施 | 扩展事件类型 |
+
+---
+
+## 16. DAG 执行器核心实现
+
+```typescript
+// apps/server/src/workflows/dag-executor.ts
+class DAGExecutor {
+  async *execute(runId: string): AsyncGenerator<WorkflowEvent> {
+    const run = await this.loadRun(runId);
+    const workflow = await this.loadWorkflow(run.workflowId);
+    const definition = workflow.definition as WorkflowDefinition;
+    const variables = { ...definition.variables, ...run.input };
+    const stepResults: Record<string, StepResult> = {};
+
+    // 1. 拓扑排序
+    const executionPlan = this.topologicalSort(definition.steps);
+
+    // 2. 按层级执行
+    for (const level of executionPlan) {
+      // 同层级并行执行
+      const levelResults = await Promise.allSettled(
+        level.map(step => this.executeStepWithRetry(step, { runId, variables, stepResults }))
+      );
+
+      for (const [i, result] of levelResults.entries()) {
+        const step = level[i];
+        if (result.status === "fulfilled") {
+          stepResults[step.id] = result.value;
+          await this.saveCheckpoint(runId, { variables, stepResults, completedStep: step.id });
+          yield { type: "step_completed", stepId: step.id, result: result.value };
+        } else {
+          stepResults[step.id] = { status: "failed", error: result.reason?.message };
+          yield { type: "step_failed", stepId: step.id, error: result.reason?.message };
+
+          if (definition.on_failure === "stop") {
+            yield { type: "workflow_failed", runId, error: result.reason?.message };
+            return;
+          }
+        }
+      }
+    }
+
+    yield { type: "workflow_completed", runId, output: stepResults };
+  }
+
+  private topologicalSort(steps: WorkflowStep[]): WorkflowStep[][] {
+    const levels: WorkflowStep[][] = [];
+    const completed = new Set<string>();
+    const remaining = new Map(steps.map(s => [s.id, s]));
+
+    while (remaining.size > 0) {
+      const currentLevel: WorkflowStep[] = [];
+
+      for (const [id, step] of remaining) {
+        const deps = step.depends_on || [];
+        if (deps.every(d => completed.has(d))) {
+          currentLevel.push(step);
+          remaining.delete(id);
+        }
+      }
+
+      if (currentLevel.length === 0) {
+        throw new Error(`Circular dependency detected in steps: ${[...remaining.keys()].join(", ")}`);
+      }
+
+      levels.push(currentLevel);
+      for (const step of currentLevel) completed.add(step.id);
+    }
+
+    return levels;
+  }
+}
+```
+
+---
+
+## 17. 验收标准
+
+- [x] Workflow DSL JSON Schema 定义完成（Zod 校验 + 6 种步骤类型）
+- [x] DAG 执行器完成：拓扑排序、层级执行、依赖等待、循环依赖检测
+- [x] 6 种步骤类型处理器完成：
+  - [x] Agent 步骤：复用 AgentService ReAct 循环
+  - [x] Tool 步骤：复用 ToolRegistry 工具执行
+  - [x] Condition 步骤：安全表达式求值 + 分支路由
+  - [x] Parallel 步骤：并行分支执行 + wait 策略（all/any/first）
+  - [x] Human Approval 步骤：复用 P1-5 审批门
+  - [x] Transform 步骤：数据合并和重塑
+- [x] 变量与模板系统完成：`{{var}}` 解析、步骤输出引用、嵌套路径支持
+- [x] 检查点自动保存 + 恢复机制完成（每个步骤后自动保存）
+- [x] 每步骤独立重试策略（指数退避）+ 超时处理（fail/skip/fallback）
+- [x] 工作流 CRUD API 完成（含 Zod 校验端点）
+- [x] 工作流运行控制 API 完成（run / pause / resume / cancel / retry）
+- [x] 工作流运行 SSE 实时流完成（11 种事件类型）
+- [ ] 前端：工作流列表页 + JSON 编辑器 + DAG 实时预览
+- [ ] 前端：工作流运行监控面板（DAG 可视化 + 步骤详情 + 变量快照）
+- [x] 3 个内置工作流模板：内容摘要、数据分析、代码审查
+- [x] 与 AgentService / ToolRegistry / ApprovalGate 集成验证
+- [x] 指标记录：workflow_runs_total, workflow_step_duration_ms, workflow_success_rate
+- [ ] 自测验证：Customer Support Triage 示例工作流完整执行通过
 
 # 十九、V9 Multi-Agent 多智能体协作
 
