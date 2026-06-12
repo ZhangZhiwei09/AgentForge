@@ -1,5 +1,9 @@
 // Transform Step Handler — transforms data between workflow steps
-import type { WorkflowTransformStep, StepResult, WorkflowStep } from "@agentforge/shared-types";
+import type {
+  WorkflowTransformStep,
+  StepResult,
+  WorkflowStep,
+} from "@agentforge/shared-types";
 import { SafeEvaluator, variableResolver } from "../variable-resolver.js";
 import type { StepHandler, StepContext } from "./types.js";
 
@@ -23,16 +27,28 @@ export class TransformStepHandler implements StepHandler {
           } catch {
             output = resolved;
           }
-          return { status: "completed", output, durationMs: Date.now() - startTime };
+          return {
+            status: "completed",
+            output,
+            durationMs: Date.now() - startTime,
+          };
         }
 
         case "jsonata": {
-          const resolved = SafeEvaluator.evaluateTemplate(xfStep.expression, vctx);
-          return { status: "completed", output: resolved, durationMs: Date.now() - startTime };
+          const resolved = SafeEvaluator.evaluateTemplate(
+            xfStep.expression,
+            vctx,
+          );
+          return {
+            status: "completed",
+            output: resolved,
+            durationMs: Date.now() - startTime,
+          };
         }
 
         case "map": {
-          const inputKey = xfStep.input || Object.keys(context.stepResults).pop() || "";
+          const inputKey =
+            xfStep.input || Object.keys(context.stepResults).pop() || "";
           const inputData = context.stepResults[inputKey];
           if (!Array.isArray(inputData)) {
             return {
@@ -49,11 +65,16 @@ export class TransformStepHandler implements StepHandler {
             };
             return SafeEvaluator.evaluateTemplate(xfStep.expression, itemCtx);
           });
-          return { status: "completed", output: results, durationMs: Date.now() - startTime };
+          return {
+            status: "completed",
+            output: results,
+            durationMs: Date.now() - startTime,
+          };
         }
 
         case "filter": {
-          const inputKey = xfStep.input || Object.keys(context.stepResults).pop() || "";
+          const inputKey =
+            xfStep.input || Object.keys(context.stepResults).pop() || "";
           const inputData = context.stepResults[inputKey];
           if (!Array.isArray(inputData)) {
             return {
@@ -70,7 +91,11 @@ export class TransformStepHandler implements StepHandler {
             };
             return SafeEvaluator.evaluate(xfStep.expression, itemCtx);
           });
-          return { status: "completed", output: results, durationMs: Date.now() - startTime };
+          return {
+            status: "completed",
+            output: results,
+            durationMs: Date.now() - startTime,
+          };
         }
 
         default:

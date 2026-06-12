@@ -1,5 +1,9 @@
 import { useState, useEffect } from "react";
-import type { AgentStep, AgentSessionDTO, AgentApprovalDTO } from "@agentforge/shared-types";
+import type {
+  AgentStep,
+  AgentSessionDTO,
+  AgentApprovalDTO,
+} from "@agentforge/shared-types";
 import { client } from "../../lib/api";
 import { useAgentStream } from "../../hooks/useAgentStream";
 
@@ -9,7 +13,8 @@ interface AgentPanelProps {
 
 export function AgentPanel({ conversationId }: AgentPanelProps) {
   const [sessions, setSessions] = useState<AgentSessionDTO[]>([]);
-  const [selectedSession, setSelectedSession] = useState<AgentSessionDTO | null>(null);
+  const [selectedSession, setSelectedSession] =
+    useState<AgentSessionDTO | null>(null);
   const [loading, setLoading] = useState(false);
   const [agentTask, setAgentTask] = useState("");
   const [approvals, setApprovals] = useState<AgentApprovalDTO[]>([]);
@@ -42,7 +47,9 @@ export function AgentPanel({ conversationId }: AgentPanelProps) {
 
   const loadSessionDetail = async (id: string) => {
     try {
-      const data = await client.request<AgentSessionDTO>(`/api/agent-sessions/${id}`);
+      const data = await client.request<AgentSessionDTO>(
+        `/api/agent-sessions/${id}`,
+      );
       setSelectedSession(data);
       // Also load approval history for this session
       try {
@@ -89,7 +96,9 @@ export function AgentPanel({ conversationId }: AgentPanelProps) {
       {/* Header */}
       <div className="p-3 border-b border-gray-700 space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-gray-300">🧠 Agent Sessions</h3>
+          <h3 className="text-sm font-semibold text-gray-300">
+            🧠 Agent Sessions
+          </h3>
           <button
             onClick={loadSessions}
             className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
@@ -144,16 +153,22 @@ export function AgentPanel({ conversationId }: AgentPanelProps) {
                 className="w-full text-left p-3 border-b border-gray-800 hover:bg-gray-800/50 transition-colors"
               >
                 <div className="flex items-center justify-between">
-                  <span className={`text-xs font-medium ${statusColor(session.status)}`}>
+                  <span
+                    className={`text-xs font-medium ${statusColor(session.status)}`}
+                  >
                     {session.status.toUpperCase()}
                   </span>
                   <span className="text-xs text-gray-500">
                     {session.scratchpad?.length || 0} steps
                   </span>
                 </div>
-                <p className="text-xs text-gray-400 mt-1 truncate">{session.task}</p>
+                <p className="text-xs text-gray-400 mt-1 truncate">
+                  {session.task}
+                </p>
                 {session.finalSummary && (
-                  <p className="text-xs text-gray-500 mt-1 truncate">{session.finalSummary}</p>
+                  <p className="text-xs text-gray-500 mt-1 truncate">
+                    {session.finalSummary}
+                  </p>
                 )}
               </button>
             ))
@@ -172,69 +187,104 @@ export function AgentPanel({ conversationId }: AgentPanelProps) {
           {/* Session Info */}
           <div className="p-3 border-b border-gray-700">
             <div className="flex items-center justify-between mb-2">
-              <span className={`text-xs font-medium ${statusColor(selectedSession.status)}`}>
+              <span
+                className={`text-xs font-medium ${statusColor(selectedSession.status)}`}
+              >
                 {selectedSession.status.toUpperCase()}
               </span>
               <span className="text-xs text-gray-500">
                 {selectedSession.scratchpad?.length || 0} steps
               </span>
             </div>
-            <p className="text-xs text-gray-300 mb-1"><strong>Task:</strong> {selectedSession.task}</p>
+            <p className="text-xs text-gray-300 mb-1">
+              <strong>Task:</strong> {selectedSession.task}
+            </p>
             {selectedSession.finalSummary && (
-              <p className="text-xs text-green-400"><strong>Result:</strong> {selectedSession.finalSummary}</p>
+              <p className="text-xs text-green-400">
+                <strong>Result:</strong> {selectedSession.finalSummary}
+              </p>
             )}
           </div>
 
           {/* Reasoning Chain */}
           <div className="p-2">
-            <h4 className="text-xs font-semibold text-gray-400 mb-2 px-1">Reasoning Chain</h4>
+            <h4 className="text-xs font-semibold text-gray-400 mb-2 px-1">
+              Reasoning Chain
+            </h4>
             {selectedSession.scratchpad?.map((step: AgentStep, i: number) => (
-              <div key={i} className="mb-2 border border-gray-700 rounded bg-gray-800/50 overflow-hidden">
+              <div
+                key={i}
+                className="mb-2 border border-gray-700 rounded bg-gray-800/50 overflow-hidden"
+              >
                 {/* Step Header */}
                 <div className="px-2 py-1 bg-gray-800 border-b border-gray-700 flex items-center justify-between">
-                  <span className="text-xs font-bold text-gray-400">Step {step.step}</span>
-                  <span className="text-xs text-gray-500">{decisionLabel(step.decision)}</span>
+                  <span className="text-xs font-bold text-gray-400">
+                    Step {step.step}
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {decisionLabel(step.decision)}
+                  </span>
                 </div>
 
                 {/* Step Details */}
                 <div className="p-2 space-y-1.5 text-xs">
                   {step.observation && (
                     <div>
-                      <span className="text-blue-400 font-medium">👁 Observation:</span>
-                      <p className="text-gray-400 mt-0.5 ml-1">{step.observation}</p>
+                      <span className="text-blue-400 font-medium">
+                        👁 Observation:
+                      </span>
+                      <p className="text-gray-400 mt-0.5 ml-1">
+                        {step.observation}
+                      </p>
                     </div>
                   )}
                   {step.analysis && (
                     <div>
-                      <span className="text-yellow-400 font-medium">🧠 Analysis:</span>
-                      <p className="text-gray-400 mt-0.5 ml-1">{step.analysis}</p>
+                      <span className="text-yellow-400 font-medium">
+                        🧠 Analysis:
+                      </span>
+                      <p className="text-gray-400 mt-0.5 ml-1">
+                        {step.analysis}
+                      </p>
                     </div>
                   )}
                   {step.plan && (
                     <div>
-                      <span className="text-purple-400 font-medium">📋 Plan:</span>
+                      <span className="text-purple-400 font-medium">
+                        📋 Plan:
+                      </span>
                       <p className="text-gray-400 mt-0.5 ml-1">{step.plan}</p>
                     </div>
                   )}
                   {step.decision.action === "tool_call" && (
                     <div>
-                      <span className="text-green-400 font-medium">🔧 Tool Call:</span>
+                      <span className="text-green-400 font-medium">
+                        🔧 Tool Call:
+                      </span>
                       <p className="text-gray-400 mt-0.5 ml-1">
-                        {step.decision.tool}({JSON.stringify(step.decision.args)})
+                        {step.decision.tool}(
+                        {JSON.stringify(step.decision.args)})
                       </p>
-                      <p className="text-gray-500 ml-1">Reason: {step.decision.reason}</p>
+                      <p className="text-gray-500 ml-1">
+                        Reason: {step.decision.reason}
+                      </p>
                     </div>
                   )}
                   {step.result && (
                     <div>
-                      <span className="text-cyan-400 font-medium">📤 Result:</span>
-                      <p className="text-gray-400 mt-0.5 ml-1 truncate">{step.result}</p>
+                      <span className="text-cyan-400 font-medium">
+                        📤 Result:
+                      </span>
+                      <p className="text-gray-400 mt-0.5 ml-1 truncate">
+                        {step.result}
+                      </p>
                     </div>
                   )}
                 </div>
               </div>
             ))}
-            {(!selectedSession.scratchpad || selectedSession.scratchpad.length === 0) && (
+            {(!selectedSession.scratchpad ||
+              selectedSession.scratchpad.length === 0) && (
               <p className="text-xs text-gray-500 text-center py-4">
                 No reasoning steps recorded.
               </p>
@@ -243,7 +293,9 @@ export function AgentPanel({ conversationId }: AgentPanelProps) {
             {/* P1-5 Approval History */}
             {approvals.length > 0 && (
               <div className="mt-4 border-t border-gray-700 pt-2">
-                <h4 className="text-xs font-semibold text-gray-400 mb-2 px-1">🛡️ Approval History</h4>
+                <h4 className="text-xs font-semibold text-gray-400 mb-2 px-1">
+                  🛡️ Approval History
+                </h4>
                 {approvals.map((approval) => (
                   <div
                     key={approval.id}
@@ -267,9 +319,13 @@ export function AgentPanel({ conversationId }: AgentPanelProps) {
                         {approval.status}
                       </span>
                     </div>
-                    <p className="text-xs text-gray-500">Risk: {approval.riskLevel} | Reason: {approval.reason}</p>
+                    <p className="text-xs text-gray-500">
+                      Risk: {approval.riskLevel} | Reason: {approval.reason}
+                    </p>
                     {approval.rejectionReason && (
-                      <p className="text-xs text-red-400 mt-0.5">Rejection: {approval.rejectionReason}</p>
+                      <p className="text-xs text-red-400 mt-0.5">
+                        Rejection: {approval.rejectionReason}
+                      </p>
                     )}
                     {approval.decidedAt && (
                       <p className="text-xs text-gray-600 mt-0.5">

@@ -9,7 +9,11 @@
 //   6. 数据回收（失败样本落盘 JSONL）
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
-import { getProvider, resolveModel, listProviders } from "../providers/registry.js";
+import {
+  getProvider,
+  resolveModel,
+  listProviders,
+} from "../providers/registry.js";
 import type { ChatMessage } from "../providers/types.js";
 import { logger } from "@agentforge/logger";
 import { toolRegistry } from "../tools/registry.js";
@@ -23,15 +27,25 @@ const MAX_HISTORY_MESSAGES = 20;
 const MAX_TOOL_ROUNDS = 3;
 
 // 工作时间
-const SERVICE_HOURS_START = parseInt(process.env.CS_SERVICE_HOURS_START || "9", 10);
-const SERVICE_HOURS_END = parseInt(process.env.CS_SERVICE_HOURS_END || "18", 10);
-const SERVICE_DAYS = (process.env.CS_SERVICE_DAYS || "1,2,3,4,5").split(",").map(Number);
+const SERVICE_HOURS_START = parseInt(
+  process.env.CS_SERVICE_HOURS_START || "9",
+  10,
+);
+const SERVICE_HOURS_END = parseInt(
+  process.env.CS_SERVICE_HOURS_END || "18",
+  10,
+);
+const SERVICE_DAYS = (process.env.CS_SERVICE_DAYS || "1,2,3,4,5")
+  .split(",")
+  .map(Number);
 
 // ═══════════════════════════════════════════════════════
 // 固定话术（确定性，LLM 不能改）
 // ═══════════════════════════════════════════════════════
-export const SORRY_TEMPLATE = "抱歉，我目前没有找到相关信息，建议您联系人工客服获取帮助。";
-export const FALLBACK_PREFIX = "以下是可能相关的知识库内容，如需更多帮助请联系人工客服：\n\n";
+export const SORRY_TEMPLATE =
+  "抱歉，我目前没有找到相关信息，建议您联系人工客服获取帮助。";
+export const FALLBACK_PREFIX =
+  "以下是可能相关的知识库内容，如需更多帮助请联系人工客服：\n\n";
 
 // ═══════════════════════════════════════════════════════
 // Zod Schema：LLM 输出的结构化 JSON
@@ -50,7 +64,10 @@ export const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /根据(我司|公司|平台)规定/g, label: "虚假权威引用" },
   { pattern: /经查询[^，。]*[，。]/g, label: "虚假查询陈述" },
   { pattern: /可能是(因为|由于)/g, label: "无依据推测原因" },
-  { pattern: /您的(订单|物流|快递)[^，。]{0,10}(可能|应该)/g, label: "推测客户信息" },
+  {
+    pattern: /您的(订单|物流|快递)[^，。]{0,10}(可能|应该)/g,
+    label: "推测客户信息",
+  },
   { pattern: /建议您(自行|自己)[^，。]*[，。]/g, label: "推卸责任式建议" },
 ];
 
@@ -84,7 +101,8 @@ const CUSTOMER_SERVICE_PROMPT = `你是一个专业的客户服务代表。你�
 {memory_context}
 {knowledge_context}`;
 
-const MEMORY_PROMPT_PREFIX = "\n\n# 客户信息（来自历史对话记忆）\n以下是你了解的该客户的信息：\n";
+const MEMORY_PROMPT_PREFIX =
+  "\n\n# 客户信息（来自历史对话记忆）\n以下是你了解的该客户的信息：\n";
 
 // ═══════════════════════════════════════════════════════
 // 类型
@@ -156,7 +174,9 @@ export class CustomerChatService {
 
       if (!results.length) return { context: "", results: [] };
 
-      const lines = ["【知识库参考资料 —— 以下每条数据均来自知识库，不可修改】"];
+      const lines = [
+        "【知识库参考资料 —— 以下每条数据均来自知识库，不可修改】",
+      ];
       const scoredResults: KnowledgeChunkResult[] = [];
       results.forEach((r, i) => {
         // 每条数据带来源标记：文档名 + 不可修改 + 编号
@@ -186,11 +206,19 @@ export class CustomerChatService {
     if (!sessionId) return ["", []];
     try {
       const engine = new MemoryEngine();
-      const memories = await engine.search(userMessage, CUSTOMER_USER_ID, 5, sessionId);
+      const memories = await engine.search(
+        userMessage,
+        CUSTOMER_USER_ID,
+        5,
+        sessionId,
+      );
       const relevant = memories.filter((m) => m.score > 0.3);
       if (relevant.length > 0) {
         const memoryText = relevant.map((m) => `- ${m.content}`).join("\n");
-        return [MEMORY_PROMPT_PREFIX + memoryText, relevant.map((m) => m.content)];
+        return [
+          MEMORY_PROMPT_PREFIX + memoryText,
+          relevant.map((m) => m.content),
+        ];
       }
     } catch (e) {
       logger.warn(e, "Customer memory injection failed");
@@ -199,7 +227,10 @@ export class CustomerChatService {
   }
 
   // ── 5 层校验管线 ──
-  private validateResponse(rawText: string, knowledgeChunks: string[]): ValidationResult {
+  private validateResponse(
+    rawText: string,
+    knowledgeChunks: string[],
+  ): ValidationResult {
     // Layer 1: JSON 可解析
     let parsed: unknown;
     try {
@@ -211,8 +242,14 @@ export class CustomerChatService {
     // Layer 2: Schema 校验
     const schemaResult = ChatResponseSchema.safeParse(parsed);
     if (!schemaResult.success) {
-      const issues = schemaResult.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
-      return { valid: false, errors: [`Layer2: Schema校验失败 - ${issues.join("; ")}`], layer: 2 };
+      const issues = schemaResult.error.issues.map(
+        (i) => `${i.path.join(".")}: ${i.message}`,
+      );
+      return {
+        valid: false,
+        errors: [`Layer2: Schema校验失败 - ${issues.join("; ")}`],
+        layer: 2,
+      };
     }
 
     const data = schemaResult.data;
@@ -242,9 +279,12 @@ export class CustomerChatService {
         const keywords = chunk.match(/[一-鿿\w]{3,}/g) || [];
         return keywords.some((kw) => answerLower.includes(kw.toLowerCase()));
       }).length;
-      const hitRate = knowledgeChunks.length > 0 ? hitCount / knowledgeChunks.length : 0;
+      const hitRate =
+        knowledgeChunks.length > 0 ? hitCount / knowledgeChunks.length : 0;
       if (hitRate < 0.5 && !data.answer.includes(SORRY_TEMPLATE)) {
-        layer4Errors.push(`Layer4: KB命中率过低 (${(hitRate * 100).toFixed(0)}%)`);
+        layer4Errors.push(
+          `Layer4: KB命中率过低 (${(hitRate * 100).toFixed(0)}%)`,
+        );
         // Layer 4 只是软告警，不影响 valid
       }
     }
@@ -255,7 +295,9 @@ export class CustomerChatService {
       if (data.answer.length > SORRY_TEMPLATE.length + 20) {
         return {
           valid: false,
-          errors: ["Layer5: KB上下文为空但未使用SORRY_TEMPLATE固定话术，疑似编造"],
+          errors: [
+            "Layer5: KB上下文为空但未使用SORRY_TEMPLATE固定话术，疑似编造",
+          ],
           layer: 5,
         };
       }
@@ -305,8 +347,11 @@ export class CustomerChatService {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const rawText = await this.callLLM(
-          messages, primaryModel, primaryProvider,
-          systemPrompt, temperatures[attempt] || 0,
+          messages,
+          primaryModel,
+          primaryProvider,
+          systemPrompt,
+          temperatures[attempt] || 0,
         );
         evalRecord.rawResponse = rawText;
 
@@ -338,14 +383,22 @@ export class CustomerChatService {
 
     // ── 备选模型降级（1 次） ──
     const allProviders = listProviders();
-    const fallbackProvider = allProviders.find((p) => p.type !== primaryProvider);
+    const fallbackProvider = allProviders.find(
+      (p) => p.type !== primaryProvider,
+    );
     if (fallbackProvider) {
       const fallbackModel = fallbackProvider.models[0]?.id || primaryModel;
       try {
-        logger.info({ provider: fallbackProvider.type, model: fallbackModel }, "Falling back to alternative model");
+        logger.info(
+          { provider: fallbackProvider.type, model: fallbackModel },
+          "Falling back to alternative model",
+        );
         const rawText = await this.callLLM(
-          messages, fallbackModel, fallbackProvider.type,
-          systemPrompt, 0.0,
+          messages,
+          fallbackModel,
+          fallbackProvider.type,
+          systemPrompt,
+          0.0,
         );
         evalRecord.rawResponse = rawText;
         evalRecord.modelUsed = `${fallbackProvider.type}:${fallbackModel}`;
@@ -382,7 +435,9 @@ export class CustomerChatService {
   }
 
   // ── 确定性 fallback 构建 ──
-  private buildFallbackResponse(knowledgeResults: KnowledgeChunkResult[]): ChatResponse {
+  private buildFallbackResponse(
+    knowledgeResults: KnowledgeChunkResult[],
+  ): ChatResponse {
     if (knowledgeResults.length > 0) {
       const kbText = knowledgeResults.map((r) => r.content).join("\n\n");
       return {
@@ -403,7 +458,10 @@ export class CustomerChatService {
       const path = await import("path");
       const logDir = path.join(process.cwd(), "logs", "eval");
       await fs.mkdir(logDir, { recursive: true });
-      const logFile = path.join(logDir, `cs-eval-${new Date().toISOString().split("T")[0]}.jsonl`);
+      const logFile = path.join(
+        logDir,
+        `cs-eval-${new Date().toISOString().split("T")[0]}.jsonl`,
+      );
       const line = JSON.stringify(record) + "\n";
       await fs.appendFile(logFile, line, "utf-8");
     } catch {
@@ -459,7 +517,9 @@ export class CustomerChatService {
           where: { id: conversation.id },
           data: { intent },
         });
-      } catch { /* 字段可能未迁移 */ }
+      } catch {
+        /* 字段可能未迁移 */
+      }
     }
 
     // 知识库搜索
@@ -477,9 +537,10 @@ export class CustomerChatService {
     const hoursNote = withinHours
       ? ""
       : "\n\n注意：当前为非工作时间（工作日 9:00-18:00），请在回复开头礼貌提醒客户。";
-    let systemPrompt = CUSTOMER_SERVICE_PROMPT
-      .replace("{knowledge_context}", knowledgeContext + hoursNote)
-      .replace("{memory_context}", "");
+    let systemPrompt = CUSTOMER_SERVICE_PROMPT.replace(
+      "{knowledge_context}",
+      knowledgeContext + hoursNote,
+    ).replace("{memory_context}", "");
 
     // 注入记忆
     const [memoryContext, injectedMemories] = await this.injectMemories(
@@ -555,7 +616,10 @@ export class CustomerChatService {
       type: "done",
       message_id: assistantMsgId,
       usage: {},
-      suggestions: chatResponse.suggestions.length > 0 ? chatResponse.suggestions : undefined,
+      suggestions:
+        chatResponse.suggestions.length > 0
+          ? chatResponse.suggestions
+          : undefined,
       memory: {
         injected: injectedMemories.length,
         extracted: 0,
@@ -592,7 +656,10 @@ export class CustomerChatService {
           conversation.sessionId,
         );
         if (extracted.length > 0) {
-          logger.info({ count: extracted.length, sessionId: conversation.sessionId }, "Customer memories extracted");
+          logger.info(
+            { count: extracted.length, sessionId: conversation.sessionId },
+            "Customer memories extracted",
+          );
         }
       } catch (e) {
         logger.warn(e, "Customer memory extraction failed");

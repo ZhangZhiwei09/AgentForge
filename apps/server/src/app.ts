@@ -57,18 +57,18 @@ export async function createApp() {
   registerMetricsEndpoint(app);
 
   // 注册所有业务路由（每个路由模块内部定义各自的路径前缀）
-  app.route("/", authRoutes);            // /api/auth/* (public)
-  app.route("/", chatRoutes);           // /api/chat, /api/conversations/:id/messages
-  app.route("/", conversationRoutes);    // /api/conversations CRUD
-  app.route("/", providerRoutes);        // /api/providers
-  app.route("/", memoryRoutes);          // /api/memories, /api/memories/search
-  app.route("/", customerChatRoutes);    // /api/customer-chat
-  app.route("/", knowledgeRoutes);       // /api/knowledge/*
-  app.route("/", toolRoutes);            // /api/tools
-  app.route("/", agentRoutes);           // /api/agent/*, /api/agent-sessions/*
-  app.route("/", voiceRoutes);          // /api/voice/*, WS /api/voice/stream
-  app.route("/", workflowRoutes);       // /api/workflows/*, /api/workflows/runs/*
-  app.route("/", teamRoutes);           // /api/teams/*, /api/teams/runs/*
+  app.route("/", authRoutes); // /api/auth/* (public)
+  app.route("/", chatRoutes); // /api/chat, /api/conversations/:id/messages
+  app.route("/", conversationRoutes); // /api/conversations CRUD
+  app.route("/", providerRoutes); // /api/providers
+  app.route("/", memoryRoutes); // /api/memories, /api/memories/search
+  app.route("/", customerChatRoutes); // /api/customer-chat
+  app.route("/", knowledgeRoutes); // /api/knowledge/*
+  app.route("/", toolRoutes); // /api/tools
+  app.route("/", agentRoutes); // /api/agent/*, /api/agent-sessions/*
+  app.route("/", voiceRoutes); // /api/voice/*, WS /api/voice/stream
+  app.route("/", workflowRoutes); // /api/workflows/*, /api/workflows/runs/*
+  app.route("/", teamRoutes); // /api/teams/*, /api/teams/runs/*
 
   // P1-1 Bull Board 监控面板 — 仅在 Redis 可用时挂载
   try {

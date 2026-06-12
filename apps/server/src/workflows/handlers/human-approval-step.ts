@@ -1,5 +1,9 @@
 // Human Approval Step Handler — pauses the workflow and waits for user approval
-import type { WorkflowHumanApprovalStep, StepResult, WorkflowStep } from "@agentforge/shared-types";
+import type {
+  WorkflowHumanApprovalStep,
+  StepResult,
+  WorkflowStep,
+} from "@agentforge/shared-types";
 import { variableResolver } from "../variable-resolver.js";
 import type { StepHandler, StepContext } from "./types.js";
 
@@ -45,14 +49,20 @@ export class HumanApprovalStepHandler implements StepHandler {
           status: "failed",
           output: null,
           durationMs: Date.now() - startTime,
-          reason: decision.action === "timed_out" ? "approval_timeout" : "approval_rejected",
+          reason:
+            decision.action === "timed_out"
+              ? "approval_timeout"
+              : "approval_rejected",
         };
       }
       return {
         status: "skipped",
         output: null,
         durationMs: Date.now() - startTime,
-        reason: decision.action === "timed_out" ? "approval_timeout" : "approval_rejected",
+        reason:
+          decision.action === "timed_out"
+            ? "approval_timeout"
+            : "approval_rejected",
       };
     }
 

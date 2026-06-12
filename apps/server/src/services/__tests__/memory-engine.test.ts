@@ -4,7 +4,14 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // ---- Mock all external dependencies ----
 // Use vi.hoisted to make mock refs available inside vi.mock factories
 const { mockChatSync, mockGetProvider } = vi.hoisted(() => ({
-  mockChatSync: vi.fn<(...args: Array<unknown>) => Promise<{ content: string; usage: { prompt_tokens: number; completion_tokens: number } }>>(async () => ({
+  mockChatSync: vi.fn<
+    (
+      ...args: Array<unknown>
+    ) => Promise<{
+      content: string;
+      usage: { prompt_tokens: number; completion_tokens: number };
+    }>
+  >(async () => ({
     content: JSON.stringify([
       { type: "semantic", content: "User works at Acme Corp", importance: 0.8 },
       { type: "preference", content: "User prefers Python", importance: 0.7 },
@@ -52,24 +59,30 @@ vi.mock("../../db.js", () => {
           memoryStore.push(record);
           return record;
         }),
-        findMany: vi.fn(async (args?: { where?: Record<string, unknown>; orderBy?: unknown; take?: number }) => {
-          let results = [...memoryStore];
-          const where = args?.where as Record<string, unknown> | undefined;
-          if (where?.userId) {
-            results = results.filter((m) => m.userId === where.userId);
-          }
-          if (where?.type) {
-            results = results.filter((m) => m.type === where.type);
-          }
-          if (where?.id && typeof where.id === "object") {
-            const idFilter = where.id as { in: string[] };
-            results = results.filter((m) => idFilter.in.includes(m.id));
-          }
-          if (args?.take) {
-            results = results.slice(0, args.take as number);
-          }
-          return results;
-        }),
+        findMany: vi.fn(
+          async (args?: {
+            where?: Record<string, unknown>;
+            orderBy?: unknown;
+            take?: number;
+          }) => {
+            let results = [...memoryStore];
+            const where = args?.where as Record<string, unknown> | undefined;
+            if (where?.userId) {
+              results = results.filter((m) => m.userId === where.userId);
+            }
+            if (where?.type) {
+              results = results.filter((m) => m.type === where.type);
+            }
+            if (where?.id && typeof where.id === "object") {
+              const idFilter = where.id as { in: string[] };
+              results = results.filter((m) => idFilter.in.includes(m.id));
+            }
+            if (args?.take) {
+              results = results.slice(0, args.take as number);
+            }
+            return results;
+          },
+        ),
         findUnique: vi.fn(async (args: { where: { id: string } }) => {
           return memoryStore.find((m) => m.id === args.where.id) || null;
         }),
@@ -106,7 +119,10 @@ vi.mock("../embeddings.js", () => ({
   getDefaultEmbeddingProvider: vi.fn(() => ({
     embedSingle: vi.fn(async (text: string) => {
       const len = text.length;
-      return Array.from({ length: 768 }, (_, i) => Math.sin(len + i * 0.1) * 0.01);
+      return Array.from(
+        { length: 768 },
+        (_, i) => Math.sin(len + i * 0.1) * 0.01,
+      );
     }),
   })),
 }));
@@ -184,7 +200,10 @@ describe("MemoryEngine", () => {
     it("should list memories for a user", async () => {
       // Store some memories first
       await engine.store({ type: "semantic", content: "Test A" }, "user-list");
-      await engine.store({ type: "preference", content: "Test B" }, "user-list");
+      await engine.store(
+        { type: "preference", content: "Test B" },
+        "user-list",
+      );
 
       const memories = await engine.list("user-list");
       expect(memories.length).toBeGreaterThanOrEqual(2);
@@ -193,7 +212,10 @@ describe("MemoryEngine", () => {
 
     it("should filter by type", async () => {
       await engine.store({ type: "semantic", content: "Fact" }, "user-filter");
-      await engine.store({ type: "preference", content: "Pref" }, "user-filter");
+      await engine.store(
+        { type: "preference", content: "Pref" },
+        "user-filter",
+      );
 
       const semantic = await engine.list("user-filter", "semantic");
       expect(semantic.every((m) => m.type === "semantic")).toBe(true);
@@ -209,15 +231,27 @@ describe("MemoryEngine", () => {
     it("should return search results with scores", async () => {
       // Store some test memories
       await engine.store(
-        { type: "semantic", content: "User likes Python programming", importance: 0.9 },
+        {
+          type: "semantic",
+          content: "User likes Python programming",
+          importance: 0.9,
+        },
         "user-search",
       );
       await engine.store(
-        { type: "preference", content: "User hates JavaScript", importance: 0.6 },
+        {
+          type: "preference",
+          content: "User hates JavaScript",
+          importance: 0.6,
+        },
         "user-search",
       );
 
-      const results = await engine.search("Python programming", "user-search", 3);
+      const results = await engine.search(
+        "Python programming",
+        "user-search",
+        3,
+      );
 
       expect(Array.isArray(results)).toBe(true);
       results.forEach((r) => {
@@ -245,7 +279,10 @@ describe("MemoryEngine", () => {
     it("should call provider.chatSync with correct parameters", async () => {
       const messages = [
         { role: "user", content: "I work at Acme Corp and love Python" },
-        { role: "assistant", content: "That's great! Python is a wonderful language." },
+        {
+          role: "assistant",
+          content: "That's great! Python is a wonderful language.",
+        },
       ];
 
       await engine.extractAndStore(

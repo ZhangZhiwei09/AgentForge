@@ -2,7 +2,11 @@
 // Messages are persisted to agent_team_runs.messages JSONB for recovery and auditing
 import { randomUUID } from "crypto";
 import { EventEmitter } from "events";
-import type { TeamAgentMessage, AgentMessageType, AgentMessagePayload } from "@agentforge/shared-types";
+import type {
+  TeamAgentMessage,
+  AgentMessageType,
+  AgentMessagePayload,
+} from "@agentforge/shared-types";
 
 export class MessageBus {
   private emitter: EventEmitter;
@@ -16,7 +20,14 @@ export class MessageBus {
   }
 
   /** Send a message */
-  send(from: string, to: string, type: AgentMessageType, payload: AgentMessagePayload, correlationId?: string, replyTo?: string): TeamAgentMessage {
+  send(
+    from: string,
+    to: string,
+    type: AgentMessageType,
+    payload: AgentMessagePayload,
+    correlationId?: string,
+    replyTo?: string,
+  ): TeamAgentMessage {
     const msg: TeamAgentMessage = {
       id: randomUUID(),
       teamRunId: this.teamRunId,
@@ -43,7 +54,10 @@ export class MessageBus {
   }
 
   /** Subscribe to messages for a specific agent */
-  subscribe(agentName: string, handler: (msg: TeamAgentMessage) => void): () => void {
+  subscribe(
+    agentName: string,
+    handler: (msg: TeamAgentMessage) => void,
+  ): () => void {
     this.emitter.on(agentName, handler);
     return () => {
       this.emitter.off(agentName, handler);
@@ -63,7 +77,11 @@ export class MessageBus {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         unsubscribe();
-        reject(new Error(`Timeout waiting for message from ${from} after ${timeoutMs}ms`));
+        reject(
+          new Error(
+            `Timeout waiting for message from ${from} after ${timeoutMs}ms`,
+          ),
+        );
       }, timeoutMs);
 
       const unsubscribe = this.subscribe(from, (msg) => {
@@ -75,11 +93,18 @@ export class MessageBus {
   }
 
   /** Wait for any message of a specific type */
-  waitForType(type: AgentMessageType, timeoutMs: number = 120000): Promise<TeamAgentMessage> {
+  waitForType(
+    type: AgentMessageType,
+    timeoutMs: number = 120000,
+  ): Promise<TeamAgentMessage> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         unsubscribe();
-        reject(new Error(`Timeout waiting for message type ${type} after ${timeoutMs}ms`));
+        reject(
+          new Error(
+            `Timeout waiting for message type ${type} after ${timeoutMs}ms`,
+          ),
+        );
       }, timeoutMs);
 
       const handler = (msg: TeamAgentMessage) => {

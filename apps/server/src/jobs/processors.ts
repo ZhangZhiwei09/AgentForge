@@ -1,7 +1,10 @@
 // BullMQ job processors — extracted for testability
 // These are imported by worker.ts to register with BullMQ Workers
 import type { Job } from "bullmq";
-import type { MemoryExtractionJobData, KnowledgeIngestionJobData } from "./queues.js";
+import type {
+  MemoryExtractionJobData,
+  KnowledgeIngestionJobData,
+} from "./queues.js";
 import { logger } from "@agentforge/logger";
 
 /**
@@ -9,7 +12,9 @@ import { logger } from "@agentforge/logger";
  * Called by the worker — extracts memories from conversation messages
  * and stores them via MemoryEngine (LLM extraction + embedding + Milvus/PG dual write).
  */
-export async function processMemoryExtraction(job: Job<MemoryExtractionJobData>) {
+export async function processMemoryExtraction(
+  job: Job<MemoryExtractionJobData>,
+) {
   const { messages, userId, conversationId, providerName } = job.data;
   logger.info(
     { jobId: job.id, userId, messageCount: messages.length },
@@ -38,12 +43,15 @@ export async function processMemoryExtraction(job: Job<MemoryExtractionJobData>)
  * Called by the worker — reads the pre-created KnowledgeDocument,
  * chunks the content, generates embeddings, and writes to Milvus + PostgreSQL.
  */
-export async function processKnowledgeIngestion(job: Job<KnowledgeIngestionJobData>) {
+export async function processKnowledgeIngestion(
+  job: Job<KnowledgeIngestionJobData>,
+) {
   const { docId, kbId } = job.data;
   logger.info({ jobId: job.id, docId }, "Processing knowledge ingestion job");
 
   // Dynamic import to avoid loading full server at parse time
-  const { KnowledgeIngestionService } = await import("../services/knowledge-ingestion.js");
+  const { KnowledgeIngestionService } =
+    await import("../services/knowledge-ingestion.js");
   const ingestion = new KnowledgeIngestionService();
   await ingestion.processExistingDocument(docId, kbId);
 

@@ -28,14 +28,9 @@ const webFetchDef: ToolDefinition = {
   },
 };
 
-async function webFetchExecute(
-  args: Record<string, unknown>,
-): Promise<string> {
+async function webFetchExecute(args: Record<string, unknown>): Promise<string> {
   const url = (args.url as string) || "";
-  const maxChars = Math.min(
-    ((args.max_chars as number) || 10_000),
-    50_000,
-  );
+  const maxChars = Math.min((args.max_chars as number) || 10_000, 50_000);
 
   // Validate URL
   if (!/^https?:\/\/.+/i.test(url)) {
@@ -73,7 +68,13 @@ async function webFetchExecute(
     const duration = Date.now() - start;
 
     logger.info(
-      { url, status, bodyLength, returnedChars: truncated.length, durationMs: duration },
+      {
+        url,
+        status,
+        bodyLength,
+        returnedChars: truncated.length,
+        durationMs: duration,
+      },
       "web_fetch executed",
     );
 

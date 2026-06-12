@@ -10,9 +10,13 @@ const {
   mockToolExecute,
 } = vi.hoisted(() => ({
   mockProviderStreamChat: vi.fn(),
-  mockMemorySearch: vi.fn<() => Promise<Array<Record<string, unknown>>>>(async () => []),
+  mockMemorySearch: vi.fn<() => Promise<Array<Record<string, unknown>>>>(
+    async () => [],
+  ),
   mockMemoryExtract: vi.fn(async () => []),
-  mockKnowledgeSearch: vi.fn<() => Promise<Array<Record<string, unknown>>>>(async () => []),
+  mockKnowledgeSearch: vi.fn<() => Promise<Array<Record<string, unknown>>>>(
+    async () => [],
+  ),
   mockToolExecute: vi.fn(async () => "tool result"),
 }));
 
@@ -22,7 +26,9 @@ vi.mock("../../providers/registry.js", () => ({
   getProvider: vi.fn(() => ({
     streamChat: mockProviderStreamChat,
     chatSync: vi.fn(),
-    listModels: vi.fn(() => [{ id: "gpt-4o", name: "GPT-4o", provider: "openai", max_tokens: 128000 }]),
+    listModels: vi.fn(() => [
+      { id: "gpt-4o", name: "GPT-4o", provider: "openai", max_tokens: 128000 },
+    ]),
   })),
   resolveModel: vi.fn(() => ["openai", "gpt-4o"]),
   listProviders: vi.fn(() => []),
@@ -64,11 +70,16 @@ vi.mock("../../db.js", () => ({
         return conversationStore.get(args.where.id) || null;
       }),
       findFirst: vi.fn(),
-      update: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => {
-        const conv = conversationStore.get(args.where.id);
-        if (conv) Object.assign(conv, args.data);
-        return conv;
-      }),
+      update: vi.fn(
+        async (args: {
+          where: { id: string };
+          data: Record<string, unknown>;
+        }) => {
+          const conv = conversationStore.get(args.where.id);
+          if (conv) Object.assign(conv, args.data);
+          return conv;
+        },
+      ),
     },
     message: {
       create: vi.fn(async (args: { data: Record<string, unknown> }) => {
@@ -77,9 +88,14 @@ vi.mock("../../db.js", () => ({
         messageStore.set(args.data.conversationId as string, msgs);
         return args.data;
       }),
-      findMany: vi.fn(async (args: { where: { conversationId: string }; orderBy: unknown }) => {
-        return messageStore.get(args.where.conversationId) || [];
-      }),
+      findMany: vi.fn(
+        async (args: {
+          where: { conversationId: string };
+          orderBy: unknown;
+        }) => {
+          return messageStore.get(args.where.conversationId) || [];
+        },
+      ),
     },
     $connect: vi.fn(),
     $disconnect: vi.fn(),
@@ -128,7 +144,10 @@ describe("ChatService", () => {
     it("should yield meta event with message_id and model info", async () => {
       mockProviderStreamChat.mockImplementation(async function* () {
         yield { type: "token", content: "Hello!" };
-        yield { type: "done", usage: { prompt_tokens: 10, completion_tokens: 1 } };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 10, completion_tokens: 1 },
+        };
       });
 
       const events = await collectStreamEvents(
@@ -146,7 +165,10 @@ describe("ChatService", () => {
       mockProviderStreamChat.mockImplementation(async function* () {
         yield { type: "token", content: "Hi " };
         yield { type: "token", content: "there" };
-        yield { type: "done", usage: { prompt_tokens: 5, completion_tokens: 2 } };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 5, completion_tokens: 2 },
+        };
       });
 
       const events = await collectStreamEvents(
@@ -184,7 +206,10 @@ describe("ChatService", () => {
     it("should save user message to database", async () => {
       mockProviderStreamChat.mockImplementation(async function* () {
         yield { type: "token", content: "ok" };
-        yield { type: "done", usage: { prompt_tokens: 3, completion_tokens: 1 } };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 3, completion_tokens: 1 },
+        };
       });
 
       await collectStreamEvents(
@@ -200,7 +225,10 @@ describe("ChatService", () => {
     it("should save assistant message after streaming completes", async () => {
       mockProviderStreamChat.mockImplementation(async function* () {
         yield { type: "token", content: "response" };
-        yield { type: "done", usage: { prompt_tokens: 3, completion_tokens: 1 } };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 3, completion_tokens: 1 },
+        };
       });
 
       await collectStreamEvents(
@@ -219,11 +247,18 @@ describe("ChatService", () => {
 
       mockProviderStreamChat.mockImplementation(async function* () {
         yield { type: "token", content: "Hi" };
-        yield { type: "done", usage: { prompt_tokens: 2, completion_tokens: 1 } };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 2, completion_tokens: 1 },
+        };
       });
 
       await collectStreamEvents(
-        service.streamChat("conv-test", "This is a test message for title", "gpt-4o"),
+        service.streamChat(
+          "conv-test",
+          "This is a test message for title",
+          "gpt-4o",
+        ),
       );
 
       const conversationAfter = conversationStore.get("conv-test");
@@ -241,41 +276,68 @@ describe("ChatService", () => {
         mockProviderStreamChat.mockImplementation(async function* () {
           if (callCount === 0) {
             callCount++;
-            yield { type: "tool_call", tool_call: { id: "tc1", name: "calculator", arguments: '{"expr":"2+2"}' } };
-            yield { type: "done", usage: { prompt_tokens: 10, completion_tokens: 5 } };
+            yield {
+              type: "tool_call",
+              tool_call: {
+                id: "tc1",
+                name: "calculator",
+                arguments: '{"expr":"2+2"}',
+              },
+            };
+            yield {
+              type: "done",
+              usage: { prompt_tokens: 10, completion_tokens: 5 },
+            };
           } else {
             yield { type: "token", content: "The result is 4" };
-            yield { type: "done", usage: { prompt_tokens: 15, completion_tokens: 5 } };
+            yield {
+              type: "done",
+              usage: { prompt_tokens: 15, completion_tokens: 5 },
+            };
           }
         });
 
         mockToolExecute.mockResolvedValueOnce("4");
 
         const events = await collectStreamEvents(
-          service.streamChat("conv-test", "What is 2+2?", "gpt-4o", "", null, ["calculator"]),
+          service.streamChat("conv-test", "What is 2+2?", "gpt-4o", "", null, [
+            "calculator",
+          ]),
         );
 
         const toolCallEvts = events.filter((e) => e.type === "tool_call");
         const toolResultEvts = events.filter((e) => e.type === "tool_result");
         expect(toolCallEvts.length).toBeGreaterThanOrEqual(1);
         expect(toolResultEvts.length).toBeGreaterThanOrEqual(1);
-        expect(mockToolExecute).toHaveBeenCalledWith("calculator", { expr: "2+2" });
+        expect(mockToolExecute).toHaveBeenCalledWith("calculator", {
+          expr: "2+2",
+        });
       });
 
       it("should limit tool calling to MAX_TOOL_ROUNDS (5)", async () => {
         mockProviderStreamChat.mockImplementation(async function* () {
-          yield { type: "tool_call", tool_call: { id: "tc", name: "calculator", arguments: "{}" } };
-          yield { type: "done", usage: { prompt_tokens: 5, completion_tokens: 2 } };
+          yield {
+            type: "tool_call",
+            tool_call: { id: "tc", name: "calculator", arguments: "{}" },
+          };
+          yield {
+            type: "done",
+            usage: { prompt_tokens: 5, completion_tokens: 2 },
+          };
         });
 
         mockToolExecute.mockResolvedValue("result");
 
         const events = await collectStreamEvents(
-          service.streamChat("conv-test", "Loop", "gpt-4o", "", null, ["calculator"]),
+          service.streamChat("conv-test", "Loop", "gpt-4o", "", null, [
+            "calculator",
+          ]),
         );
 
         // Should have at most 5 rounds of tool calls
-        const toolCallRounds = events.filter((e) => e.type === "tool_call").length;
+        const toolCallRounds = events.filter(
+          (e) => e.type === "tool_call",
+        ).length;
         expect(toolCallRounds).toBeLessThanOrEqual(5);
       });
     });
@@ -283,12 +345,26 @@ describe("ChatService", () => {
     describe("memory injection", () => {
       it("should include memory_count in meta event", async () => {
         mockMemorySearch.mockResolvedValueOnce([
-          { id: "m1", content: "User likes Python", score: 0.9, userId: "user-test", type: "preference", importance: 0.9, metadata: null, conversationId: null, createdAt: new Date(), updatedAt: new Date() },
+          {
+            id: "m1",
+            content: "User likes Python",
+            score: 0.9,
+            userId: "user-test",
+            type: "preference",
+            importance: 0.9,
+            metadata: null,
+            conversationId: null,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          },
         ]);
 
         mockProviderStreamChat.mockImplementation(async function* () {
           yield { type: "token", content: "Hi" };
-          yield { type: "done", usage: { prompt_tokens: 3, completion_tokens: 1 } };
+          yield {
+            type: "done",
+            usage: { prompt_tokens: 3, completion_tokens: 1 },
+          };
         });
 
         const events = await collectStreamEvents(
@@ -304,7 +380,10 @@ describe("ChatService", () => {
 
         mockProviderStreamChat.mockImplementation(async function* () {
           yield { type: "token", content: "Fallback" };
-          yield { type: "done", usage: { prompt_tokens: 3, completion_tokens: 1 } };
+          yield {
+            type: "done",
+            usage: { prompt_tokens: 3, completion_tokens: 1 },
+          };
         });
 
         // Should not throw even when memory injection fails
@@ -321,12 +400,23 @@ describe("ChatService", () => {
     describe("knowledge injection", () => {
       it("should include knowledge_count in meta event", async () => {
         mockKnowledgeSearch.mockResolvedValueOnce([
-          { chunkId: "c1", docId: "d1", kbId: "kb1", content: "Relevant doc", score: 0.95, chunkIndex: 0, docTitle: "Doc Title" },
+          {
+            chunkId: "c1",
+            docId: "d1",
+            kbId: "kb1",
+            content: "Relevant doc",
+            score: 0.95,
+            chunkIndex: 0,
+            docTitle: "Doc Title",
+          },
         ]);
 
         mockProviderStreamChat.mockImplementation(async function* () {
           yield { type: "token", content: "Answer" };
-          yield { type: "done", usage: { prompt_tokens: 5, completion_tokens: 1 } };
+          yield {
+            type: "done",
+            usage: { prompt_tokens: 5, completion_tokens: 1 },
+          };
         });
 
         const events = await collectStreamEvents(

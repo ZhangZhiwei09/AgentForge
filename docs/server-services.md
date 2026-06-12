@@ -17,27 +17,27 @@ Provider 层 (src/providers/) → LLM 抽象：统一不同 AI 厂商的接口
 
 ### 一、聊天服务（核心编排层）
 
-| 文件 | 类 | 职责 |
-|------|-----|------|
-| `chat.ts` | `ChatService` | 主聊天流程：加载历史 → 注入记忆到 system prompt → 流式调用 LLM → 保存消息 → 自动生成对话标题 → 提取新记忆到向量库 |
-| `customer-chat.ts` | `CustomerChatService` | 客服聊天变体：搜索知识库 → 中文客服 prompt → 基于 sessionId 管理匿名对话 |
+| 文件               | 类                    | 职责                                                                                                              |
+| ------------------ | --------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `chat.ts`          | `ChatService`         | 主聊天流程：加载历史 → 注入记忆到 system prompt → 流式调用 LLM → 保存消息 → 自动生成对话标题 → 提取新记忆到向量库 |
+| `customer-chat.ts` | `CustomerChatService` | 客服聊天变体：搜索知识库 → 中文客服 prompt → 基于 sessionId 管理匿名对话                                          |
 
 ### 二、知识库服务（RAG 管线）
 
-| 文件 | 类 | 职责 |
-|------|-----|------|
-| `knowledge.ts` | `KnowledgeService` | 混合检索：dense 向量 + BM25 稀疏向量，可选 LLM Rerank 重排序 |
+| 文件                     | 类                          | 职责                                                                   |
+| ------------------------ | --------------------------- | ---------------------------------------------------------------------- |
+| `knowledge.ts`           | `KnowledgeService`          | 混合检索：dense 向量 + BM25 稀疏向量，可选 LLM Rerank 重排序           |
 | `knowledge-ingestion.ts` | `KnowledgeIngestionService` | 文档摄取：切分 → embedding → Milvus → PG，支持批量/删除/重建 BM25 索引 |
 
 ### 三、基础设施服务（底层工具）
 
-| 文件 | 类 | 职责 |
-|------|-----|------|
-| `memory-engine.ts` | `MemoryEngine` | 长期记忆：CRUD + 向量搜索 + LLM 从对话中提取用户事实/偏好 |
-| `embeddings.ts` | `OpenAIEmbeddingProvider` | Embedding 封装：OpenAI API → 1536 维向量 |
-| `milvus.ts` | （函数模块） | Milvus 客户端单例 + Collection 自动创建/索引 |
-| `bm25.ts` | `BM25SparseEncoder` | 稀疏向量编码器（当前为 stub，返回空向量） |
-| `text-splitter.ts` | `RecursiveCharacterTextSplitter` | 递归文本切分，按分隔符优先级降级，带 overlap |
+| 文件               | 类                               | 职责                                                      |
+| ------------------ | -------------------------------- | --------------------------------------------------------- |
+| `memory-engine.ts` | `MemoryEngine`                   | 长期记忆：CRUD + 向量搜索 + LLM 从对话中提取用户事实/偏好 |
+| `embeddings.ts`    | `OpenAIEmbeddingProvider`        | Embedding 封装：OpenAI API → 1536 维向量                  |
+| `milvus.ts`        | （函数模块）                     | Milvus 客户端单例 + Collection 自动创建/索引              |
+| `bm25.ts`          | `BM25SparseEncoder`              | 稀疏向量编码器（当前为 stub，返回空向量）                 |
+| `text-splitter.ts` | `RecursiveCharacterTextSplitter` | 递归文本切分，按分隔符优先级降级，带 overlap              |
 
 ---
 
@@ -62,8 +62,8 @@ Provider 层 (src/providers/) → LLM 抽象：统一不同 AI 厂商的接口
 
 ## 各文件详细分析
 
-| 文件 | 文档 |
-|------|------|
+| 文件               | 文档                                                 |
+| ------------------ | ---------------------------------------------------- |
 | `customer-chat.ts` | [CustomerChatService 数据流详解 →](customer-chat.md) |
 
 其他文件的分析可通过 `/analyze-flow` skill 逐步补充。

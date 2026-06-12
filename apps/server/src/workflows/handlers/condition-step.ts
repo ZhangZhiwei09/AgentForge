@@ -1,5 +1,9 @@
 // Condition Step Handler — evaluates a condition expression and routes to branches
-import type { WorkflowConditionStep, WorkflowStep, StepResult } from "@agentforge/shared-types";
+import type {
+  WorkflowConditionStep,
+  WorkflowStep,
+  StepResult,
+} from "@agentforge/shared-types";
 import { SafeEvaluator } from "../variable-resolver.js";
 import type { StepHandler, StepContext } from "./types.js";
 
@@ -19,7 +23,9 @@ export class ConditionStepHandler implements StepHandler {
     // Find matching branch (fallback to default or first available)
     const branchSteps: WorkflowStep[] =
       condStep.branches[branchKey] ||
-      (condStep.default_branch ? condStep.branches[condStep.default_branch] : null) ||
+      (condStep.default_branch
+        ? condStep.branches[condStep.default_branch]
+        : null) ||
       [];
 
     return {

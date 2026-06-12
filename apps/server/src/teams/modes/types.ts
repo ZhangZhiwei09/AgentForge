@@ -1,5 +1,10 @@
 // Mode Types — shared types for collaboration mode executors
-import type { TeamDefinition, AgentRole, TeamStreamEvent, AgentStreamEvent } from "@agentforge/shared-types";
+import type {
+  TeamDefinition,
+  AgentRole,
+  TeamStreamEvent,
+  AgentStreamEvent,
+} from "@agentforge/shared-types";
 import type { MessageBus } from "../message-bus.js";
 import type { Blackboard } from "../blackboard.js";
 
@@ -36,9 +41,13 @@ ${role.systemPrompt}
 ${blackboard.toContextString()}
 
 ## 最近消息
-${bus.getRecent(10).map(m =>
-    `[${m.from}→${m.to}] ${m.type}: ${JSON.stringify(m.payload).substring(0, 200)}`
-  ).join('\n')}
+${bus
+  .getRecent(10)
+  .map(
+    (m) =>
+      `[${m.from}→${m.to}] ${m.type}: ${JSON.stringify(m.payload).substring(0, 200)}`,
+  )
+  .join("\n")}
 
 ## 任务
 ${task}
@@ -48,7 +57,10 @@ ${task}
 }
 
 /** Map agent names to roles from the definition */
-export function getRoleByName(definition: TeamDefinition, name: string): AgentRole | undefined {
+export function getRoleByName(
+  definition: TeamDefinition,
+  name: string,
+): AgentRole | undefined {
   return definition.agents.find((a) => a.name === name);
 }
 

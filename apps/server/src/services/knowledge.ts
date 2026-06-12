@@ -1,7 +1,12 @@
 // 知识库检索服务 —— 混合搜索（dense + sparse） + LLM Rerank
 // 搜索流程：用户查询 → embedding → Milvus dense 搜索 → 合并 BM25 稀疏向量分数 → 可选 LLM 重排序
 import { prisma } from "../db.js";
-import { getMilvusClient, MILVUS_KNOWLEDGE_COLLECTION, EMBEDDING_DIM, ensureKnowledgeCollection } from "./milvus.js";
+import {
+  getMilvusClient,
+  MILVUS_KNOWLEDGE_COLLECTION,
+  EMBEDDING_DIM,
+  ensureKnowledgeCollection,
+} from "./milvus.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
 import { tokenize } from "./tokenizer.js";
 import { getProvider } from "../providers/registry.js";
@@ -9,7 +14,7 @@ import { logger } from "@agentforge/logger";
 import { milvusSearchDurationMs } from "../observability/metrics.js";
 import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
 
-const DENSE_WEIGHT = 0.6;  // 语义向量权重
+const DENSE_WEIGHT = 0.6; // 语义向量权重
 const SPARSE_WEIGHT = 0.4; // 关键词匹配权重
 
 // LLM Rerank 的 system prompt：让 LLM 对候选文档打分排序
@@ -29,7 +34,7 @@ export interface KnowledgeSearchResult {
   content: string;
   score: number;
   chunkIndex: number;
-  docTitle: string;  // 文档标题（从 PG 关联查询）
+  docTitle: string; // 文档标题（从 PG 关联查询）
 }
 
 export class KnowledgeService {
@@ -69,14 +74,20 @@ export class KnowledgeService {
     });
 
     // 2. 构建内存 lookup: term → { df, chunks: Map<chunkId, tf> }
-    const termInfo = new Map<string, { df: number; chunks: Map<string, number> }>();
+    const termInfo = new Map<
+      string,
+      { df: number; chunks: Map<string, number> }
+    >();
     for (const entry of indexEntries) {
       let info = termInfo.get(entry.term);
       if (!info) {
         info = { df: 0, chunks: new Map() };
         termInfo.set(entry.term, info);
       }
-      info.chunks.set(entry.chunkId, (info.chunks.get(entry.chunkId) ?? 0) + entry.termFreq);
+      info.chunks.set(
+        entry.chunkId,
+        (info.chunks.get(entry.chunkId) ?? 0) + entry.termFreq,
+      );
       info.df = info.chunks.size; // 包含该 term 的 chunk 数量
     }
 
@@ -138,7 +149,7 @@ export class KnowledgeService {
   // 基础搜索：dense embedding → Milvus 向量搜索 → 返回结果
   async search(
     query: string,
-    kbIds?: string[] | null,    // 可选：限定在指定知识库中搜索
+    kbIds?: string[] | null, // 可选：限定在指定知识库中搜索
     topK: number = 5,
   ): Promise<KnowledgeSearchResult[]> {
     if (!query.trim()) return [];
@@ -180,7 +191,10 @@ export class KnowledgeService {
         output_fields: ["chunk_id", "kb_id", "content"], // 返回这些字段的值
         params: { nprobe: 16 }, // 搜索的聚类数，值越大越精确但越慢
       });
-      milvusSearchDurationMs.observe({ operation: "knowledge" }, Date.now() - milvusSearchStart);
+      milvusSearchDurationMs.observe(
+        { operation: "knowledge" },
+        Date.now() - milvusSearchStart,
+      );
 
       if (!results.results || results.results.length === 0) {
         return [];
@@ -196,7 +210,11 @@ export class KnowledgeService {
         chunkId: h.chunk_id as string,
         content: contents[i] || "",
       }));
-      const bm25Scores = await this.computeBM25FromIndex(query, candidateChunks, targetKbId);
+      const bm25Scores = await this.computeBM25FromIndex(
+        query,
+        candidateChunks,
+        targetKbId,
+      );
 
       const searchResults: KnowledgeSearchResult[] = [];
       for (let i = 0; i < results.results.length; i++) {
@@ -208,7 +226,8 @@ export class KnowledgeService {
         const sparseScore = bm25Scores[i] || 0;
 
         // 混合打分：dense 权重 0.6 + sparse 权重 0.4
-        const hybridScore = DENSE_WEIGHT * denseScore + SPARSE_WEIGHT * sparseScore;
+        const hybridScore =
+          DENSE_WEIGHT * denseScore + SPARSE_WEIGHT * sparseScore;
 
         const meta = chunkMetaMap[chunkId] || {};
 
@@ -253,7 +272,12 @@ export class KnowledgeService {
 
     // Rerank 阶段：让 LLM 对候选文档重新打分
     try {
-      const reranked = await this.llmRerank(query, candidates, topK, llmProviderName);
+      const reranked = await this.llmRerank(
+        query,
+        candidates,
+        topK,
+        llmProviderName,
+      );
       if (reranked) return reranked;
     } catch (e) {
       logger.warn(e, "LLM rerank failed");
@@ -313,7 +337,11 @@ export class KnowledgeService {
   }
 
   // 从 PG 批量查 chunk 的文档归属、序号和文档标题
-  private async getChunkMetas(chunkIds: string[]): Promise<Record<string, { docId?: string; chunkIndex?: number; docTitle?: string }>> {
+  private async getChunkMetas(
+    chunkIds: string[],
+  ): Promise<
+    Record<string, { docId?: string; chunkIndex?: number; docTitle?: string }>
+  > {
     const chunks = await prisma.knowledgeChunk.findMany({
       where: { id: { in: chunkIds } },
       select: { id: true, documentId: true, chunkIndex: true },
@@ -329,7 +357,10 @@ export class KnowledgeService {
     });
     const docTitleMap = new Map(docs.map((d) => [d.id, d.title]));
 
-    const result: Record<string, { docId?: string; chunkIndex?: number; docTitle?: string }> = {};
+    const result: Record<
+      string,
+      { docId?: string; chunkIndex?: number; docTitle?: string }
+    > = {};
     for (const chunk of chunks) {
       result[chunk.id] = {
         docId: chunk.documentId,

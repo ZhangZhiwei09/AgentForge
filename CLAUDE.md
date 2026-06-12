@@ -95,9 +95,9 @@ AgentForge is a **pnpm + Turborepo monorepo** building a ChatGPT clone as the fo
 
 ### Package Layout
 
-| Package | Runtime | Purpose |
-|---------|---------|---------|
-| `apps/web` | React 19 / Vite 6 / TypeScript | Chat UI on port 5173 |
+| Package       | Runtime                           | Purpose                  |
+| ------------- | --------------------------------- | ------------------------ |
+| `apps/web`    | React 19 / Vite 6 / TypeScript    | Chat UI on port 5173     |
 | `apps/server` | Node.js 20+ / Hono 4 / TypeScript | Backend API on port 8000 |
 
 | `packages/database` | Prisma 6 | Shared Prisma schema + client singleton (`@agentforge/database`) |
@@ -155,10 +155,10 @@ Browser (React) ←SSE/HTTP→ Hono (8000) → LLMProvider (abstract) → OpenAI
 
 16. **Voice Agent (V5 ✅):** WebSocket-based real-time voice via `WS /api/voice/stream`. Pipeline: Browser PCM → VAD → WebSocket → ASR (Whisper) → LLM (ChatService) → TTS (OpenAI, 6 voices) → MP3 playback. `VoiceService` (`apps/server/src/services/voice.ts`) manages turn state machine with `AbortController`-based interruption. Audio providers (`apps/server/src/services/audio-providers.ts`) follow lazy registry pattern. Voice sessions in `voice_sessions` table. Frontend: `VoicePanel` with mic, waveform, voice selector, transcript. HTTP: `POST /api/voice/transcribe`, `POST /api/voice/synthesize`, `GET /api/voice/voices`. Backward compatible — text chat unaffected.
 
-
 ### Keeping CLAUDE.md in Sync with plan.md
 
 When a development phase from `plan.md` is completed:
+
 1. Mark the phase with ✅ in `plan.md` (version roadmap + acceptance criteria)
 2. Update the "Version Roadmap" section above with the same ✅ and a brief description of what was built
 3. If the phase introduced new packages, commands, or architectural patterns, add them to the relevant sections
@@ -170,6 +170,7 @@ This ensures CLAUDE.md always reflects the current state of the project, not jus
 The `plan.md` defines the full V1→V10 + P0-P2 roadmap. Completed phases are marked with ✅. When a new phase is completed, update both `plan.md` and this section.
 
 **Platform Foundation:**
+
 - **P0-1 Auth & Multi-Tenancy:** ✅ JWT authentication, API keys, per-user data isolation
 - **P0-2 Structured Logging:** ✅ pino-based structured logging with correlation IDs
 - **P0-3 Testing:** ✅ vitest unit + integration tests (36 tests, CI enforced)
@@ -183,6 +184,7 @@ The `plan.md` defines the full V1→V10 + P0-P2 roadmap. Completed phases are ma
 - **P1-6 Tool Ecosystem:** ✅ 10 production tools with Docker sandbox, circuit-breakers, and Prometheus metrics
 
 **Agent Capabilities:**
+
 - **V1 ChatGPT Clone:** Multi-turn chat, streaming, model switching, provider abstraction ✅
 - **V2 Memory:** PostgreSQL + Milvus for long-term memory ✅
 - **V3 RAG:** Document ingestion, hybrid search, knowledge UI, customer chat ✅
@@ -193,4 +195,5 @@ The `plan.md` defines the full V1→V10 + P0-P2 roadmap. Completed phases are ma
 - **V10 MCP Ecosystem:** MCP Server + Client, dynamic tool discovery, hot-reload
 
 **Beyond V10:**
+
 - Agent evaluation & benchmarking, fine-tuning pipeline, multi-modal, K8s deployment

@@ -10,13 +10,13 @@
 
 P0 是 AgentForge V4 完成后的第一个平台工程阶段，聚焦于"能让第二个用户使用"的最低平台门槛。包含 5 个子阶段：
 
-| 子阶段 | 名称 | 状态 |
-|--------|------|------|
-| P0-1 | 认证与多租户 | ✅ |
-| P0-2 | 结构化日志 | ✅ |
-| P0-3 | 测试基础设施 | ✅ |
-| P0-4 | CI/CD 流水线 | ✅ |
-| P0-5 | 安全加固 | ✅ |
+| 子阶段 | 名称         | 状态 |
+| ------ | ------------ | ---- |
+| P0-1   | 认证与多租户 | ✅   |
+| P0-2   | 结构化日志   | ✅   |
+| P0-3   | 测试基础设施 | ✅   |
+| P0-4   | CI/CD 流水线 | ✅   |
+| P0-5   | 安全加固     | ✅   |
 
 ---
 
@@ -29,6 +29,7 @@ P0 是 AgentForge V4 完成后的第一个平台工程阶段，聚焦于"能让�
 ### 数据模型
 
 **User 表扩展：**
+
 ```sql
 ALTER TABLE users ADD COLUMN password_hash VARCHAR(255);
 ALTER TABLE users ADD COLUMN avatar_url VARCHAR(500);
@@ -36,30 +37,31 @@ ALTER TABLE users ADD COLUMN role VARCHAR(20) DEFAULT 'user';
 ```
 
 **新增表：**
+
 - `refresh_tokens` — 刷新令牌（JWT + 哈希存储 + 吊销支持）
 - `api_keys` — API 密钥（哈希存储 + 最后使用时间 + 过期吊销）
 
 ### 新增文件
 
-| 文件 | 用途 |
-|------|------|
-| `apps/server/src/services/auth.ts` | AuthService：注册、登录、JWT 签发/验证、密码哈希、Refresh Token 轮转、API Key 管理 |
-| `apps/server/src/middleware/auth.ts` | 认证中间件：提取 Bearer Token / API Key → 验证 → 注入 `c.set("user", ...)` |
-| `apps/server/src/routes/auth.ts` | 认证路由：signup、signin、refresh、signout、me、api-keys CRUD |
-| `apps/server/src/lib/hono.ts` | 类型化 Hono 工厂函数 `createHono()`，统一 `AppVariables` 类型 |
+| 文件                                 | 用途                                                                               |
+| ------------------------------------ | ---------------------------------------------------------------------------------- |
+| `apps/server/src/services/auth.ts`   | AuthService：注册、登录、JWT 签发/验证、密码哈希、Refresh Token 轮转、API Key 管理 |
+| `apps/server/src/middleware/auth.ts` | 认证中间件：提取 Bearer Token / API Key → 验证 → 注入 `c.set("user", ...)`         |
+| `apps/server/src/routes/auth.ts`     | 认证路由：signup、signin、refresh、signout、me、api-keys CRUD                      |
+| `apps/server/src/lib/hono.ts`        | 类型化 Hono 工厂函数 `createHono()`，统一 `AppVariables` 类型                      |
 
 ### 修改文件
 
-| 文件 | 变更 |
-|------|------|
-| `packages/database/prisma/schema.prisma` | 添加 passwordHash、avatarUrl、role 字段 + RefreshToken、ApiKey 模型 |
-| `apps/server/src/app.ts` | 注册 authMiddleware + authRoutes；导出 `AppVariables` 类型 |
-| `apps/server/src/index.ts` | 种子数据改用 `authService.signUp()`（默认密码：agentforge） |
-| `apps/server/src/routes/chat.ts` | `DEFAULT_USER_ID` → `c.get("user").id`；增加会话所有权校验 |
-| `apps/server/src/routes/conversations.ts` | `DEFAULT_USER_ID` → `c.get("user").id`；查询/删除增加 userId 过滤 |
-| `apps/server/src/routes/memories.ts` | `DEFAULT_USER_ID` → `c.get("user").id` |
-| `packages/sdk/src/client.ts` | 新增 `signUp/signIn/refreshToken/getMe/apiKey` 方法；自动注入 Authorization header |
-| `packages/shared-types/src/user.ts` | 新增 AuthUser, SignUpRequest, SignInRequest, AuthResponse, ApiKeyDTO 等类型 |
+| 文件                                      | 变更                                                                               |
+| ----------------------------------------- | ---------------------------------------------------------------------------------- |
+| `packages/database/prisma/schema.prisma`  | 添加 passwordHash、avatarUrl、role 字段 + RefreshToken、ApiKey 模型                |
+| `apps/server/src/app.ts`                  | 注册 authMiddleware + authRoutes；导出 `AppVariables` 类型                         |
+| `apps/server/src/index.ts`                | 种子数据改用 `authService.signUp()`（默认密码：agentforge）                        |
+| `apps/server/src/routes/chat.ts`          | `DEFAULT_USER_ID` → `c.get("user").id`；增加会话所有权校验                         |
+| `apps/server/src/routes/conversations.ts` | `DEFAULT_USER_ID` → `c.get("user").id`；查询/删除增加 userId 过滤                  |
+| `apps/server/src/routes/memories.ts`      | `DEFAULT_USER_ID` → `c.get("user").id`                                             |
+| `packages/sdk/src/client.ts`              | 新增 `signUp/signIn/refreshToken/getMe/apiKey` 方法；自动注入 Authorization header |
+| `packages/shared-types/src/user.ts`       | 新增 AuthUser, SignUpRequest, SignInRequest, AuthResponse, ApiKeyDTO 等类型        |
 
 ### 架构决策
 
@@ -92,40 +94,40 @@ DELETE /api/auth/api-keys/:id    # 吊销 API Key
 
 ### 新增文件
 
-| 文件 | 用途 |
-|------|------|
-| `packages/logger/package.json` | `@agentforge/logger` 包清单 |
-| `packages/logger/tsconfig.json` | TypeScript 配置 |
-| `packages/logger/src/index.ts` | pino 日志器 + AsyncLocalStorage 请求上下文 |
+| 文件                                       | 用途                                                       |
+| ------------------------------------------ | ---------------------------------------------------------- |
+| `packages/logger/package.json`             | `@agentforge/logger` 包清单                                |
+| `packages/logger/tsconfig.json`            | TypeScript 配置                                            |
+| `packages/logger/src/index.ts`             | pino 日志器 + AsyncLocalStorage 请求上下文                 |
 | `apps/server/src/middleware/request-id.ts` | Request ID 中间件（生成/转发 X-Request-ID + 请求耗时记录） |
 
 ### 修改文件（共 15 个）
 
 所有 `apps/server/src/` 下的 console 调用替换为结构化日志：
 
-| 文件 | 替换内容 |
-|------|----------|
-| `services/chat.ts` | `console.log/warn` → `logger.info/warn/debug` |
-| `services/memory-engine.ts` | 同上 |
-| `services/knowledge.ts` | 同上 |
-| `services/knowledge-ingestion.ts` | 同上 |
-| `services/customer-chat.ts` | 同上 |
-| `services/bm25.ts` | 同上 |
-| `tools/registry.ts` | 同上 |
-| `routes/chat.ts` | 同上 |
-| `routes/knowledge.ts` | 同上 |
-| `middleware/error.ts` | 同上 |
-| `index.ts` | 同上 |
+| 文件                              | 替换内容                                      |
+| --------------------------------- | --------------------------------------------- |
+| `services/chat.ts`                | `console.log/warn` → `logger.info/warn/debug` |
+| `services/memory-engine.ts`       | 同上                                          |
+| `services/knowledge.ts`           | 同上                                          |
+| `services/knowledge-ingestion.ts` | 同上                                          |
+| `services/customer-chat.ts`       | 同上                                          |
+| `services/bm25.ts`                | 同上                                          |
+| `tools/registry.ts`               | 同上                                          |
+| `routes/chat.ts`                  | 同上                                          |
+| `routes/knowledge.ts`             | 同上                                          |
+| `middleware/error.ts`             | 同上                                          |
+| `index.ts`                        | 同上                                          |
 
 ### 日志级别约定
 
-| 级别 | 场景 |
-|------|------|
-| `trace` | LLM 原始 chunk |
-| `debug` | LLM 调用、工具执行、中间状态 |
-| `info` | 请求生命周期、用户操作、种子数据 |
-| `warn` | 可恢复错误（Milvus 降级、服务跳过） |
-| `error` | 请求失败、数据库连接失败 |
+| 级别    | 场景                                |
+| ------- | ----------------------------------- |
+| `trace` | LLM 原始 chunk                      |
+| `debug` | LLM 调用、工具执行、中间状态        |
+| `info`  | 请求生命周期、用户操作、种子数据    |
+| `warn`  | 可恢复错误（Milvus 降级、服务跳过） |
+| `error` | 请求失败、数据库连接失败            |
 
 ---
 
@@ -137,12 +139,12 @@ DELETE /api/auth/api-keys/:id    # 吊销 API Key
 
 ### 新增文件
 
-| 文件 | 用途 |
-|------|------|
-| `apps/server/vitest.config.ts` | vitest 配置（单 fork 模式，兼容 Windows） |
-| `apps/server/src/__tests__/setup.ts` | 测试环境初始化 |
-| `apps/server/src/tools/__tests__/registry.test.ts` | ToolRegistry 单元测试（11 tests） |
-| `apps/server/src/services/__tests__/bm25.test.ts` | BM25 编码器测试（5 tests） |
+| 文件                                               | 用途                                      |
+| -------------------------------------------------- | ----------------------------------------- |
+| `apps/server/vitest.config.ts`                     | vitest 配置（单 fork 模式，兼容 Windows） |
+| `apps/server/src/__tests__/setup.ts`               | 测试环境初始化                            |
+| `apps/server/src/tools/__tests__/registry.test.ts` | ToolRegistry 单元测试（11 tests）         |
+| `apps/server/src/services/__tests__/bm25.test.ts`  | BM25 编码器测试（5 tests）                |
 
 ### 测试结果
 
@@ -170,8 +172,8 @@ pnpm --filter @agentforge/server test:watch  # 监听模式
 
 ### 新增文件
 
-| 文件 | 用途 |
-|------|------|
+| 文件                       | 用途                                                         |
+| -------------------------- | ------------------------------------------------------------ |
 | `.github/workflows/ci.yml` | GitHub Actions：install → prisma generate → typecheck → test |
 
 ### 触发条件
@@ -191,16 +193,16 @@ pnpm --filter @agentforge/server test:watch  # 监听模式
 
 ### 新增文件
 
-| 文件 | 用途 |
-|------|------|
+| 文件                                       | 用途                   |
+| ------------------------------------------ | ---------------------- |
 | `apps/server/src/middleware/rate-limit.ts` | 滑动窗口内存限流中间件 |
 
 ### 限流策略
 
-| 级别 | 限制 | 窗口 |
-|------|------|------|
-| 全局 | 60 次/分钟/IP | 60s |
-| Chat API | 20 次/分钟/IP | 60s |
+| 级别     | 限制          | 窗口 |
+| -------- | ------------- | ---- |
+| 全局     | 60 次/分钟/IP | 60s  |
+| Chat API | 20 次/分钟/IP | 60s  |
 
 ### 行为
 
@@ -211,12 +213,12 @@ pnpm --filter @agentforge/server test:watch  # 监听模式
 
 ## 七、验证清单
 
-| 检查项 | 命令 | 结果 |
-|--------|------|------|
-| 全量类型检查 | `pnpm typecheck` | ✅ 12/12 包通过 |
-| 测试套件 | `pnpm --filter @agentforge/server test` | ✅ 16 tests passed |
-| Prisma 迁移 | `prisma migrate dev` | ✅ 已应用 `add_auth_tables` |
-| 默认用户 | 种子数据 | ✅ dev@agentforge.local / agentforge |
+| 检查项       | 命令                                    | 结果                                 |
+| ------------ | --------------------------------------- | ------------------------------------ |
+| 全量类型检查 | `pnpm typecheck`                        | ✅ 12/12 包通过                      |
+| 测试套件     | `pnpm --filter @agentforge/server test` | ✅ 16 tests passed                   |
+| Prisma 迁移  | `prisma migrate dev`                    | ✅ 已应用 `add_auth_tables`          |
+| 默认用户     | 种子数据                                | ✅ dev@agentforge.local / agentforge |
 
 ---
 

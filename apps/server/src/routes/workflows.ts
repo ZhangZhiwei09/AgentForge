@@ -29,7 +29,10 @@ workflowRoutes.post(
 
     const workflow = await workflowService.create(user.id, data);
 
-    logger.info({ workflowId: workflow.id, name: workflow.name }, "Workflow created");
+    logger.info(
+      { workflowId: workflow.id, name: workflow.name },
+      "Workflow created",
+    );
     return c.json(workflow, 201);
   },
 );
@@ -42,7 +45,12 @@ workflowRoutes.get("/api/workflows", async (c) => {
   const page = parseInt(c.req.query("page") || "1", 10);
   const limit = parseInt(c.req.query("limit") || "20", 10);
 
-  const result = await workflowService.list(user.id, { status, tag, page, limit });
+  const result = await workflowService.list(user.id, {
+    status,
+    tag,
+    page,
+    limit,
+  });
   return c.json(result);
 });
 
@@ -53,30 +61,36 @@ workflowRoutes.get("/api/workflows/templates", async (c) => {
 });
 
 // POST /api/workflows/templates/:template_id/instantiate — Create from template
-workflowRoutes.post("/api/workflows/templates/:template_id/instantiate", async (c) => {
-  const user = c.get("user");
-  const templateId = c.req.param("template_id");
-  const body = await c.req.json().catch(() => ({}));
-  const name = body.name;
+workflowRoutes.post(
+  "/api/workflows/templates/:template_id/instantiate",
+  async (c) => {
+    const user = c.get("user");
+    const templateId = c.req.param("template_id");
+    const body = await c.req.json().catch(() => ({}));
+    const name = body.name;
 
-  const template = getTemplate(templateId);
-  if (!template) {
-    return c.json({ detail: "Template not found" }, 404);
-  }
+    const template = getTemplate(templateId);
+    if (!template) {
+      return c.json({ detail: "Template not found" }, 404);
+    }
 
-  const definition = { ...template.definition };
-  if (name) definition.name = name;
+    const definition = { ...template.definition };
+    if (name) definition.name = name;
 
-  const workflow = await workflowService.create(user.id, {
-    name: definition.name,
-    description: definition.description,
-    definition,
-    tags: [template.category],
-  });
+    const workflow = await workflowService.create(user.id, {
+      name: definition.name,
+      description: definition.description,
+      definition,
+      tags: [template.category],
+    });
 
-  logger.info({ workflowId: workflow.id, templateId }, "Workflow instantiated from template");
-  return c.json(workflow, 201);
-});
+    logger.info(
+      { workflowId: workflow.id, templateId },
+      "Workflow instantiated from template",
+    );
+    return c.json(workflow, 201);
+  },
+);
 
 // POST /api/workflows/validate — Validate a workflow definition
 workflowRoutes.post("/api/workflows/validate", async (c) => {
@@ -107,7 +121,11 @@ workflowRoutes.put(
     const id = c.req.param("id");
     const data = c.req.valid("json");
 
-    const workflow = await workflowService.update(id, user.id, data as Record<string, unknown>);
+    const workflow = await workflowService.update(
+      id,
+      user.id,
+      data as Record<string, unknown>,
+    );
     if (!workflow) {
       return c.json({ detail: "Workflow not found or access denied" }, 404);
     }
@@ -148,10 +166,16 @@ workflowRoutes.post(
       return c.json({ detail: "Workflow not found or access denied" }, 404);
     }
     if (workflow.status !== "ready" && workflow.status !== "draft") {
-      return c.json({ detail: `Workflow is ${workflow.status}, cannot execute` }, 400);
+      return c.json(
+        { detail: `Workflow is ${workflow.status}, cannot execute` },
+        400,
+      );
     }
 
-    logger.info({ workflowId, variables: JSON.stringify(variables).slice(0, 100) }, "Workflow run started");
+    logger.info(
+      { workflowId, variables: JSON.stringify(variables).slice(0, 100) },
+      "Workflow run started",
+    );
 
     return streamSSE(c, async (stream) => {
       try {
@@ -188,7 +212,11 @@ workflowRoutes.get("/api/workflows/:id/runs", async (c) => {
     return c.json({ detail: "Workflow not found or access denied" }, 404);
   }
 
-  const result = await workflowService.listRuns(workflowId, user.id, { status, page, limit });
+  const result = await workflowService.listRuns(workflowId, user.id, {
+    status,
+    page,
+    limit,
+  });
   return c.json(result);
 });
 
@@ -219,7 +247,8 @@ workflowRoutes.get("/api/workflows/runs/:run_id/stream", async (c) => {
   const run = result.run;
   if (run.status !== "running") {
     return c.json({
-      type: run.status === "completed" ? "workflow_completed" : "workflow_failed",
+      type:
+        run.status === "completed" ? "workflow_completed" : "workflow_failed",
       runId,
       output: run.output,
       error: run.error,
@@ -292,7 +321,10 @@ workflowRoutes.post("/api/workflows/runs/:run_id/retry", async (c) => {
 
   const run = result.run;
   if (run.status !== "failed") {
-    return c.json({ detail: `Run is ${run.status}, can only retry failed runs` }, 400);
+    return c.json(
+      { detail: `Run is ${run.status}, can only retry failed runs` },
+      400,
+    );
   }
 
   // Start a new run with the same input (from checkpoint)

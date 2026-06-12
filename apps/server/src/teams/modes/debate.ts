@@ -20,7 +20,10 @@ export class DebateMode implements CollaborationModeExecutor {
 
     const debate = definition.debate;
     if (!debate) {
-      yield { type: "team_failed", error: "Debate mode requires debate config" };
+      yield {
+        type: "team_failed",
+        error: "Debate mode requires debate config",
+      };
       return;
     }
 
@@ -29,7 +32,10 @@ export class DebateMode implements CollaborationModeExecutor {
     const judgeRole = getRoleByName(definition, debate.judgeAgent);
 
     if (!proRole || !conRole || !judgeRole) {
-      yield { type: "team_failed", error: "Debate mode: pro, con, or judge agent not found" };
+      yield {
+        type: "team_failed",
+        error: "Debate mode: pro, con, or judge agent not found",
+      };
       return;
     }
 
@@ -40,7 +46,10 @@ export class DebateMode implements CollaborationModeExecutor {
       teamRunId: context.teamRunId,
       teamName: definition.name,
       mode: "debate",
-      agents: definition.agents.map((a) => ({ name: a.name, role: a.displayName })),
+      agents: definition.agents.map((a) => ({
+        name: a.name,
+        role: a.displayName,
+      })),
     };
 
     // ---- Phase 1: Parallel Debate Rounds ----
@@ -55,14 +64,29 @@ export class DebateMode implements CollaborationModeExecutor {
 
       // Run Pro and Con in parallel
       const proResult = await this.runDebater(
-        proRole, "pro", debate.question, round + 1, context, bb, bus,
+        proRole,
+        "pro",
+        debate.question,
+        round + 1,
+        context,
+        bb,
+        bus,
       );
       const conResult = await this.runDebater(
-        conRole, "con", debate.question, round + 1, context, bb, bus,
+        conRole,
+        "con",
+        debate.question,
+        round + 1,
+        context,
+        bb,
+        bus,
       );
 
       // Yield the combined results
-      for (const event of [...(proResult.events || []), ...(conResult.events || [])]) {
+      for (const event of [
+        ...(proResult.events || []),
+        ...(conResult.events || []),
+      ]) {
         yield event;
       }
 
@@ -72,7 +96,10 @@ export class DebateMode implements CollaborationModeExecutor {
 
       // Cross-share arguments
       bus.send(proRole.name, conRole.name, "feedback", {
-        context: { pro_argument: proResult.output, con_argument: conResult.output },
+        context: {
+          pro_argument: proResult.output,
+          con_argument: conResult.output,
+        },
       });
     }
 
@@ -83,7 +110,9 @@ export class DebateMode implements CollaborationModeExecutor {
       totalRounds: maxDebateRounds + 1,
     };
 
-    const judgeTask = buildAgentTask(judgeRole, `
+    const judgeTask = buildAgentTask(
+      judgeRole,
+      `
 辩论题目: ${debate.question}
 
 ## 正方 (Pro: ${proRole.displayName}) 论点
@@ -101,18 +130,30 @@ ${bb.read("con_argument_1") || ""}
   "keyFactors": ["关键因素1", "关键因素2"],
   "recommendation": "建议"
 }
-`.trim(), bb, bus);
+`.trim(),
+      bb,
+      bus,
+    );
 
-    yield { type: "agent_started", agentName: judgeRole.name, role: judgeRole.displayName, task: "Judge evaluation" };
+    yield {
+      type: "agent_started",
+      agentName: judgeRole.name,
+      role: judgeRole.displayName,
+      task: "Judge evaluation",
+    };
 
     const agentService = new AgentService();
     let judgeOutput: string | null = null;
 
     try {
-      for await (const event of agentService.run(context.conversationId, judgeTask, {
-        maxIterations: judgeRole.maxIterations,
-        tools: judgeRole.tools.length > 0 ? judgeRole.tools : null,
-      })) {
+      for await (const event of agentService.run(
+        context.conversationId,
+        judgeTask,
+        {
+          maxIterations: judgeRole.maxIterations,
+          tools: judgeRole.tools.length > 0 ? judgeRole.tools : null,
+        },
+      )) {
         const teamEvent = toTeamEvent(event, judgeRole.name);
         if (teamEvent) yield teamEvent;
         if (event.type === "agent_respond") {
@@ -128,7 +169,6 @@ ${bb.read("con_argument_1") || ""}
         output: judgeOutput || "",
         durationMs: 0,
       };
-
     } catch (err) {
       yield {
         type: "agent_error",
@@ -163,9 +203,10 @@ ${bb.read("con_argument_1") || ""}
   ): Promise<{ output: string; events: TeamStreamEvent[] }> {
     const events: TeamStreamEvent[] = [];
 
-    const sidePrompt = side === "pro"
-      ? `你代表正方。请为以下论点提供支持和论据。`
-      : `你代表反方。请反驳正方观点并提供反对论据。`;
+    const sidePrompt =
+      side === "pro"
+        ? `你代表正方。请为以下论点提供支持和论据。`
+        : `你代表反方。请反驳正方观点并提供反对论据。`;
 
     const debaterTask = `
 ${role.systemPrompt}
@@ -183,16 +224,25 @@ ${bb.toContextString()}
 请提出你的论点。
 `.trim();
 
-    events.push({ type: "agent_started", agentName: role.name, role: role.displayName, task: `Debate round ${round} (${side})` });
+    events.push({
+      type: "agent_started",
+      agentName: role.name,
+      role: role.displayName,
+      task: `Debate round ${round} (${side})`,
+    });
 
     const agentService = new AgentService();
     let output = "";
 
     try {
-      for await (const event of agentService.run(context.conversationId, debaterTask, {
-        maxIterations: role.maxIterations,
-        tools: role.tools.length > 0 ? role.tools : null,
-      })) {
+      for await (const event of agentService.run(
+        context.conversationId,
+        debaterTask,
+        {
+          maxIterations: role.maxIterations,
+          tools: role.tools.length > 0 ? role.tools : null,
+        },
+      )) {
         const teamEvent = toTeamEvent(event, role.name);
         if (teamEvent) events.push(teamEvent);
         if (event.type === "agent_respond") {
@@ -200,8 +250,12 @@ ${bb.toContextString()}
         }
       }
 
-      events.push({ type: "agent_completed", agentName: role.name, output, durationMs: 0 });
-
+      events.push({
+        type: "agent_completed",
+        agentName: role.name,
+        output,
+        durationMs: 0,
+      });
     } catch (err) {
       events.push({
         type: "agent_error",

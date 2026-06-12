@@ -1,9 +1,16 @@
 // Parallel Step Handler — executes multiple branches concurrently
-import type { WorkflowParallelStep, WorkflowStep, StepResult } from "@agentforge/shared-types";
+import type {
+  WorkflowParallelStep,
+  WorkflowStep,
+  StepResult,
+} from "@agentforge/shared-types";
 import type { StepHandler, StepContext } from "./types.js";
 import { logger } from "@agentforge/logger";
 
-type StepExecutor = (step: WorkflowStep, ctx: StepContext) => Promise<StepResult>;
+type StepExecutor = (
+  step: WorkflowStep,
+  ctx: StepContext,
+) => Promise<StepResult>;
 
 export class ParallelStepHandler implements StepHandler {
   private executeStep: StepExecutor;
@@ -15,43 +22,54 @@ export class ParallelStepHandler implements StepHandler {
   async execute(step: WorkflowStep, context: StepContext): Promise<StepResult> {
     const parStep = step as WorkflowParallelStep;
     const startTime = Date.now();
-    const branchResults: Array<{ branchId: string; label?: string; results: StepResult[]; error?: string }> = [];
+    const branchResults: Array<{
+      branchId: string;
+      label?: string;
+      results: StepResult[];
+      error?: string;
+    }> = [];
 
-    const branchPromises = parStep.branches.map(async (branch: { id: string; label?: string; steps: WorkflowStep[] }) => {
-      const results: StepResult[] = [];
+    const branchPromises = parStep.branches.map(
+      async (branch: { id: string; label?: string; steps: WorkflowStep[] }) => {
+        const results: StepResult[] = [];
 
-      try {
-        for (const subStep of branch.steps) {
-          const result = await this.executeStep(subStep, context);
-          results.push(result);
+        try {
+          for (const subStep of branch.steps) {
+            const result = await this.executeStep(subStep, context);
+            results.push(result);
 
-          if (result.status === "failed") {
-            logger.warn({ branchId: branch.id, stepId: subStep.id }, "Branch step failed");
-            if (parStep.wait === "all") {
-              return {
-                branchId: branch.id,
-                label: branch.label,
-                results,
-                error: `Step ${subStep.id} failed: ${result.error}`,
-              };
+            if (result.status === "failed") {
+              logger.warn(
+                { branchId: branch.id, stepId: subStep.id },
+                "Branch step failed",
+              );
+              if (parStep.wait === "all") {
+                return {
+                  branchId: branch.id,
+                  label: branch.label,
+                  results,
+                  error: `Step ${subStep.id} failed: ${result.error}`,
+                };
+              }
             }
           }
-        }
 
-        return {
-          branchId: branch.id,
-          label: branch.label,
-          results,
-        };
-      } catch (err) {
-        return {
-          branchId: branch.id,
-          label: branch.label,
-          results,
-          error: err instanceof Error ? err.message : "Branch execution failed",
-        };
-      }
-    });
+          return {
+            branchId: branch.id,
+            label: branch.label,
+            results,
+          };
+        } catch (err) {
+          return {
+            branchId: branch.id,
+            label: branch.label,
+            results,
+            error:
+              err instanceof Error ? err.message : "Branch execution failed",
+          };
+        }
+      },
+    );
 
     const settled = await Promise.allSettled(branchPromises);
 
@@ -81,7 +99,8 @@ export class ParallelStepHandler implements StepHandler {
     const branchOutputs = branchResults.map((b) => ({
       branchId: b.branchId,
       label: b.label,
-      output: b.results.length > 0 ? b.results[b.results.length - 1].output : null,
+      output:
+        b.results.length > 0 ? b.results[b.results.length - 1].output : null,
       error: b.error,
     }));
 

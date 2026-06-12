@@ -6,7 +6,8 @@ import type { TeamTemplate } from "@agentforge/shared-types";
 const codeReviewTeam: TeamTemplate = {
   id: "code-review-team",
   name: "代码审查团队",
-  description: "多维度代码审查：安全、性能、可维护性并行审查，输出综合审计报告。适合 PR Review 场景。",
+  description:
+    "多维度代码审查：安全、性能、可维护性并行审查，输出综合审计报告。适合 PR Review 场景。",
   category: "engineering",
   definition: {
     name: "代码审查团队",
@@ -110,7 +111,8 @@ const codeReviewTeam: TeamTemplate = {
 const researchSynthesis: TeamTemplate = {
   id: "research-synthesis",
   name: "调研综合团队",
-  description: "两个研究员从不同角度调研同一主题，由综合者汇总形成完整报告。适合技术选型、竞品分析等场景。",
+  description:
+    "两个研究员从不同角度调研同一主题，由综合者汇总形成完整报告。适合技术选型、竞品分析等场景。",
   category: "research",
   definition: {
     name: "调研综合团队",
@@ -188,7 +190,8 @@ const researchSynthesis: TeamTemplate = {
 const debateAnalyzer: TeamTemplate = {
   id: "debate-analyzer",
   name: "辩论分析团队",
-  description: "正反辩论 + 裁判裁决。适合需要权衡利弊的决策场景，如技术选型、架构方案对比。",
+  description:
+    "正反辩论 + 裁判裁决。适合需要权衡利弊的决策场景，如技术选型、架构方案对比。",
   category: "analysis",
   definition: {
     name: "辩论分析团队",
@@ -268,7 +271,8 @@ const debateAnalyzer: TeamTemplate = {
 const pairProgramming: TeamTemplate = {
   id: "pair-programming",
   name: "结对编程团队",
-  description: "前端+后端专家协作开发，通过消息总线自由讨论 API 设计、数据类型和架构方案。",
+  description:
+    "前端+后端专家协作开发，通过消息总线自由讨论 API 设计、数据类型和架构方案。",
   category: "engineering",
   definition: {
     name: "结对编程团队",

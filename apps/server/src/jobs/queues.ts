@@ -27,8 +27,12 @@ export const KNOWLEDGE_INGESTION_QUEUE = "knowledge-ingestion";
 // Use a symbol to distinguish "not yet initialized" from "initialized as null (Redis down)"
 const UNINITIALIZED = Symbol("uninitialized");
 
-let _memoryQueue: Queue<MemoryExtractionJobData> | null | typeof UNINITIALIZED = UNINITIALIZED;
-let _ingestionQueue: Queue<KnowledgeIngestionJobData> | null | typeof UNINITIALIZED = UNINITIALIZED;
+let _memoryQueue: Queue<MemoryExtractionJobData> | null | typeof UNINITIALIZED =
+  UNINITIALIZED;
+let _ingestionQueue:
+  | Queue<KnowledgeIngestionJobData>
+  | null
+  | typeof UNINITIALIZED = UNINITIALIZED;
 
 function createQueue<T>(name: string): Queue<T> | null {
   const connection = getRedisConnection();
@@ -50,14 +54,18 @@ function createQueue<T>(name: string): Queue<T> | null {
 
 export function getMemoryQueue(): Queue<MemoryExtractionJobData> | null {
   if (_memoryQueue === UNINITIALIZED) {
-    _memoryQueue = createQueue<MemoryExtractionJobData>(MEMORY_EXTRACTION_QUEUE);
+    _memoryQueue = createQueue<MemoryExtractionJobData>(
+      MEMORY_EXTRACTION_QUEUE,
+    );
   }
   return _memoryQueue as Queue<MemoryExtractionJobData> | null;
 }
 
 export function getIngestionQueue(): Queue<KnowledgeIngestionJobData> | null {
   if (_ingestionQueue === UNINITIALIZED) {
-    _ingestionQueue = createQueue<KnowledgeIngestionJobData>(KNOWLEDGE_INGESTION_QUEUE);
+    _ingestionQueue = createQueue<KnowledgeIngestionJobData>(
+      KNOWLEDGE_INGESTION_QUEUE,
+    );
   }
   return _ingestionQueue as Queue<KnowledgeIngestionJobData> | null;
 }

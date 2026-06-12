@@ -20,9 +20,14 @@ export class OrchestratorMode implements CollaborationModeExecutor {
     const maxRounds = definition.maxTotalIterations;
 
     // Find the orchestrator agent
-    const orchName = definition.orchestrator || definition.agents.find((a) => a.canDelegate)?.name;
+    const orchName =
+      definition.orchestrator ||
+      definition.agents.find((a) => a.canDelegate)?.name;
     if (!orchName) {
-      yield { type: "team_failed", error: "No orchestrator agent found with canDelegate=true" };
+      yield {
+        type: "team_failed",
+        error: "No orchestrator agent found with canDelegate=true",
+      };
       return;
     }
 
@@ -36,7 +41,10 @@ export class OrchestratorMode implements CollaborationModeExecutor {
       teamRunId: context.teamRunId,
       teamName: definition.name,
       mode: "orchestrator",
-      agents: definition.agents.map((a) => ({ name: a.name, role: a.displayName })),
+      agents: definition.agents.map((a) => ({
+        name: a.name,
+        role: a.displayName,
+      })),
     };
 
     for (let round = 0; round < maxRounds; round++) {
@@ -49,16 +57,25 @@ export class OrchestratorMode implements CollaborationModeExecutor {
       // Run orchestrator agent
       const orchTask = buildAgentTask(orchRole, task, bb, bus);
 
-      yield { type: "agent_started", agentName: orchName, role: orchRole.displayName, task: orchTask };
+      yield {
+        type: "agent_started",
+        agentName: orchName,
+        role: orchRole.displayName,
+        task: orchTask,
+      };
 
       const agentService = new AgentService();
       let orchOutput: string | null = null;
 
       try {
-        for await (const event of agentService.run(context.conversationId, orchTask, {
-          maxIterations: orchRole.maxIterations,
-          tools: orchRole.tools.length > 0 ? orchRole.tools : null,
-        })) {
+        for await (const event of agentService.run(
+          context.conversationId,
+          orchTask,
+          {
+            maxIterations: orchRole.maxIterations,
+            tools: orchRole.tools.length > 0 ? orchRole.tools : null,
+          },
+        )) {
           const teamEvent = toTeamEvent(event, orchName);
           if (teamEvent) yield teamEvent;
           if (event.type === "agent_respond") {
@@ -72,7 +89,6 @@ export class OrchestratorMode implements CollaborationModeExecutor {
           output: orchOutput || "Orchestrator completed planning",
           durationMs: 0,
         };
-
       } catch (err) {
         yield {
           type: "agent_error",
@@ -96,7 +112,14 @@ export class OrchestratorMode implements CollaborationModeExecutor {
       }
 
       // Execute the delegated agent
-      yield* this.executeDelegate(delegateTo.agentName, delegateTo.subTask, definition, context, bus, bb);
+      yield* this.executeDelegate(
+        delegateTo.agentName,
+        delegateTo.subTask,
+        definition,
+        context,
+        bus,
+        bb,
+      );
     }
 
     // Build final output from blackboard
@@ -109,7 +132,9 @@ export class OrchestratorMode implements CollaborationModeExecutor {
   }
 
   /** Parse orchestrator output to find delegation command */
-  private parseDelegation(output: string): { agentName: string; subTask: string } | null {
+  private parseDelegation(
+    output: string,
+  ): { agentName: string; subTask: string } | null {
     try {
       // Try to find JSON in the output
       const jsonMatch = output.match(/\{[\s\S]*\}/);
@@ -124,7 +149,9 @@ export class OrchestratorMode implements CollaborationModeExecutor {
     }
 
     // Text-based fallback: look for "delegate to X: task"
-    const textMatch = output.match(/delegate\s+(?:to\s+)?(\w+)\s*[:：]\s*(.+)/i);
+    const textMatch = output.match(
+      /delegate\s+(?:to\s+)?(\w+)\s*[:：]\s*(.+)/i,
+    );
     if (textMatch) {
       return { agentName: textMatch[1], subTask: textMatch[2] };
     }
@@ -160,28 +187,47 @@ export class OrchestratorMode implements CollaborationModeExecutor {
     bus.send("orchestrator", agentName, "task", { task: subTask });
 
     const agentTask = buildAgentTask(role, subTask, bb, bus);
-    yield { type: "agent_started", agentName, role: role.displayName, task: subTask };
+    yield {
+      type: "agent_started",
+      agentName,
+      role: role.displayName,
+      task: subTask,
+    };
 
     const agentService = new AgentService();
 
     try {
-      for await (const event of agentService.run(context.conversationId, agentTask, {
-        maxIterations: role.maxIterations,
-        tools: role.tools.length > 0 ? role.tools : null,
-      })) {
+      for await (const event of agentService.run(
+        context.conversationId,
+        agentTask,
+        {
+          maxIterations: role.maxIterations,
+          tools: role.tools.length > 0 ? role.tools : null,
+        },
+      )) {
         const teamEvent = toTeamEvent(event, agentName);
         if (teamEvent) yield teamEvent;
       }
 
       // Write agent output to blackboard
       const outputKey = `execution_${agentName}`;
-      bb.write(outputKey, { status: "completed", agentName, subTask }, agentName);
+      bb.write(
+        outputKey,
+        { status: "completed", agentName, subTask },
+        agentName,
+      );
 
-      yield { type: "agent_completed", agentName, output: `Completed: ${subTask}`, durationMs: 0 };
+      yield {
+        type: "agent_completed",
+        agentName,
+        output: `Completed: ${subTask}`,
+        durationMs: 0,
+      };
 
       // Send result back to orchestrator
-      bus.send(agentName, "orchestrator", "result", { result: bb.read(outputKey) });
-
+      bus.send(agentName, "orchestrator", "result", {
+        result: bb.read(outputKey),
+      });
     } catch (err) {
       yield {
         type: "agent_error",

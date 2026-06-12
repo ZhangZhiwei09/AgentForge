@@ -57,7 +57,7 @@ const StepSchema: z.ZodType<unknown> = z.lazy(() =>
     ParallelStepSchemaLazy,
     HumanApprovalStepSchema,
     TransformStepSchema,
-  ])
+  ]),
 );
 
 const ConditionStepSchemaLazy = BaseStepSchema.extend({
@@ -74,7 +74,7 @@ const ParallelStepSchemaLazy = BaseStepSchema.extend({
       id: z.string().min(1),
       label: z.string().optional(),
       steps: z.array(StepSchema),
-    })
+    }),
   ),
   wait: z.enum(["all", "any", "first"]).default("all"),
 });
@@ -129,7 +129,9 @@ export const WorkflowDefinitionSchema = z.object({
   version: z.string().default("1.0"),
   description: z.string().optional(),
   variables: z.record(z.string(), VariableDefSchema).default({}),
-  steps: z.array(WorkflowStepSchema).min(1, "Workflow must have at least one step"),
+  steps: z
+    .array(WorkflowStepSchema)
+    .min(1, "Workflow must have at least one step"),
   on_failure: z.enum(["stop", "continue", "rollback"]).default("stop"),
   max_concurrency: z.number().min(1).max(10).default(4),
 });
@@ -164,5 +166,7 @@ export const ApprovalDecisionSchema = z.object({
 
 export type ValidatedStepRetry = z.infer<typeof StepRetrySchema>;
 export type ValidatedWorkflowStep = z.infer<typeof WorkflowStepSchema>;
-export type ValidatedWorkflowDefinition = z.infer<typeof WorkflowDefinitionSchema>;
+export type ValidatedWorkflowDefinition = z.infer<
+  typeof WorkflowDefinitionSchema
+>;
 export type ValidatedCreateWorkflow = z.infer<typeof CreateWorkflowSchema>;

@@ -256,7 +256,9 @@ export class VoiceService {
       const tts = getTTSProvider();
 
       // Split text into sentence groups (up to 3 sentences per chunk for efficiency)
-      const sentences = fullResponse.match(/[^.!?]+[.!?]+[\s]*/g) || [fullResponse];
+      const sentences = fullResponse.match(/[^.!?]+[.!?]+[\s]*/g) || [
+        fullResponse,
+      ];
       const sentenceGroups: string[] = [];
       let currentGroup = "";
 

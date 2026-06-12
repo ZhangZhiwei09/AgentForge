@@ -38,27 +38,27 @@ V1 的目标并不是实现一个简单聊天机器人，而是搭建未来所�
 
 实现：
 
-* 多轮会话
-* 消息持久化
-* 流式输出
-* 模型切换
-* Prompt 管理
-* Provider 抽象
-* Debug 面板
-* Monorepo 基础设施
+- 多轮会话
+- 消息持久化
+- 流式输出
+- 模型切换
+- Prompt 管理
+- Provider 抽象
+- Debug 面板
+- Monorepo 基础设施
 
 已完成：
 
-* Memory（V2 ✅）
-* RAG（V3 ✅）
+- Memory（V2 ✅）
+- RAG（V3 ✅）
 
 未来新增：
 
-* Tool Calling
-* Voice
-* Workflow Engine
-* Browser Agent
-* MCP Ecosystem
+- Tool Calling
+- Voice
+- Workflow Engine
+- Browser Agent
+- MCP Ecosystem
 
 无需推翻现有架构。
 
@@ -68,15 +68,15 @@ V1 的目标并不是实现一个简单聊天机器人，而是搭建未来所�
 
 ## Monorepo
 
-* Turborepo
-* pnpm workspace
+- Turborepo
+- pnpm workspace
 
 职责：
 
-* 项目统一管理
-* 共享代码
-* 增量构建
-* 多应用协同开发
+- 项目统一管理
+- 共享代码
+- 增量构建
+- 多应用协同开发
 
 ---
 
@@ -84,30 +84,30 @@ V1 的目标并不是实现一个简单聊天机器人，而是搭建未来所�
 
 ### Framework
 
-* React 19
-* TypeScript
-* Vite
+- React 19
+- TypeScript
+- Vite
 
 ### UI
 
-* TailwindCSS
-* shadcn/ui
+- TailwindCSS
+- shadcn/ui
 
 ### State
 
-* Zustand
-* TanStack Query
+- Zustand
+- TanStack Query
 
 ### Rendering
 
-* react-markdown
-* remark
-* rehype
+- react-markdown
+- remark
+- rehype
 
 ### Streaming
 
-* Fetch Stream
-* ReadableStream
+- Fetch Stream
+- ReadableStream
 
 ---
 
@@ -115,21 +115,21 @@ V1 的目标并不是实现一个简单聊天机器人，而是搭建未来所�
 
 ### Framework
 
-* TypeScript
-* Node.js 20+
-* Hono 4
+- TypeScript
+- Node.js 20+
+- Hono 4
 
 ### ORM
 
-* Prisma 6
+- Prisma 6
 
 ### Validation
 
-* Zod
+- Zod
 
 ### Migration
 
-* Prisma Migrate
+- Prisma Migrate
 
 ---
 
@@ -137,16 +137,16 @@ V1 的目标并不是实现一个简单聊天机器人，而是搭建未来所�
 
 ### PostgreSQL
 
-* 端口 5434（避免与其他服务冲突）
-* Milvus 向量数据库（Docker 部署，端口 19530）
+- 端口 5434（避免与其他服务冲突）
+- Milvus 向量数据库（Docker 部署，端口 19530）
 
 负责：
 
-* User
-* Conversation
-* Message
-* Memory（元数据 + 向量）
-* KnowledgeBase / KnowledgeDocument / KnowledgeChunk（RAG 知识库）
+- User
+- Conversation
+- Message
+- Memory（元数据 + 向量）
+- KnowledgeBase / KnowledgeDocument / KnowledgeChunk（RAG 知识库）
 
 存储
 
@@ -156,8 +156,8 @@ V1 的目标并不是实现一个简单聊天机器人，而是搭建未来所�
 
 第一阶段支持：
 
-* OpenAI
-* DeepSeek
+- OpenAI
+- DeepSeek
 
 统一通过 Provider Layer 调用。
 
@@ -192,10 +192,10 @@ React Web 应用。
 
 职责：
 
-* Chat UI
-* Conversation UI
-* Debug Panel
-* Streaming Render
+- Chat UI
+- Conversation UI
+- Debug Panel
+- Streaming Render
 
 ---
 
@@ -205,12 +205,12 @@ TypeScript Hono 服务。
 
 职责：
 
-* Chat API（SSE 流式）
-* Customer Chat API（匿名客服 + 知识库检索）
-* Conversation API
-* Message API
-* Memory API
-* Knowledge Base API
+- Chat API（SSE 流式）
+- Customer Chat API（匿名客服 + 知识库检索）
+- Conversation API
+- Message API
+- Memory API
+- Knowledge Base API
 
 ---
 
@@ -221,10 +221,10 @@ TypeScript Hono 服务。
 例如：
 
 ```ts
-ChatMessage
-Conversation
-User
-ProviderInfo
+ChatMessage;
+Conversation;
+User;
+ProviderInfo;
 ```
 
 前后端统一使用。
@@ -256,8 +256,8 @@ API 客户端 SDK（TypeScript）。
 提供：
 
 ```typescript
-AgentForgeClient   // HTTP 请求封装
-streamChat()       // SSE 流解析 → AsyncGenerator<ChatStreamChunk>
+AgentForgeClient; // HTTP 请求封装
+streamChat(); // SSE 流解析 → AsyncGenerator<ChatStreamChunk>
 ```
 
 前端通过 SDK 调用后端，不直接 fetch。
@@ -351,9 +351,9 @@ interface LLMProvider {
 实现：
 
 ```typescript
-OpenAIProvider
-DeepSeekProvider
-AzureProvider
+OpenAIProvider;
+DeepSeekProvider;
+AzureProvider;
 ```
 
 未来扩展无需修改业务逻辑。
@@ -420,9 +420,9 @@ text/event-stream
 
 功能：
 
-* 创建会话
-* 切换会话
-* 删除会话
+- 创建会话
+- 切换会话
+- 删除会话
 
 ---
 
@@ -430,11 +430,11 @@ text/event-stream
 
 功能：
 
-* 用户消息
-* AI消息
-* Markdown渲染
-* 代码高亮
-* Streaming渲染
+- 用户消息
+- AI消息
+- Markdown渲染
+- 代码高亮
+- Streaming渲染
 
 ---
 
@@ -485,8 +485,8 @@ LLM
 
 目标：
 
-* 首 Token 快速响应
-* 类 ChatGPT 用户体验
+- 首 Token 快速响应
+- 类 ChatGPT 用户体验
 
 ---
 
@@ -530,11 +530,11 @@ LLM
 
 关键能力：
 
-* 自动提取：每轮对话后 LLM 自动判断并提取关键信息
-* 语义检索：对话前根据用户问题检索相关记忆，注入上下文
-* 向量存储：Milvus 存储文本 Embedding，支持语义相似搜索
-* 元数据管理：PostgreSQL 存储记忆元数据（类型、重要性、时间）
-* 记忆面板：前端可视化查看、搜索、删除记忆
+- 自动提取：每轮对话后 LLM 自动判断并提取关键信息
+- 语义检索：对话前根据用户问题检索相关记忆，注入上下文
+- 向量存储：Milvus 存储文本 Embedding，支持语义相似搜索
+- 元数据管理：PostgreSQL 存储记忆元数据（类型、重要性、时间）
+- 记忆面板：前端可视化查看、搜索、删除记忆
 
 ---
 
@@ -574,12 +574,12 @@ LLM
 
 ## 3. 技术选型
 
-| 组件 | 技术 | 用途 |
-|------|------|------|
+| 组件       | 技术                       | 用途                         |
+| ---------- | -------------------------- | ---------------------------- |
 | 向量数据库 | Milvus Standalone (Docker) | 存储文本 Embedding，语义搜索 |
-| 元数据存储 | PostgreSQL（已有） | 记忆 ID、类型、重要性等 |
-| Embedding | DeepSeek / OpenAI API | 文本 → 向量 |
-| 记忆提取 | LLM Prompt 工程 | 对话后自动提取关键事实 |
+| 元数据存储 | PostgreSQL（已有）         | 记忆 ID、类型、重要性等      |
+| Embedding  | DeepSeek / OpenAI API      | 文本 → 向量                  |
+| 记忆提取   | LLM Prompt 工程            | 对话后自动提取关键事实       |
 
 ---
 
@@ -616,21 +616,24 @@ content         VarChar               -- 冗余存储便于调试
 
 ```typescript
 class MemoryEngine {
-  async store(memory: MemoryCreate): Promise<Memory>
-    // 存储记忆到 PG + Milvus
+  async store(memory: MemoryCreate): Promise<Memory>;
+  // 存储记忆到 PG + Milvus
 
-  async search(query: string, userId: string, topK: number): Promise<Memory[]>
-    // 语义搜索相关记忆
+  async search(query: string, userId: string, topK: number): Promise<Memory[]>;
+  // 语义搜索相关记忆
 
-  async extractAndStore(messages: Message[], userId: string,
-                        conversationId: string): Promise<Memory[]>
-    // LLM 提取关键信息并存储
+  async extractAndStore(
+    messages: Message[],
+    userId: string,
+    conversationId: string,
+  ): Promise<Memory[]>;
+  // LLM 提取关键信息并存储
 
-  async list(userId: string, type?: MemoryType): Promise<Memory[]>
-    // 列出用户记忆
+  async list(userId: string, type?: MemoryType): Promise<Memory[]>;
+  // 列出用户记忆
 
-  async delete(memoryId: string): Promise<void>
-    // 删除记忆
+  async delete(memoryId: string): Promise<void>;
+  // 删除记忆
 }
 ```
 
@@ -740,23 +743,23 @@ V3 在 V2 Memory Engine 的向量检索能力基础上，扩展为完整的 RAG 
 
 ## 核心能力
 
-* 文档管理：上传、删除、按知识库组织
-* 文档摄取：自动切片 → Embedding → Milvus + PostgreSQL 双写
-* 混合检索：dense 语义向量（0.6）+ BM25 关键词（0.4），可选 LLM Rerank
-* 客服集成：`CustomerChatService` 自动搜索知识库，注入 system prompt
-* 前端管理：知识库管理 UI + 搜索测试界面
+- 文档管理：上传、删除、按知识库组织
+- 文档摄取：自动切片 → Embedding → Milvus + PostgreSQL 双写
+- 混合检索：dense 语义向量（0.6）+ BM25 关键词（0.4），可选 LLM Rerank
+- 客服集成：`CustomerChatService` 自动搜索知识库，注入 system prompt
+- 前端管理：知识库管理 UI + 搜索测试界面
 
 ## 数据模型
 
-* `knowledge_bases` — 知识库（名称、描述、Embedding 模型）
-* `knowledge_documents` — 文档（标题、类型、状态）
-* `knowledge_chunks` — 切片（内容、序号、Embedding ID）
+- `knowledge_bases` — 知识库（名称、描述、Embedding 模型）
+- `knowledge_documents` — 文档（标题、类型、状态）
+- `knowledge_chunks` — 切片（内容、序号、Embedding ID）
 
 ## 技术栈
 
-* Milvus Hybrid Search（dense + sparse）
-* `RecursiveCharacterTextSplitter` — 递归文本切分
-* OpenAI `text-embedding-ada-002` → 1536 维向量
+- Milvus Hybrid Search（dense + sparse）
+- `RecursiveCharacterTextSplitter` — 递归文本切分
+- OpenAI `text-embedding-ada-002` → 1536 维向量
 
 ---
 
@@ -806,12 +809,12 @@ Done:        tool_calls_count: 1
 
 ## 4. 技术选型
 
-| 组件 | 技术 | 用途 |
-|------|------|------|
-| 工具注册 | ToolRegistry (Singleton) | 注册、查找、执行工具 |
-| 内置工具 | get_current_time, calculator, web_search | MVP 基础工具集 |
-| LLM 集成 | OpenAI Function Calling API | 工具定义传递和调用 |
-| 执行循环 | ChatService Multi-Round | Server 端最多 5 轮循环 |
+| 组件     | 技术                                     | 用途                   |
+| -------- | ---------------------------------------- | ---------------------- |
+| 工具注册 | ToolRegistry (Singleton)                 | 注册、查找、执行工具   |
+| 内置工具 | get_current_time, calculator, web_search | MVP 基础工具集         |
+| LLM 集成 | OpenAI Function Calling API              | 工具定义传递和调用     |
+| 执行循环 | ChatService Multi-Round                  | Server 端最多 5 轮循环 |
 
 ## 5. API 设计
 
@@ -849,7 +852,6 @@ Body: { "message": "...", "tools": ["calculator"] }
 ✅ 向后兼容（无 tools 参数时不发送工具定义）完成
 
 ✅ 自测验证通过（calculator 和 get_current_time 工具调用正常）
-
 
 # 十五、P0 平台基础 —— 从 Demo 到可部署产品
 
@@ -930,15 +932,16 @@ DELETE /api/auth/api-keys/:id    # 吊销 API Key
 ```typescript
 // apps/server/src/middleware/auth.ts
 const authMiddleware = createMiddleware(async (c, next) => {
-  const token = c.req.header("Authorization")?.replace("Bearer ", "")
-    ?? c.req.query("api_key");  // 也支持 query param 的 API Key
+  const token =
+    c.req.header("Authorization")?.replace("Bearer ", "") ??
+    c.req.query("api_key"); // 也支持 query param 的 API Key
 
   if (!token) return c.json({ detail: "Unauthorized" }, 401);
 
   const user = await authService.validateToken(token);
   if (!user) return c.json({ detail: "Invalid or expired token" }, 401);
 
-  c.set("user", user);  // 注入用户上下文
+  c.set("user", user); // 注入用户上下文
   await next();
 });
 ```
@@ -963,12 +966,12 @@ const authMiddleware = createMiddleware(async (c, next) => {
 
 ### 技术选型
 
-| 组件 | 技术 | 用途 |
-|------|------|------|
-| 日志库 | pino | 结构化 JSON 日志，极低开销 |
-| 日志传输 | pino-pretty (dev) / pino/file (prod) | 开发时人类可读，生产时 JSON → 文件或 stdout |
-| Correlation ID | Hono 中间件 + AsyncLocalStorage | 每个请求生成唯一 ID，贯穿所有日志 |
-| 日志级别 | trace / debug / info / warn / error / fatal | 通过环境变量 `LOG_LEVEL` 控制 |
+| 组件           | 技术                                        | 用途                                        |
+| -------------- | ------------------------------------------- | ------------------------------------------- |
+| 日志库         | pino                                        | 结构化 JSON 日志，极低开销                  |
+| 日志传输       | pino-pretty (dev) / pino/file (prod)        | 开发时人类可读，生产时 JSON → 文件或 stdout |
+| Correlation ID | Hono 中间件 + AsyncLocalStorage             | 每个请求生成唯一 ID，贯穿所有日志           |
+| 日志级别       | trace / debug / info / warn / error / fatal | 通过环境变量 `LOG_LEVEL` 控制               |
 
 ### 架构
 
@@ -978,9 +981,10 @@ import pino from "pino";
 
 export const logger = pino({
   level: process.env.LOG_LEVEL || "info",
-  transport: process.env.NODE_ENV === "development"
-    ? { target: "pino-pretty", options: { colorize: true } }
-    : undefined,
+  transport:
+    process.env.NODE_ENV === "development"
+      ? { target: "pino-pretty", options: { colorize: true } }
+      : undefined,
   mixin() {
     // 自动注入 correlationId
     const ctx = getRequestContext();
@@ -996,7 +1000,7 @@ export const logger = pino({
 app.use("*", async (c, next) => {
   const requestId = c.req.header("X-Request-ID") || crypto.randomUUID();
   c.set("requestId", requestId);
-  c.header("X-Request-ID", requestId);  // 返回给前端便于问题定位
+  c.header("X-Request-ID", requestId); // 返回给前端便于问题定位
   await runWithRequestContext({ requestId }, next);
 });
 ```
@@ -1019,13 +1023,13 @@ app.use("*", async (c, next) => {
 
 ### 技术选型
 
-| 组件 | 技术 | 用途 |
-|------|------|------|
-| 测试框架 | vitest | 与 Vite 生态一致，速度快 |
-| 断言 | vitest 内置 expect | 无需额外断言库 |
-| Mock | vitest + msw (Mock Service Worker) | Mock HTTP / Provider 层 |
-| 数据库测试 | 测试用 PostgreSQL 实例 或 SQLite 替代 | 隔离的测试数据库 |
-| E2E | Playwright | 浏览器端测试 |
+| 组件       | 技术                                  | 用途                     |
+| ---------- | ------------------------------------- | ------------------------ |
+| 测试框架   | vitest                                | 与 Vite 生态一致，速度快 |
+| 断言       | vitest 内置 expect                    | 无需额外断言库           |
+| Mock       | vitest + msw (Mock Service Worker)    | Mock HTTP / Provider 层  |
+| 数据库测试 | 测试用 PostgreSQL 实例 或 SQLite 替代 | 隔离的测试数据库         |
+| E2E        | Playwright                            | 浏览器端测试             |
 
 ### 测试分层
 
@@ -1084,7 +1088,7 @@ app.use("*", async (c, next) => {
 name: CI
 on:
   push:
-    branches: [main, init, 'feature/**']
+    branches: [main, init, "feature/**"]
   pull_request:
     branches: [main]
 
@@ -1103,23 +1107,23 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v2
       - uses: actions/setup-node@v4
-        with: { node-version: '20', cache: 'pnpm' }
+        with: { node-version: "20", cache: "pnpm" }
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm typecheck        # 全量类型检查
-      - run: pnpm lint             # ESLint
-      - run: pnpm format --check   # Prettier 格式检查
-      - run: pnpm test             # vitest 测试
-      - run: pnpm build            # 构建验证
+      - run: pnpm typecheck # 全量类型检查
+      - run: pnpm lint # ESLint
+      - run: pnpm format --check # Prettier 格式检查
+      - run: pnpm test # vitest 测试
+      - run: pnpm build # 构建验证
 ```
 
 ### 流水线阶段
 
-| 阶段 | 触发条件 | 操作 |
-|------|----------|------|
-| **Quality** | 每次 push/PR | typecheck → lint → format → test → build |
-| **Preview Deploy** | PR 创建 | 部署到临时环境（后续可加） |
-| **Release** | main 分支 tag push | 构建 Docker 镜像 → 推送到 Registry |
+| 阶段               | 触发条件           | 操作                                     |
+| ------------------ | ------------------ | ---------------------------------------- |
+| **Quality**        | 每次 push/PR       | typecheck → lint → format → test → build |
+| **Preview Deploy** | PR 创建            | 部署到临时环境（后续可加）               |
+| **Release**        | main 分支 tag push | 构建 Docker 镜像 → 推送到 Registry       |
 
 ### 验收标准
 
@@ -1142,18 +1146,24 @@ jobs:
 import { rateLimiter } from "hono-rate-limiter";
 
 // 全局：每个 IP 每分钟最多 60 次请求
-app.use("*", rateLimiter({
-  windowMs: 60 * 1000,
-  max: 60,
-  keyGenerator: (c) => c.req.header("X-Forwarded-For") || "unknown",
-}));
+app.use(
+  "*",
+  rateLimiter({
+    windowMs: 60 * 1000,
+    max: 60,
+    keyGenerator: (c) => c.req.header("X-Forwarded-For") || "unknown",
+  }),
+);
 
 // Chat API：每个用户每分钟最多 20 次（防止 token 滥用）
-app.use("/api/chat", rateLimiter({
-  windowMs: 60 * 1000,
-  max: 20,
-  keyGenerator: (c) => c.get("user")?.id || c.req.header("X-Forwarded-For"),
-}));
+app.use(
+  "/api/chat",
+  rateLimiter({
+    windowMs: 60 * 1000,
+    max: 20,
+    keyGenerator: (c) => c.get("user")?.id || c.req.header("X-Forwarded-For"),
+  }),
+);
 ```
 
 ### Input Validation
@@ -1203,11 +1213,11 @@ LLM 流式响应完成
 
 ### 技术选型
 
-| 组件 | 技术 | 用途 |
-|------|------|------|
-| 消息队列 | BullMQ (Redis) | 可靠的任务队列，支持重试、延迟、优先级 |
-| Worker | 独立 tsx 进程 | 消费队列任务 |
-| Dashboard | Bull Board | 任务监控 UI |
+| 组件      | 技术           | 用途                                   |
+| --------- | -------------- | -------------------------------------- |
+| 消息队列  | BullMQ (Redis) | 可靠的任务队列，支持重试、延迟、优先级 |
+| Worker    | 独立 tsx 进程  | 消费队列任务                           |
+| Dashboard | Bull Board     | 任务监控 UI                            |
 
 ### 数据流
 
@@ -1283,13 +1293,13 @@ await memoryQueue.add("extract", {
 
 ### 技术选型
 
-| 组件 | 技术 | 用途 |
-|------|------|------|
-| Metrics 库 | prom-client | Prometheus 指标采集 |
-| Metrics 端点 | GET /api/metrics | Prometheus scrape |
-| Tracing SDK | @opentelemetry/sdk-node | 分布式追踪 |
-| Exporter | OTLP → Jaeger / Grafana Tempo | 追踪存储和可视化 |
-| 仪表盘 | Grafana | 统一可视化 |
+| 组件         | 技术                          | 用途                |
+| ------------ | ----------------------------- | ------------------- |
+| Metrics 库   | prom-client                   | Prometheus 指标采集 |
+| Metrics 端点 | GET /api/metrics              | Prometheus scrape   |
+| Tracing SDK  | @opentelemetry/sdk-node       | 分布式追踪          |
+| Exporter     | OTLP → Jaeger / Grafana Tempo | 追踪存储和可视化    |
+| 仪表盘       | Grafana                       | 统一可视化          |
 
 ### 验收标准
 
@@ -1340,10 +1350,15 @@ await memoryQueue.add("extract", {
 ```typescript
 // packages/shared-types/src/agent-decision.ts
 type AgentDecision =
-  | { action: "tool_call"; tool: string; args: Record<string, unknown>; reason: string }
+  | {
+      action: "tool_call";
+      tool: string;
+      args: Record<string, unknown>;
+      reason: string;
+    }
   | { action: "respond"; content: string; summary: string }
   | { action: "ask_user"; question: string; context: string }
-  | { action: "delegate"; agent: string; task: string; context: string };  // V9 Multi-Agent
+  | { action: "delegate"; agent: string; task: string; context: string }; // V9 Multi-Agent
 ```
 
 ### System Prompt 模板（ReAct 风格）
@@ -1377,11 +1392,11 @@ class AgentService {
       model?: string;
       maxIterations?: number;
       tools?: string[];
-      requireApproval?: boolean;  // P1-5 Human-in-the-loop
-    }
+      requireApproval?: boolean; // P1-5 Human-in-the-loop
+    },
   ): AsyncGenerator<AgentStreamEvent> {
     let iteration = 0;
-    const scratchpad: AgentStep[] = [];  // 工作内存
+    const scratchpad: AgentStep[] = []; // 工作内存
 
     while (iteration < (options.maxIterations || 10)) {
       // 1. 构建上下文（system prompt + scratchpad + task）
@@ -1413,6 +1428,7 @@ class AgentService {
 ### 核心目标
 
 不同于 V2 的长期记忆（跨会话），Agent 需要一个当前任务的 scratchpad：
+
 - 存储中间推理步骤
 - 存储工具调用的中间结果
 - 任务完成后可归档为长期记忆或丢弃
@@ -1508,8 +1524,8 @@ interface RegisteredTool {
   definition: ToolDefinition;
   execute: ToolExecutor;
   riskLevel: "safe" | "read_only" | "mutation" | "destructive";
-  requireApproval: boolean;  // true = 必须审批
-  approvalMessage?: (args: Record<string, unknown>) => string;  // 审批提示
+  requireApproval: boolean; // true = 必须审批
+  approvalMessage?: (args: Record<string, unknown>) => string; // 审批提示
 }
 ```
 
@@ -1539,19 +1555,19 @@ Body: { "action": "approve" | "reject" | "modify", "modified_args": {...} }
 
 ### 新增内置工具
 
-| 工具 | 类别 | 描述 | 风险等级 |
-|------|------|------|----------|
-| `file_read` | 文件系统 | 读取指定路径的文件内容 | safe |
-| `file_write` | 文件系统 | 写入内容到文件 | destructive |
-| `file_search` | 文件系统 | 按文件名/内容搜索 | read_only |
-| `code_execute` | 沙箱 | 在 Docker 沙箱中执行 Python/JS 代码 | mutation |
-| `http_request` | 网络 | 发送 HTTP 请求（GET/POST） | mutation |
-| `db_query` | 数据库 | 执行只读 SQL 查询 | read_only |
-| `web_search` | 搜索 | 真实在线搜索（SerpAPI/Tavily） | read_only |
-| `web_fetch` | 网络 | 抓取指定 URL 内容 | read_only |
-| `send_email` | 通信 | 发送邮件（需审批） | destructive |
-| `calendar_query` | 日程 | 查询日历事件 | read_only |
-| `github_issue` | 集成 | 创建/查询 GitHub Issue | mutation |
+| 工具             | 类别     | 描述                                | 风险等级    |
+| ---------------- | -------- | ----------------------------------- | ----------- |
+| `file_read`      | 文件系统 | 读取指定路径的文件内容              | safe        |
+| `file_write`     | 文件系统 | 写入内容到文件                      | destructive |
+| `file_search`    | 文件系统 | 按文件名/内容搜索                   | read_only   |
+| `code_execute`   | 沙箱     | 在 Docker 沙箱中执行 Python/JS 代码 | mutation    |
+| `http_request`   | 网络     | 发送 HTTP 请求（GET/POST）          | mutation    |
+| `db_query`       | 数据库   | 执行只读 SQL 查询                   | read_only   |
+| `web_search`     | 搜索     | 真实在线搜索（SerpAPI/Tavily）      | read_only   |
+| `web_fetch`      | 网络     | 抓取指定 URL 内容                   | read_only   |
+| `send_email`     | 通信     | 发送邮件（需审批）                  | destructive |
+| `calendar_query` | 日程     | 查询日历事件                        | read_only   |
+| `github_issue`   | 集成     | 创建/查询 GitHub Issue              | mutation    |
 
 ### 工具执行沙箱
 
@@ -1593,7 +1609,6 @@ Body: { "action": "approve" | "reject" | "modify", "modified_args": {...} }
 - [x] Web Search 真实实现（SerpAPI 或 Tavily 集成）
 - [x] 工具执行指标记录（调用次数、成功率、平均延迟）
 
-
 # 十七、V5 Voice Agent 语音交互
 
 ## 1. 核心目标
@@ -1633,14 +1648,14 @@ Body: { "action": "approve" | "reject" | "modify", "modified_args": {...} }
 
 ## 3. 技术选型
 
-| 组件 | 技术 | 用途 |
-|------|------|------|
-| ASR (语音识别) | OpenAI Whisper API | 高精度多语言语音转文字 |
-| TTS (语音合成) | OpenAI TTS API / Edge TTS | 文字转语音，多种音色 |
-| 实时通信 | WebSocket | 音频流双向传输（替代 HTTP SSE） |
-| 音频采集 | MediaRecorder API (浏览器) | 前端麦克风采集 |
-| 音频播放 | Web Audio API | 前端播放 TTS 音频流 |
-| VAD (语音活动检测) | @ricky0123/vad-web | 检测用户是否在说话 |
+| 组件               | 技术                       | 用途                            |
+| ------------------ | -------------------------- | ------------------------------- |
+| ASR (语音识别)     | OpenAI Whisper API         | 高精度多语言语音转文字          |
+| TTS (语音合成)     | OpenAI TTS API / Edge TTS  | 文字转语音，多种音色            |
+| 实时通信           | WebSocket                  | 音频流双向传输（替代 HTTP SSE） |
+| 音频采集           | MediaRecorder API (浏览器) | 前端麦克风采集                  |
+| 音频播放           | Web Audio API              | 前端播放 TTS 音频流             |
+| VAD (语音活动检测) | @ricky0123/vad-web         | 检测用户是否在说话              |
 
 ## 4. 打断机制
 
@@ -1703,7 +1718,6 @@ POST /api/voice/synthesize    # 提交文字 → 返回音频
 - [x] 向后兼容：文本聊天模式不受影响
 - [x] 语音对话历史可回看（自动保存 transcript）
 
-
 # 十八、V6 Workflow Engine 工作流引擎
 
 ## 1. 核心目标
@@ -1712,29 +1726,29 @@ POST /api/voice/synthesize    # 提交文字 → 返回音频
 
 关键能力：
 
-* DAG 编排：支持串行、并行、条件分支、依赖等待的图执行
-* 步骤类型：agent 推理、tool 调用、condition 判断、parallel 并行、human_approval 审批
-* 变量系统：工作流级别变量定义、步骤间数据传递、模板表达式 `{{var}}`
-* 检查点恢复：每个步骤完成后自动保存检查点，失败后可从中断处继续
-* 重试与超时：每步骤独立的指数退避重试策略和超时控制
-* 实时监控：SSE 流推送每个步骤的执行状态，前端 DAG 可视化
-* 模板库：内置常用工作流模板，一键创建
+- DAG 编排：支持串行、并行、条件分支、依赖等待的图执行
+- 步骤类型：agent 推理、tool 调用、condition 判断、parallel 并行、human_approval 审批
+- 变量系统：工作流级别变量定义、步骤间数据传递、模板表达式 `{{var}}`
+- 检查点恢复：每个步骤完成后自动保存检查点，失败后可从中断处继续
+- 重试与超时：每步骤独立的指数退避重试策略和超时控制
+- 实时监控：SSE 流推送每个步骤的执行状态，前端 DAG 可视化
+- 模板库：内置常用工作流模板，一键创建
 
 ---
 
 ## 2. 技术选型
 
-| 组件 | 技术 | 用途 |
-|------|------|------|
-| DAG 调度 | 自研 DAGExecutor | 拓扑排序 + 依赖解析 + 并行调度 |
-| 模板引擎 | 自研简易模板（`{{var}}` 语法） | 工作流变量替换，支持嵌套对象路径 `{{step_id.output.field}}` |
-| 条件表达式 | 沙箱化表达式求值（无 `eval`） | 安全解析 `{{var}} > 50` / `{{status}} === "ok"` 等条件 |
-| 检查点存储 | PostgreSQL JSONB（workflow_runs.checkpoint） | 持久化检查点，无需额外组件 |
-| 实时推送 | SSE（已有基础设施） | 步骤执行事件推送到前端 |
-| 工作流存储 | PostgreSQL JSONB（workflows.definition） | DSL 定义存储，支持索引查询 |
-| Agent 集成 | 复用 AgentService（P1-3） | agent 步骤类型内部调用 ReAct 循环 |
-| Tool 集成 | 复用 ToolRegistry（V4 + P1-6） | tool 步骤类型内部调用工具执行 |
-| 审批集成 | 复用 P1-5 审批机制 | human_approval 步骤类型触发审批门 |
+| 组件       | 技术                                         | 用途                                                        |
+| ---------- | -------------------------------------------- | ----------------------------------------------------------- |
+| DAG 调度   | 自研 DAGExecutor                             | 拓扑排序 + 依赖解析 + 并行调度                              |
+| 模板引擎   | 自研简易模板（`{{var}}` 语法）               | 工作流变量替换，支持嵌套对象路径 `{{step_id.output.field}}` |
+| 条件表达式 | 沙箱化表达式求值（无 `eval`）                | 安全解析 `{{var}} > 50` / `{{status}} === "ok"` 等条件      |
+| 检查点存储 | PostgreSQL JSONB（workflow_runs.checkpoint） | 持久化检查点，无需额外组件                                  |
+| 实时推送   | SSE（已有基础设施）                          | 步骤执行事件推送到前端                                      |
+| 工作流存储 | PostgreSQL JSONB（workflows.definition）     | DSL 定义存储，支持索引查询                                  |
+| Agent 集成 | 复用 AgentService（P1-3）                    | agent 步骤类型内部调用 ReAct 循环                           |
+| Tool 集成  | 复用 ToolRegistry（V4 + P1-6）               | tool 步骤类型内部调用工具执行                               |
+| 审批集成   | 复用 P1-5 审批机制                           | human_approval 步骤类型触发审批门                           |
 
 ---
 
@@ -1812,7 +1826,14 @@ const StepRetrySchema = z.object({
 
 const BaseStepSchema = z.object({
   id: z.string().min(1).max(100),
-  type: z.enum(["agent", "tool", "condition", "parallel", "human_approval", "transform"]),
+  type: z.enum([
+    "agent",
+    "tool",
+    "condition",
+    "parallel",
+    "human_approval",
+    "transform",
+  ]),
   description: z.string().optional(),
   depends_on: z.array(z.string()).optional(),
   retry: StepRetrySchema.optional(),
@@ -1828,7 +1849,7 @@ const AgentStepSchema = BaseStepSchema.extend({
   model: z.string().optional(),
   tools: z.array(z.string()).optional(),
   max_iterations: z.number().default(10),
-  output_as: z.string().optional(),  // 结果存储的变量名，默认 = step.id
+  output_as: z.string().optional(), // 结果存储的变量名，默认 = step.id
 });
 
 const ToolStepSchema = BaseStepSchema.extend({
@@ -1848,11 +1869,13 @@ const ConditionStepSchema = BaseStepSchema.extend({
 
 const ParallelStepSchema = BaseStepSchema.extend({
   type: z.literal("parallel"),
-  branches: z.array(z.object({
-    id: z.string(),
-    label: z.string().optional(),
-    steps: z.array(z.lazy(() => StepSchema)),
-  })),
+  branches: z.array(
+    z.object({
+      id: z.string(),
+      label: z.string().optional(),
+      steps: z.array(z.lazy(() => StepSchema)),
+    }),
+  ),
   wait: z.enum(["all", "any", "first"]).default("all"),
 });
 
@@ -1868,7 +1891,7 @@ const TransformStepSchema = BaseStepSchema.extend({
   type: z.literal("transform"),
   operation: z.enum(["map", "filter", "merge", "jsonata"]),
   expression: z.string(),
-  input: z.string().optional(),  // 输入变量名，默认取上一步结果
+  input: z.string().optional(), // 输入变量名，默认取上一步结果
   output_as: z.string().optional(),
 });
 
@@ -2009,7 +2032,10 @@ async function executeAgentStep(step: AgentStep, context: StepContext): Promise<
 直接调用 ToolRegistry 执行工具。
 
 ```typescript
-async function executeToolStep(step: ToolStep, context: StepContext): Promise<StepResult> {
+async function executeToolStep(
+  step: ToolStep,
+  context: StepContext,
+): Promise<StepResult> {
   const resolvedArgs = resolveVariables(step.args, context.variables);
 
   // P1-5 审批检查
@@ -2034,16 +2060,20 @@ async function executeToolStep(step: ToolStep, context: StepContext): Promise<St
 安全表达式求值分支。
 
 ```typescript
-async function executeConditionStep(step: ConditionStep, context: StepContext): Promise<StepResult> {
+async function executeConditionStep(
+  step: ConditionStep,
+  context: StepContext,
+): Promise<StepResult> {
   const resolvedExpr = resolveVariables(step.expression, context.variables);
   // 使用安全的表达式求值器（非 eval），支持: > < >= <= === !== && || includes startsWith
   const branchKey = SafeEvaluator.evaluate(resolvedExpr) ? "true" : "false";
-  const branchSteps = step.branches[branchKey] || step.branches[step.default_branch || "true"];
+  const branchSteps =
+    step.branches[branchKey] || step.branches[step.default_branch || "true"];
 
   return {
     status: "completed",
     output: { branch: branchKey },
-    subSteps: branchSteps,  // 返回分支步骤交由 DAGExecutor 继续执行
+    subSteps: branchSteps, // 返回分支步骤交由 DAGExecutor 继续执行
   };
 }
 ```
@@ -2053,7 +2083,10 @@ async function executeConditionStep(step: ConditionStep, context: StepContext): 
 并行执行多个分支，每个分支内可包含多个串行步骤。
 
 ```typescript
-async function executeParallelStep(step: ParallelStep, context: StepContext): Promise<StepResult> {
+async function executeParallelStep(
+  step: ParallelStep,
+  context: StepContext,
+): Promise<StepResult> {
   const branchResults = await Promise.allSettled(
     step.branches.map(async (branch) => {
       const branchContext = { ...context, parentStepId: step.id };
@@ -2062,21 +2095,28 @@ async function executeParallelStep(step: ParallelStep, context: StepContext): Pr
       for (const subStep of branch.steps) {
         const result = await executeStep(subStep, branchContext);
         results.push(result);
-        if (result.status === "failed") throw new Error(`Branch ${branch.id} failed at step ${subStep.id}`);
+        if (result.status === "failed")
+          throw new Error(`Branch ${branch.id} failed at step ${subStep.id}`);
       }
       return { branchId: branch.id, results };
-    })
+    }),
   );
 
   // wait 策略处理
-  const failures = branchResults.filter(r => r.status === "rejected");
+  const failures = branchResults.filter((r) => r.status === "rejected");
   if (step.wait === "all" && failures.length > 0) {
-    return { status: "failed", output: null, error: `${failures.length} branches failed` };
+    return {
+      status: "failed",
+      output: null,
+      error: `${failures.length} branches failed`,
+    };
   }
 
   return {
     status: "completed",
-    output: branchResults.map(r => r.status === "fulfilled" ? r.value : null).filter(Boolean),
+    output: branchResults
+      .map((r) => (r.status === "fulfilled" ? r.value : null))
+      .filter(Boolean),
   };
 }
 ```
@@ -2119,14 +2159,23 @@ async function executeHumanApprovalStep(step: HumanApprovalStep, context: StepCo
 数据转换步骤，用于步骤间数据重塑。
 
 ```typescript
-async function executeTransformStep(step: TransformStep, context: StepContext): Promise<StepResult> {
+async function executeTransformStep(
+  step: TransformStep,
+  context: StepContext,
+): Promise<StepResult> {
   const resolvedExpr = resolveVariables(step.expression, context.variables);
 
   switch (step.operation) {
     case "merge":
-      return { status: "completed", output: SafeEvaluator.evaluateTemplate(resolvedExpr, context.variables) };
+      return {
+        status: "completed",
+        output: SafeEvaluator.evaluateTemplate(resolvedExpr, context.variables),
+      };
     case "jsonata":
-      return { status: "completed", output: JSONataEvaluator.evaluate(resolvedExpr, context.variables) };
+      return {
+        status: "completed",
+        output: JSONataEvaluator.evaluate(resolvedExpr, context.variables),
+      };
     default:
       return { status: "completed", output: resolvedExpr };
   }
@@ -2176,7 +2225,9 @@ class VariableResolver {
       if (stepMatch) {
         const stepResult = context.stepResults[stepMatch[1]];
         const fieldPath = stepMatch[2] || "";
-        return fieldPath ? getNestedValue(stepResult, fieldPath) : JSON.stringify(stepResult);
+        return fieldPath
+          ? getNestedValue(stepResult, fieldPath)
+          : JSON.stringify(stepResult);
       }
 
       // 工作流变量
@@ -2189,7 +2240,7 @@ class VariableResolver {
         return JSON.stringify(context.stepResults[trimmed]);
       }
 
-      return `{{${trimmed}}}`;  // 未解析的保留原样
+      return `{{${trimmed}}}`; // 未解析的保留原样
     });
   }
 }
@@ -2200,15 +2251,18 @@ class VariableResolver {
 ```typescript
 // 不使用 eval()，仅支持安全表达式
 class SafeEvaluator {
-  private static OPERATORS: Record<string, (a: unknown, b: unknown) => boolean> = {
+  private static OPERATORS: Record<
+    string,
+    (a: unknown, b: unknown) => boolean
+  > = {
     ">": (a, b) => Number(a) > Number(b),
     "<": (a, b) => Number(a) < Number(b),
     ">=": (a, b) => Number(a) >= Number(b),
     "<=": (a, b) => Number(a) <= Number(b),
     "===": (a, b) => a === b,
     "!==": (a, b) => a !== b,
-    "includes": (a, b) => String(a).includes(String(b)),
-    "startsWith": (a, b) => String(a).startsWith(String(b)),
+    includes: (a, b) => String(a).includes(String(b)),
+    startsWith: (a, b) => String(a).startsWith(String(b)),
   };
 
   static evaluate(expression: string): boolean {
@@ -2285,21 +2339,28 @@ interface WorkflowCheckpoint {
   runId: string;
   completedSteps: string[];
   currentStep: string | null;
-  pendingSteps: string[];                 // 待执行的步骤 ID 列表
-  stepResults: Record<string, {           // 每个步骤的详细结果
-    status: "completed" | "failed" | "skipped";
-    output: unknown;
-    tokensUsed?: number;
-    durationMs: number;
-    retryCount: number;
-    error?: string;
-  }>;
-  variables: Record<string, unknown>;     // 变量累积快照
+  pendingSteps: string[]; // 待执行的步骤 ID 列表
+  stepResults: Record<
+    string,
+    {
+      // 每个步骤的详细结果
+      status: "completed" | "failed" | "skipped";
+      output: unknown;
+      tokensUsed?: number;
+      durationMs: number;
+      retryCount: number;
+      error?: string;
+    }
+  >;
+  variables: Record<string, unknown>; // 变量累积快照
   savedAt: string;
 }
 
 // 保存检查点（在 DAGExecutor 的每个步骤后自动触发）
-async function saveCheckpoint(runId: string, checkpoint: WorkflowCheckpoint): Promise<void> {
+async function saveCheckpoint(
+  runId: string,
+  checkpoint: WorkflowCheckpoint,
+): Promise<void> {
   await prisma.workflowRun.update({
     where: { id: runId },
     data: { checkpoint: checkpoint as any },
@@ -2324,12 +2385,12 @@ async function resumeWorkflow(runId: string): Promise<void> {
 
 ### 8.2 检查点触发时机
 
-| 时机 | 触发条件 | 保存内容 |
-|------|---------|---------|
-| Step 完成 | 每个步骤成功执行后 | 完整检查点 |
+| 时机      | 触发条件                   | 保存内容              |
+| --------- | -------------------------- | --------------------- |
+| Step 完成 | 每个步骤成功执行后         | 完整检查点            |
 | Step 失败 | 步骤执行失败（重试耗尽后） | 完整检查点 + 错误信息 |
-| 人工审批 | 进入 human_approval 步骤前 | 检查点 + 审批待处理 |
-| 手动暂停 | 用户调用 `/pause` | 当前状态快照 |
+| 人工审批  | 进入 human_approval 步骤前 | 检查点 + 审批待处理   |
+| 手动暂停  | 用户调用 `/pause`          | 当前状态快照          |
 
 ---
 
@@ -2339,11 +2400,11 @@ async function resumeWorkflow(runId: string): Promise<void> {
 
 ```typescript
 interface StepRetryConfig {
-  maxAttempts: number;          // 最大重试次数（默认 3）
+  maxAttempts: number; // 最大重试次数（默认 3）
   backoff: "fixed" | "exponential" | "linear";
-  initialDelay: number;         // 初始延迟（ms，默认 1000）
-  maxDelay: number;             // 最大延迟（ms，默认 60000）
-  retryOn: string[];            // 可重试的错误类型
+  initialDelay: number; // 初始延迟（ms，默认 1000）
+  maxDelay: number; // 最大延迟（ms，默认 60000）
+  retryOn: string[]; // 可重试的错误类型
 }
 
 // 重试延迟计算
@@ -2354,7 +2415,10 @@ function calculateRetryDelay(config: StepRetryConfig, attempt: number): number {
     case "linear":
       return config.initialDelay * attempt;
     case "exponential":
-      return Math.min(config.initialDelay * Math.pow(2, attempt - 1), config.maxDelay);
+      return Math.min(
+        config.initialDelay * Math.pow(2, attempt - 1),
+        config.maxDelay,
+      );
   }
 }
 
@@ -2362,9 +2426,15 @@ function calculateRetryDelay(config: StepRetryConfig, attempt: number): number {
 async function executeWithRetry(
   step: WorkflowStep,
   context: StepContext,
-  execute: () => Promise<StepResult>
+  execute: () => Promise<StepResult>,
 ): Promise<StepResult> {
-  const retry = step.retry || { maxAttempts: 3, backoff: "exponential", initialDelay: 1000, maxDelay: 60000, retryOn: ["*"] };
+  const retry = step.retry || {
+    maxAttempts: 3,
+    backoff: "exponential",
+    initialDelay: 1000,
+    maxDelay: 60000,
+    retryOn: ["*"],
+  };
   let lastError: Error | null = null;
 
   for (let attempt = 1; attempt <= retry.maxAttempts; attempt++) {
@@ -2397,18 +2467,34 @@ async function executeWithRetry(
 ### 9.2 超时处理
 
 ```typescript
-async function handleTimeout(step: WorkflowStep, context: StepContext, error: Error): Promise<StepResult> {
+async function handleTimeout(
+  step: WorkflowStep,
+  context: StepContext,
+  error: Error,
+): Promise<StepResult> {
   switch (step.on_timeout) {
     case "skip":
-      return { status: "skipped", output: null, reason: `timeout after ${step.timeout}s` };
+      return {
+        status: "skipped",
+        output: null,
+        reason: `timeout after ${step.timeout}s`,
+      };
     case "fail":
-      return { status: "failed", output: null, error: `timeout after ${step.timeout}s` };
+      return {
+        status: "failed",
+        output: null,
+        error: `timeout after ${step.timeout}s`,
+      };
     case "fallback":
       if (step.fallback_step) {
         const fallbackStep = context.getStep(step.fallback_step);
         return await executeStep(fallbackStep, context);
       }
-      return { status: "failed", output: null, error: "fallback step not found" };
+      return {
+        status: "failed",
+        output: null,
+        error: "fallback step not found",
+      };
   }
 }
 ```
@@ -2418,9 +2504,9 @@ async function handleTimeout(step: WorkflowStep, context: StepContext, error: Er
 ```typescript
 // 可重试错误 vs 不可恢复错误
 enum ErrorCategory {
-  RETRYABLE,       // LLM 超时、网络抖动、工具暂时不可用
-  DEGRADABLE,      // 工具熔断，可用 fallback
-  FATAL,           // Schema 校验失败、依赖步骤失败、权限不足
+  RETRYABLE, // LLM 超时、网络抖动、工具暂时不可用
+  DEGRADABLE, // 工具熔断，可用 fallback
+  FATAL, // Schema 校验失败、依赖步骤失败、权限不足
 }
 
 function categorizeError(error: Error, step: WorkflowStep): ErrorCategory {
@@ -2441,19 +2527,19 @@ function categorizeError(error: Error, step: WorkflowStep): ErrorCategory {
 
 工作流执行实时推送到前端，复用已有的 SSE 基础设施，新增以下事件类型：
 
-| 事件类型 | 方向 | 含义 | 携带数据 |
-|---------|------|------|---------|
-| `workflow_started` | S→C | 工作流开始执行 | `{ runId, workflowName, totalSteps }` |
-| `workflow_step_started` | S→C | 步骤开始执行 | `{ stepId, stepType, input }` |
-| `workflow_step_progress` | S→C | 步骤执行中（Agent 子事件） | `{ stepId, agentEvent }` |
-| `workflow_step_completed` | S→C | 步骤执行成功 | `{ stepId, status, output, durationMs }` |
-| `workflow_step_failed` | S→C | 步骤执行失败（重试中） | `{ stepId, error, retryCount, nextRetryMs }` |
-| `workflow_paused` | S→C | 工作流暂停（审批等待） | `{ runId, reason, stepId }` |
-| `workflow_resumed` | S→C | 工作流恢复 | `{ runId, resumedFrom }` |
-| `workflow_completed` | S→C | 工作流执行完成 | `{ runId, output, totalDurationMs, stepSummary }` |
-| `workflow_failed` | S→C | 工作流执行失败 | `{ runId, error, failedStepId, checkpoint }` |
-| `workflow_cancelled` | S→C | 工作流被取消 | `{ runId, cancelledBy }` |
-| `workflow_approval_required` | S→C | 需要用户审批 | `{ runId, stepId, message, details, timeoutSeconds }` |
+| 事件类型                     | 方向 | 含义                       | 携带数据                                              |
+| ---------------------------- | ---- | -------------------------- | ----------------------------------------------------- |
+| `workflow_started`           | S→C  | 工作流开始执行             | `{ runId, workflowName, totalSteps }`                 |
+| `workflow_step_started`      | S→C  | 步骤开始执行               | `{ stepId, stepType, input }`                         |
+| `workflow_step_progress`     | S→C  | 步骤执行中（Agent 子事件） | `{ stepId, agentEvent }`                              |
+| `workflow_step_completed`    | S→C  | 步骤执行成功               | `{ stepId, status, output, durationMs }`              |
+| `workflow_step_failed`       | S→C  | 步骤执行失败（重试中）     | `{ stepId, error, retryCount, nextRetryMs }`          |
+| `workflow_paused`            | S→C  | 工作流暂停（审批等待）     | `{ runId, reason, stepId }`                           |
+| `workflow_resumed`           | S→C  | 工作流恢复                 | `{ runId, resumedFrom }`                              |
+| `workflow_completed`         | S→C  | 工作流执行完成             | `{ runId, output, totalDurationMs, stepSummary }`     |
+| `workflow_failed`            | S→C  | 工作流执行失败             | `{ runId, error, failedStepId, checkpoint }`          |
+| `workflow_cancelled`         | S→C  | 工作流被取消               | `{ runId, cancelledBy }`                              |
+| `workflow_approval_required` | S→C  | 需要用户审批               | `{ runId, stepId, message, details, timeoutSeconds }` |
 
 ### 10.2 流式传输实现
 
@@ -2467,10 +2553,18 @@ async function* streamWorkflowRun(runId: string): AsyncGenerator<SSEEvent> {
   for await (const stepEvent of executor.execute(runId)) {
     switch (stepEvent.type) {
       case "step_started":
-        yield { type: "workflow_step_started", stepId: stepEvent.stepId, stepType: stepEvent.stepType };
+        yield {
+          type: "workflow_step_started",
+          stepId: stepEvent.stepId,
+          stepType: stepEvent.stepType,
+        };
         break;
       case "step_progress":
-        yield { type: "workflow_step_progress", stepId: stepEvent.stepId, agentEvent: stepEvent.event };
+        yield {
+          type: "workflow_step_progress",
+          stepId: stepEvent.stepId,
+          agentEvent: stepEvent.event,
+        };
         break;
       case "step_completed":
         yield {
@@ -2490,13 +2584,28 @@ async function* streamWorkflowRun(runId: string): AsyncGenerator<SSEEvent> {
         };
         break;
       case "paused":
-        yield { type: "workflow_paused", runId, reason: "approval_required", stepId: stepEvent.stepId };
+        yield {
+          type: "workflow_paused",
+          runId,
+          reason: "approval_required",
+          stepId: stepEvent.stepId,
+        };
         break;
       case "completed":
-        yield { type: "workflow_completed", runId, output: stepEvent.output, totalDurationMs: stepEvent.durationMs };
+        yield {
+          type: "workflow_completed",
+          runId,
+          output: stepEvent.output,
+          totalDurationMs: stepEvent.durationMs,
+        };
         break;
       case "failed":
-        yield { type: "workflow_failed", runId, error: stepEvent.error, checkpoint: stepEvent.checkpoint };
+        yield {
+          type: "workflow_failed",
+          runId,
+          error: stepEvent.error,
+          checkpoint: stepEvent.checkpoint,
+        };
         break;
     }
   }
@@ -2755,7 +2864,11 @@ POST   /api/workflows/templates/:template_id/instantiate
   "name": "Content Summarizer",
   "description": "多源内容聚合并生成结构化摘要",
   "variables": {
-    "source_urls": { "type": "array", "required": true, "description": "要摘要的 URL 列表" },
+    "source_urls": {
+      "type": "array",
+      "required": true,
+      "description": "要摘要的 URL 列表"
+    },
     "language": { "type": "string", "default": "zh" }
   },
   "steps": [
@@ -2788,7 +2901,11 @@ POST   /api/workflows/templates/:template_id/instantiate
   "name": "Data Analysis Pipeline",
   "description": "数据采集 → 清洗 → 分析 → 报告",
   "variables": {
-    "data_source": { "type": "string", "required": true, "description": "数据源 URL 或文件路径" },
+    "data_source": {
+      "type": "string",
+      "required": true,
+      "description": "数据源 URL 或文件路径"
+    },
     "analysis_question": { "type": "string", "required": true }
   },
   "steps": [
@@ -2823,12 +2940,16 @@ POST   /api/workflows/templates/:template_id/instantiate
 
 ### 14.3 代码审查工作流（code-review）
 
-```json
+````json
 {
   "name": "Automated Code Review",
   "description": "多维度代码审查：安全、性能、可维护性",
   "variables": {
-    "code": { "type": "string", "required": true, "description": "待审查的代码" },
+    "code": {
+      "type": "string",
+      "required": true,
+      "description": "待审查的代码"
+    },
     "language": { "type": "string", "default": "typescript" }
   },
   "steps": [
@@ -2840,32 +2961,38 @@ POST   /api/workflows/templates/:template_id/instantiate
         {
           "id": "security_review",
           "label": "Security",
-          "steps": [{
-            "id": "check_security",
-            "type": "agent",
-            "prompt": "Review the following {{language}} code for security vulnerabilities (SQL injection, XSS, auth issues, etc).\n\nCODE:\n```{{language}}\n{{code}}\n```",
-            "output_as": "security_findings"
-          }]
+          "steps": [
+            {
+              "id": "check_security",
+              "type": "agent",
+              "prompt": "Review the following {{language}} code for security vulnerabilities (SQL injection, XSS, auth issues, etc).\n\nCODE:\n```{{language}}\n{{code}}\n```",
+              "output_as": "security_findings"
+            }
+          ]
         },
         {
           "id": "performance_review",
           "label": "Performance",
-          "steps": [{
-            "id": "check_perf",
-            "type": "agent",
-            "prompt": "Review for performance issues (N+1 queries, memory leaks, unnecessary allocations).\n\nCODE:\n```{{language}}\n{{code}}\n```",
-            "output_as": "perf_findings"
-          }]
+          "steps": [
+            {
+              "id": "check_perf",
+              "type": "agent",
+              "prompt": "Review for performance issues (N+1 queries, memory leaks, unnecessary allocations).\n\nCODE:\n```{{language}}\n{{code}}\n```",
+              "output_as": "perf_findings"
+            }
+          ]
         },
         {
           "id": "maintainability_review",
           "label": "Maintainability",
-          "steps": [{
-            "id": "check_maint",
-            "type": "agent",
-            "prompt": "Review for maintainability (naming, coupling, SOLID violations).\n\nCODE:\n```{{language}}\n{{code}}\n```",
-            "output_as": "maint_findings"
-          }]
+          "steps": [
+            {
+              "id": "check_maint",
+              "type": "agent",
+              "prompt": "Review for maintainability (naming, coupling, SOLID violations).\n\nCODE:\n```{{language}}\n{{code}}\n```",
+              "output_as": "maint_findings"
+            }
+          ]
         }
       ]
     },
@@ -2877,7 +3004,7 @@ POST   /api/workflows/templates/:template_id/instantiate
     }
   ]
 }
-```
+````
 
 ---
 
@@ -2901,7 +3028,7 @@ class AgentStepHandler implements StepHandler {
         model: step.model,
         maxIterations,
         tools: step.tools,
-      }
+      },
     )) {
       events.push(event);
 
@@ -2939,16 +3066,16 @@ class AgentStepHandler implements StepHandler {
 
 **关键集成点:**
 
-| Workflow 能力 | 复用模块 | 集成方式 |
-|-------------|---------|---------|
-| Agent 步骤 | AgentService.run() (P1-3) | 直接调用，透传 Agent 事件 |
-| Tool 步骤 | ToolRegistry.execute() (V4) | 直接调用 |
-| 审批暂停 | ApprovalGate (P1-5) | 复用 P1-5 审批门 |
-| 记忆上下文 | MemoryEngine.search() (V2) | Agent 步骤前自动注入相关记忆 |
-| 知识库搜索 | KnowledgeService.search() (V3) | Tool 步骤可调用 knowledge_search |
-| 后台投递 | BullMQ (P1-1) | 长时间工作流通过队列异步执行 |
-| 指标记录 | Prometheus (P1-2) | 工作流执行次数、步骤耗时、成功率 |
-| SSE 推送 | 已有 SSE 基础设施 | 扩展事件类型 |
+| Workflow 能力 | 复用模块                       | 集成方式                         |
+| ------------- | ------------------------------ | -------------------------------- |
+| Agent 步骤    | AgentService.run() (P1-3)      | 直接调用，透传 Agent 事件        |
+| Tool 步骤     | ToolRegistry.execute() (V4)    | 直接调用                         |
+| 审批暂停      | ApprovalGate (P1-5)            | 复用 P1-5 审批门                 |
+| 记忆上下文    | MemoryEngine.search() (V2)     | Agent 步骤前自动注入相关记忆     |
+| 知识库搜索    | KnowledgeService.search() (V3) | Tool 步骤可调用 knowledge_search |
+| 后台投递      | BullMQ (P1-1)                  | 长时间工作流通过队列异步执行     |
+| 指标记录      | Prometheus (P1-2)              | 工作流执行次数、步骤耗时、成功率 |
+| SSE 推送      | 已有 SSE 基础设施              | 扩展事件类型                     |
 
 ---
 
@@ -2971,21 +3098,42 @@ class DAGExecutor {
     for (const level of executionPlan) {
       // 同层级并行执行
       const levelResults = await Promise.allSettled(
-        level.map(step => this.executeStepWithRetry(step, { runId, variables, stepResults }))
+        level.map((step) =>
+          this.executeStepWithRetry(step, { runId, variables, stepResults }),
+        ),
       );
 
       for (const [i, result] of levelResults.entries()) {
         const step = level[i];
         if (result.status === "fulfilled") {
           stepResults[step.id] = result.value;
-          await this.saveCheckpoint(runId, { variables, stepResults, completedStep: step.id });
-          yield { type: "step_completed", stepId: step.id, result: result.value };
+          await this.saveCheckpoint(runId, {
+            variables,
+            stepResults,
+            completedStep: step.id,
+          });
+          yield {
+            type: "step_completed",
+            stepId: step.id,
+            result: result.value,
+          };
         } else {
-          stepResults[step.id] = { status: "failed", error: result.reason?.message };
-          yield { type: "step_failed", stepId: step.id, error: result.reason?.message };
+          stepResults[step.id] = {
+            status: "failed",
+            error: result.reason?.message,
+          };
+          yield {
+            type: "step_failed",
+            stepId: step.id,
+            error: result.reason?.message,
+          };
 
           if (definition.on_failure === "stop") {
-            yield { type: "workflow_failed", runId, error: result.reason?.message };
+            yield {
+              type: "workflow_failed",
+              runId,
+              error: result.reason?.message,
+            };
             return;
           }
         }
@@ -2998,21 +3146,23 @@ class DAGExecutor {
   private topologicalSort(steps: WorkflowStep[]): WorkflowStep[][] {
     const levels: WorkflowStep[][] = [];
     const completed = new Set<string>();
-    const remaining = new Map(steps.map(s => [s.id, s]));
+    const remaining = new Map(steps.map((s) => [s.id, s]));
 
     while (remaining.size > 0) {
       const currentLevel: WorkflowStep[] = [];
 
       for (const [id, step] of remaining) {
         const deps = step.depends_on || [];
-        if (deps.every(d => completed.has(d))) {
+        if (deps.every((d) => completed.has(d))) {
           currentLevel.push(step);
           remaining.delete(id);
         }
       }
 
       if (currentLevel.length === 0) {
-        throw new Error(`Circular dependency detected in steps: ${[...remaining.keys()].join(", ")}`);
+        throw new Error(
+          `Circular dependency detected in steps: ${[...remaining.keys()].join(", ")}`,
+        );
       }
 
       levels.push(currentLevel);
@@ -3058,29 +3208,29 @@ class DAGExecutor {
 
 关键能力：
 
-* **角色系统**：预定义 5 种角色模板（Planner/Executor/Reviewer/Researcher/Orchestrator），每个角色有独立的 system prompt、工具权限、模型配置
-* **消息总线**：Agent 间实时消息传递，支持点对点（direct）、广播（broadcast）、委派（delegate）三种通信模式
-* **黑board共享上下文**：所有 Agent 共享一个结构化工作内存（Blackboard），可读写键值对，作为协作的"白板"
-* **3 种协作模式**：Orchestrator（层级式）、Peer-to-Peer（对等式）、Debate（辩论式），覆盖从简单委派到复杂辩论的场景
-* **回合管理**：可配置的回合制（round-robin）或事件驱动（event-driven）调度策略
-* **Agent 实例复用**：每个角色通过 AgentService（P1-3 ReAct）运行，复用现有的工具调用、审批、推理能力
-* **实时可视化**：SSE 流推送每个 Agent 的思考过程、消息传递、黑board变更，前端多卡片面板展示
+- **角色系统**：预定义 5 种角色模板（Planner/Executor/Reviewer/Researcher/Orchestrator），每个角色有独立的 system prompt、工具权限、模型配置
+- **消息总线**：Agent 间实时消息传递，支持点对点（direct）、广播（broadcast）、委派（delegate）三种通信模式
+- **黑board共享上下文**：所有 Agent 共享一个结构化工作内存（Blackboard），可读写键值对，作为协作的"白板"
+- **3 种协作模式**：Orchestrator（层级式）、Peer-to-Peer（对等式）、Debate（辩论式），覆盖从简单委派到复杂辩论的场景
+- **回合管理**：可配置的回合制（round-robin）或事件驱动（event-driven）调度策略
+- **Agent 实例复用**：每个角色通过 AgentService（P1-3 ReAct）运行，复用现有的工具调用、审批、推理能力
+- **实时可视化**：SSE 流推送每个 Agent 的思考过程、消息传递、黑board变更，前端多卡片面板展示
 
 ---
 
 ## 2. 技术选型
 
-| 组件 | 技术 | 用途 |
-|------|------|------|
-| Agent 运行时 | 复用 AgentService（P1-3） | 每个角色作为一个 Agent 实例运行，复用 ReAct 循环 |
-| 消息传递 | 内存 EventEmitter + DB 持久化 | 同进程内事件驱动，消息同时写入 DB 用于恢复和审计 |
-| 共享上下文 | Blackboard（Map + JSONB） | 结构化键值存储，支持读写锁和版本追踪 |
-| 回合调度 | RoundRobin / EventDriven 策略 | 控制哪个 Agent 何时获得执行权 |
-| 角色定义 | JSON DSL（Zod 校验） | 团队配置存储在 agent_teams.definition JSONB |
-| 实时推送 | SSE（已有基础设施） | 团队运行事件推送到前端（agent_think/agent_msg/blackboard_update 等） |
-| 工具集成 | 复用 ToolRegistry（V4 + P1-6） | 每个角色可配置独立的工具白名单 |
-| 审批集成 | 复用 P1-5 ApprovalGate | 高风险操作的审批在 Agent 实例内处理 |
-| 持久化 | PostgreSQL JSONB | agent_teams + agent_team_runs 表，消息和黑board以 JSONB 存储 |
+| 组件         | 技术                           | 用途                                                                 |
+| ------------ | ------------------------------ | -------------------------------------------------------------------- |
+| Agent 运行时 | 复用 AgentService（P1-3）      | 每个角色作为一个 Agent 实例运行，复用 ReAct 循环                     |
+| 消息传递     | 内存 EventEmitter + DB 持久化  | 同进程内事件驱动，消息同时写入 DB 用于恢复和审计                     |
+| 共享上下文   | Blackboard（Map + JSONB）      | 结构化键值存储，支持读写锁和版本追踪                                 |
+| 回合调度     | RoundRobin / EventDriven 策略  | 控制哪个 Agent 何时获得执行权                                        |
+| 角色定义     | JSON DSL（Zod 校验）           | 团队配置存储在 agent_teams.definition JSONB                          |
+| 实时推送     | SSE（已有基础设施）            | 团队运行事件推送到前端（agent_think/agent_msg/blackboard_update 等） |
+| 工具集成     | 复用 ToolRegistry（V4 + P1-6） | 每个角色可配置独立的工具白名单                                       |
+| 审批集成     | 复用 P1-5 ApprovalGate         | 高风险操作的审批在 Agent 实例内处理                                  |
+| 持久化       | PostgreSQL JSONB               | agent_teams + agent_team_runs 表，消息和黑board以 JSONB 存储         |
 
 ---
 
@@ -3092,30 +3242,30 @@ class DAGExecutor {
 
 ```typescript
 interface AgentRole {
-  name: string;                    // 唯一标识：planner, executor, reviewer, ...
-  displayName: string;             // 显示名称："规划者"、"执行者"、"审查者"
-  description: string;             // 角色描述
-  systemPrompt: string;            // 角色专用 System Prompt（支持 {{variable}} 模板）
-  model?: string;                  // 模型选择（默认继承团队设置）
-  tools: string[];                 // 工具白名单（工具名列表，空数组 = 无工具）
-  maxIterations: number;           // 最大 ReAct 迭代次数（默认 5）
-  temperature?: number;            // LLM 温度（默认 0.7）
-  priority: number;                // 优先级（1-10，数字越大优先级越高）
-  canDelegate: boolean;            // 是否可以将子任务委派给其他 Agent
-  canBroadcast: boolean;           // 是否可以向团队广播消息
-  outputSchema?: object;           // 可选：输出 JSON Schema，用于结构化输出
+  name: string; // 唯一标识：planner, executor, reviewer, ...
+  displayName: string; // 显示名称："规划者"、"执行者"、"审查者"
+  description: string; // 角色描述
+  systemPrompt: string; // 角色专用 System Prompt（支持 {{variable}} 模板）
+  model?: string; // 模型选择（默认继承团队设置）
+  tools: string[]; // 工具白名单（工具名列表，空数组 = 无工具）
+  maxIterations: number; // 最大 ReAct 迭代次数（默认 5）
+  temperature?: number; // LLM 温度（默认 0.7）
+  priority: number; // 优先级（1-10，数字越大优先级越高）
+  canDelegate: boolean; // 是否可以将子任务委派给其他 Agent
+  canBroadcast: boolean; // 是否可以向团队广播消息
+  outputSchema?: object; // 可选：输出 JSON Schema，用于结构化输出
 }
 ```
 
 ### 3.2 五种默认角色
 
-| 角色 | name | 工具权限 | maxIterations | 典型场景 |
-|------|------|----------|---------------|----------|
-| **Planner** (规划者) | `planner` | 无工具（纯推理） | 5 | 分析复杂任务，分解为可执行步骤，输出执行计划 |
-| **Executor** (执行者) | `executor` | 全部工具 | 15 | 执行具体步骤，调用工具获取信息、执行代码、操作文件 |
-| **Reviewer** (审查者) | `reviewer` | 只读工具（web_search, file_read, file_search, db_query） | 5 | 审查执行结果，发现遗漏、错误和不一致，提出改进建议 |
-| **Researcher** (研究员) | `researcher` | web_search, web_fetch, http_request | 10 | 信息搜集，网页搜索和内容分析，提供结构化调研结果 |
-| **Orchestrator** (协调者) | `orchestrator` | 无直接工具，通过委派间接使用 | 10 | 整体协调，决定何时委派给谁，跟踪进度，汇总最终输出 |
+| 角色                      | name           | 工具权限                                                 | maxIterations | 典型场景                                           |
+| ------------------------- | -------------- | -------------------------------------------------------- | ------------- | -------------------------------------------------- |
+| **Planner** (规划者)      | `planner`      | 无工具（纯推理）                                         | 5             | 分析复杂任务，分解为可执行步骤，输出执行计划       |
+| **Executor** (执行者)     | `executor`     | 全部工具                                                 | 15            | 执行具体步骤，调用工具获取信息、执行代码、操作文件 |
+| **Reviewer** (审查者)     | `reviewer`     | 只读工具（web_search, file_read, file_search, db_query） | 5             | 审查执行结果，发现遗漏、错误和不一致，提出改进建议 |
+| **Researcher** (研究员)   | `researcher`   | web_search, web_fetch, http_request                      | 10            | 信息搜集，网页搜索和内容分析，提供结构化调研结果   |
+| **Orchestrator** (协调者) | `orchestrator` | 无直接工具，通过委派间接使用                             | 10            | 整体协调，决定何时委派给谁，跟踪进度，汇总最终输出 |
 
 ### 3.3 Planner 角色详细定义
 
@@ -3278,41 +3428,47 @@ canBroadcast: true
 
 ```typescript
 interface AgentMessage {
-  id: string;                          // 消息唯一 ID
-  teamRunId: string;                   // 所属团队运行 ID
-  from: string;                        // 发送 Agent 名称（role name）
-  to: string | "broadcast" | "orchestrator";  // 接收方
-  type: AgentMessageType;              // 消息类型（见下方枚举）
-  payload: AgentMessagePayload;        // 消息载荷
-  timestamp: string;                   // ISO 8601 时间戳
-  replyTo?: string;                    // 回复的消息 ID（可选）
-  correlationId?: string;              // 关联 ID：同一任务链的消息共享同一 ID
+  id: string; // 消息唯一 ID
+  teamRunId: string; // 所属团队运行 ID
+  from: string; // 发送 Agent 名称（role name）
+  to: string | "broadcast" | "orchestrator"; // 接收方
+  type: AgentMessageType; // 消息类型（见下方枚举）
+  payload: AgentMessagePayload; // 消息载荷
+  timestamp: string; // ISO 8601 时间戳
+  replyTo?: string; // 回复的消息 ID（可选）
+  correlationId?: string; // 关联 ID：同一任务链的消息共享同一 ID
 }
 
 type AgentMessageType =
-  | "task"          // 分配任务：Orchestrator → Agent
-  | "result"        // 任务结果：Agent → Orchestrator
-  | "question"      // 提问：Agent → Agent/Orchestrator
+  | "task" // 分配任务：Orchestrator → Agent
+  | "result" // 任务结果：Agent → Orchestrator
+  | "question" // 提问：Agent → Agent/Orchestrator
   | "clarification" // 澄清：Agent 请求更多上下文
-  | "feedback"      // 反馈：Reviewer → Executor
-  | "handoff"       // 转交：Agent A 将任务转交给 Agent B
-  | "broadcast"     // 广播：向所有 Agent 发送通知
-  | "status"        // 状态更新：Agent 报告自己的进度
-  | "error"         // 错误报告：Agent 报告执行错误
-  | "done";         // 完成通知：Agent 表示自己完成当前工作
+  | "feedback" // 反馈：Reviewer → Executor
+  | "handoff" // 转交：Agent A 将任务转交给 Agent B
+  | "broadcast" // 广播：向所有 Agent 发送通知
+  | "status" // 状态更新：Agent 报告自己的进度
+  | "error" // 错误报告：Agent 报告执行错误
+  | "done"; // 完成通知：Agent 表示自己完成当前工作
 
 interface AgentMessagePayload {
-  task?: string;                       // 任务描述
-  result?: unknown;                    // 任务结果
-  question?: string;                   // 提问内容
-  feedback?: {                         // 审查反馈
+  task?: string; // 任务描述
+  result?: unknown; // 任务结果
+  question?: string; // 提问内容
+  feedback?: {
+    // 审查反馈
     verdict: "pass" | "revise" | "reject";
     score: number;
-    issues: Array<{ severity: string; description: string; suggestion: string }>;
+    issues: Array<{
+      severity: string;
+      description: string;
+      suggestion: string;
+    }>;
     summary: string;
   };
-  context?: Record<string, unknown>;   // 附加上下文
-  status?: {                           // 进度状态
+  context?: Record<string, unknown>; // 附加上下文
+  status?: {
+    // 进度状态
     completed: number;
     total: number;
     currentStep?: string;
@@ -3332,14 +3488,22 @@ interface AgentMessagePayload {
 ```typescript
 class MessageBus {
   private emitter: EventEmitter;
-  private messages: AgentMessage[] = [];       // 当前运行的全部消息（内存）
+  private messages: AgentMessage[] = []; // 当前运行的全部消息（内存）
   private subscriptions: Map<string, (msg: AgentMessage) => void> = new Map();
 
   /** 发送消息 */
-  async send(from: string, to: string, type: AgentMessageType, payload: AgentMessagePayload): Promise<AgentMessage> {
+  async send(
+    from: string,
+    to: string,
+    type: AgentMessageType,
+    payload: AgentMessagePayload,
+  ): Promise<AgentMessage> {
     const msg: AgentMessage = {
       id: randomUUID(),
-      from, to, type, payload,
+      from,
+      to,
+      type,
+      payload,
       timestamp: new Date().toISOString(),
     };
     this.messages.push(msg);
@@ -3357,9 +3521,12 @@ class MessageBus {
   }
 
   /** 订阅特定 Agent 的消息 */
-  subscribe(agentName: string, handler: (msg: AgentMessage) => void): () => void {
+  subscribe(
+    agentName: string,
+    handler: (msg: AgentMessage) => void,
+  ): () => void {
     this.emitter.on(agentName, handler);
-    return () => this.emitter.off(agentName, handler);  // 返回取消订阅函数
+    return () => this.emitter.off(agentName, handler); // 返回取消订阅函数
   }
 
   /** 获取会话中的所有消息（用于恢复和审计） */
@@ -3370,7 +3537,10 @@ class MessageBus {
   /** 等待来自特定 Agent 的消息（Promise-based，用于同步等待） */
   waitFor(from: string, timeoutMs: number = 120000): Promise<AgentMessage> {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => reject(new Error(`Timeout waiting for ${from}`)), timeoutMs);
+      const timer = setTimeout(
+        () => reject(new Error(`Timeout waiting for ${from}`)),
+        timeoutMs,
+      );
       const unsubscribe = this.subscribe(from, (msg) => {
         clearTimeout(timer);
         unsubscribe();
@@ -3397,27 +3567,34 @@ Blackboard 是所有 Agent 共享的结构化工作内存——Agent 可以读�
 
 ```typescript
 interface BlackboardEntry {
-  key: string;                         // 键名（如 "plan", "research_findings", "review_result"）
-  value: unknown;                      // 任意 JSON 值
-  writtenBy: string;                   // 写入者 Agent 名称
-  timestamp: string;                   // 写入时间
-  version: number;                     // 版本号（每次写入递增）
+  key: string; // 键名（如 "plan", "research_findings", "review_result"）
+  value: unknown; // 任意 JSON 值
+  writtenBy: string; // 写入者 Agent 名称
+  timestamp: string; // 写入时间
+  version: number; // 版本号（每次写入递增）
   metadata?: {
-    description?: string;              // 简短描述
-    tags?: string[];                   // 标签（便于检索）
-    ttl?: number;                      // 可选过期时间（秒）
+    description?: string; // 简短描述
+    tags?: string[]; // 标签（便于检索）
+    ttl?: number; // 可选过期时间（秒）
   };
 }
 
 class Blackboard {
   private entries: Map<string, BlackboardEntry> = new Map();
-  private history: BlackboardEntry[] = [];  // 所有历史版本
+  private history: BlackboardEntry[] = []; // 所有历史版本
 
   /** 写入（带版本控制） */
-  write(key: string, value: unknown, agentName: string, metadata?: BlackboardEntry["metadata"]): BlackboardEntry {
+  write(
+    key: string,
+    value: unknown,
+    agentName: string,
+    metadata?: BlackboardEntry["metadata"],
+  ): BlackboardEntry {
     const prevEntry = this.entries.get(key);
     const entry: BlackboardEntry = {
-      key, value, writtenBy: agentName,
+      key,
+      value,
+      writtenBy: agentName,
       timestamp: new Date().toISOString(),
       version: (prevEntry?.version ?? 0) + 1,
       metadata,
@@ -3466,7 +3643,10 @@ class Blackboard {
     if (this.entries.size === 0) return "(Blackboard is empty)";
     let ctx = "## Shared Blackboard (最新值):\n";
     for (const [key, entry] of this.entries) {
-      const val = typeof entry.value === "string" ? entry.value : JSON.stringify(entry.value);
+      const val =
+        typeof entry.value === "string"
+          ? entry.value
+          : JSON.stringify(entry.value);
       ctx += `- **${key}** (written by ${entry.writtenBy}, v${entry.version}): ${val.substring(0, 300)}\n`;
     }
     return ctx;
@@ -3476,14 +3656,14 @@ class Blackboard {
 
 ### 5.3 Blackboard 使用约定
 
-| Key | 写入者 | 用途 |
-|-----|--------|------|
-| `plan` | Planner | 任务分解计划 |
-| `research_findings` | Researcher | 调研结果 |
-| `execution_result_{stepId}` | Executor | 每个步骤的执行结果 |
-| `review_result_{stepId}` | Reviewer | 每个步骤的审查结果 |
-| `final_output` | Orchestrator | 最终汇总输出 |
-| `team_notes` | 任意 Agent | 团队共享笔记 |
+| Key                         | 写入者       | 用途               |
+| --------------------------- | ------------ | ------------------ |
+| `plan`                      | Planner      | 任务分解计划       |
+| `research_findings`         | Researcher   | 调研结果           |
+| `execution_result_{stepId}` | Executor     | 每个步骤的执行结果 |
+| `review_result_{stepId}`    | Reviewer     | 每个步骤的审查结果 |
+| `final_output`              | Orchestrator | 最终汇总输出       |
+| `team_notes`                | 任意 Agent   | 团队共享笔记       |
 
 ---
 
@@ -3532,7 +3712,10 @@ class OrchestratorMode {
   private team: AgentRole[];
   private maxRounds: number = 20;
 
-  async *execute(task: string, context: ExecutionContext): AsyncGenerator<TeamStreamEvent> {
+  async *execute(
+    task: string,
+    context: ExecutionContext,
+  ): AsyncGenerator<TeamStreamEvent> {
     const bus = new MessageBus();
     const bb = new Blackboard();
 
@@ -3556,11 +3739,11 @@ class OrchestratorMode {
       const decision = this.parseOrchestratorDecision(/* last event */);
 
       if (decision.action === "done") {
-        break;  // 任务完成
+        break; // 任务完成
       }
 
       if (decision.action === "delegate") {
-        const targetAgent = this.team.find(a => a.name === decision.to);
+        const targetAgent = this.team.find((a) => a.name === decision.to);
         if (!targetAgent) continue;
 
         // 执行被委派的 Agent
@@ -3599,13 +3782,24 @@ User Task → 同时启动 Agent A + Agent B（各自有不同视角/专长）
 
 ```typescript
 class PeerMode {
-  async *execute(agents: AgentRole[], task: string, context: ExecutionContext): AsyncGenerator<TeamStreamEvent> {
+  async *execute(
+    agents: AgentRole[],
+    task: string,
+    context: ExecutionContext,
+  ): AsyncGenerator<TeamStreamEvent> {
     const bus = new MessageBus();
     const bb = new Blackboard();
 
     // 同时启动所有 Agent（并发，每个独立运行 ReAct）
     const agentTasks = agents.map((role) =>
-      this.runPeerAgent(role, task, agents.map(a => a.name), context, bus, bb)
+      this.runPeerAgent(
+        role,
+        task,
+        agents.map((a) => a.name),
+        context,
+        bus,
+        bb,
+      ),
     );
 
     // 使用事件驱动调度：有消息到达时触发对应 Agent
@@ -3650,28 +3844,33 @@ Question → Blackboard.write("debate_question", q)
 
 ```typescript
 interface TeamDefinition {
-  name: string;                                  // 团队名称
-  version: string;                               // 版本号
-  description?: string;                          // 描述
-  collaborationMode: "orchestrator" | "peer" | "debate";  // 协作模式
-  agents: AgentRole[];                           // 角色列表（2-10 个）
-  orchestrator?: string;                         // Orchestrator 模式的协调者（默认第一个 agent）
-  debate?: {                                     // Debate 模式配置（仅 debate 模式）
-    question: string;                            // 辩论问题
-    proAgent: string;                            // 正方 Agent 名称
-    conAgent: string;                            // 反方 Agent 名称
-    judgeAgent: string;                          // 裁判 Agent 名称
-    maxRounds: number;                           // 每方最大发言轮数（默认 3）
+  name: string; // 团队名称
+  version: string; // 版本号
+  description?: string; // 描述
+  collaborationMode: "orchestrator" | "peer" | "debate"; // 协作模式
+  agents: AgentRole[]; // 角色列表（2-10 个）
+  orchestrator?: string; // Orchestrator 模式的协调者（默认第一个 agent）
+  debate?: {
+    // Debate 模式配置（仅 debate 模式）
+    question: string; // 辩论问题
+    proAgent: string; // 正方 Agent 名称
+    conAgent: string; // 反方 Agent 名称
+    judgeAgent: string; // 裁判 Agent 名称
+    maxRounds: number; // 每方最大发言轮数（默认 3）
   };
-  maxTotalIterations: number;                    // 团队总迭代次数上限（默认 50）
-  stopCondition?: "all_done" | "orchestrator_decides" | "consensus";  // 停止条件
-  timeout?: number;                              // 全局超时（秒，默认 600）
-  onFailure?: "stop" | "continue" | "retry";     // Agent 失败时的团队行为
-  variables?: Record<string, {                   // 团队级变量
-    type: string;
-    default?: unknown;
-    description?: string;
-  }>;
+  maxTotalIterations: number; // 团队总迭代次数上限（默认 50）
+  stopCondition?: "all_done" | "orchestrator_decides" | "consensus"; // 停止条件
+  timeout?: number; // 全局超时（秒，默认 600）
+  onFailure?: "stop" | "continue" | "retry"; // Agent 失败时的团队行为
+  variables?: Record<
+    string,
+    {
+      // 团队级变量
+      type: string;
+      default?: unknown;
+      description?: string;
+    }
+  >;
 }
 ```
 
@@ -3860,21 +4059,21 @@ ${task}
 
 为 Multi-Agent 新增 12 种事件类型，前端可以实时看到每个 Agent 的思考过程：
 
-| 事件类型 | 触发时机 | 关键字段 |
-|----------|----------|----------|
-| `team_started` | 团队开始执行 | `teamRunId, teamName, mode, agents[]` |
-| `team_round_start` | 新一轮开始 | `roundNumber, totalRounds` |
-| `agent_started` | 某个 Agent 开始执行 | `agentName, role, task` |
-| `agent_think` | Agent 的 observation（复用） | `agentName, observation` |
-| `agent_plan` | Agent 的 plan（复用） | `agentName, plan` |
-| `agent_act` | Agent 调用工具（复用） | `agentName, tool, args` |
-| `agent_observe` | Agent 观察工具结果（复用） | `agentName, result` |
-| `agent_message` | Agent 发送消息 | `from, to, type, payload` |
-| `blackboard_update` | Blackboard 写入 | `key, value, writtenBy, version` |
-| `agent_completed` | Agent 完成本轮 | `agentName, output, durationMs` |
-| `agent_error` | Agent 执行错误 | `agentName, error` |
-| `team_completed` | 团队执行完成 | `output, totalDurationMs, roundsCount` |
-| `team_failed` | 团队执行失败 | `error` |
+| 事件类型            | 触发时机                     | 关键字段                               |
+| ------------------- | ---------------------------- | -------------------------------------- |
+| `team_started`      | 团队开始执行                 | `teamRunId, teamName, mode, agents[]`  |
+| `team_round_start`  | 新一轮开始                   | `roundNumber, totalRounds`             |
+| `agent_started`     | 某个 Agent 开始执行          | `agentName, role, task`                |
+| `agent_think`       | Agent 的 observation（复用） | `agentName, observation`               |
+| `agent_plan`        | Agent 的 plan（复用）        | `agentName, plan`                      |
+| `agent_act`         | Agent 调用工具（复用）       | `agentName, tool, args`                |
+| `agent_observe`     | Agent 观察工具结果（复用）   | `agentName, result`                    |
+| `agent_message`     | Agent 发送消息               | `from, to, type, payload`              |
+| `blackboard_update` | Blackboard 写入              | `key, value, writtenBy, version`       |
+| `agent_completed`   | Agent 完成本轮               | `agentName, output, durationMs`        |
+| `agent_error`       | Agent 执行错误               | `agentName, error`                     |
+| `team_completed`    | 团队执行完成                 | `output, totalDurationMs, roundsCount` |
+| `team_failed`       | 团队执行失败                 | `error`                                |
 
 ### Event Stream 示例
 
@@ -4050,7 +4249,13 @@ teamRoutes.post("/:id/run", auth, async (c) => {
   const { task, variables, conversationId } = await c.req.json();
 
   return streamSSE(c, async (yield) => {
-    for await (const event of teamService.runTeam(id, userId, task, variables, conversationId)) {
+    for await (const event of teamService.runTeam(
+      id,
+      userId,
+      task,
+      variables,
+      conversationId,
+    )) {
       yield event;
     }
   });
@@ -4154,12 +4359,12 @@ teamRoutes.post("/:id/run", auth, async (c) => {
 
 ### 13.1 模板列表
 
-| 模板 ID | 名称 | 模式 | 角色数 | 用途 |
-|---------|------|------|--------|------|
-| `code-review-team` | 代码审查团队 | orchestrator | 4 | 多维度代码审查（安全/性能/可维护性） |
-| `research-synthesis` | 调研综合团队 | orchestrator | 3 | 研究员×2（不同角度）→ 综合者 |
-| `debate-analyzer` | 辩论分析团队 | debate | 3 | 正反辩论 + 裁判裁决 |
-| `pair-programming` | 结对编程团队 | peer | 2 | 前端+后端协作开发 |
+| 模板 ID              | 名称         | 模式         | 角色数 | 用途                                 |
+| -------------------- | ------------ | ------------ | ------ | ------------------------------------ |
+| `code-review-team`   | 代码审查团队 | orchestrator | 4      | 多维度代码审查（安全/性能/可维护性） |
+| `research-synthesis` | 调研综合团队 | orchestrator | 3      | 研究员×2（不同角度）→ 综合者         |
+| `debate-analyzer`    | 辩论分析团队 | debate       | 3      | 正反辩论 + 裁判裁决                  |
+| `pair-programming`   | 结对编程团队 | peer         | 2      | 前端+后端协作开发                    |
 
 ### 13.2 示例模板：research-synthesis
 
@@ -4258,13 +4463,13 @@ Workflow 中的 `agent` 步骤类型可以配置为使用团队而非单个 Agen
 
 新增 Prometheus 指标：
 
-| 指标名 | 类型 | 标签 | 说明 |
-|--------|------|------|------|
-| `team_runs_total` | Counter | `mode, status` | 团队运行总数 |
-| `team_rounds_total` | Counter | `mode` | 团队总轮数 |
-| `team_messages_total` | Counter | `type` | 消息类型计数 |
-| `team_agent_duration_ms` | Histogram | `role` | 每个角色的执行时长 |
-| `team_blackboard_writes_total` | Counter | `key` | Blackboard 写入计数 |
+| 指标名                         | 类型      | 标签           | 说明                |
+| ------------------------------ | --------- | -------------- | ------------------- |
+| `team_runs_total`              | Counter   | `mode, status` | 团队运行总数        |
+| `team_rounds_total`            | Counter   | `mode`         | 团队总轮数          |
+| `team_messages_total`          | Counter   | `type`         | 消息类型计数        |
+| `team_agent_duration_ms`       | Histogram | `role`         | 每个角色的执行时长  |
+| `team_blackboard_writes_total` | Counter   | `key`          | Blackboard 写入计数 |
 
 ```typescript
 // 在 metrics.ts 中注册
@@ -4298,7 +4503,7 @@ export const teamAgentDurationMs = new Histogram({
 - [x] 数据模型：Prisma Schema（agent_teams + agent_team_runs）+ 迁移
 - [x] Team CRUD API 完成（create/list/get/update/delete/validate）
 - [x] Team Run API 完成（run SSE / history / cancel / pause / resume）
-- [x] SSE 事件类型扩展（12 种 team_ 事件 + agent_message + blackboard_update）
+- [x] SSE 事件类型扩展（12 种 team\_ 事件 + agent_message + blackboard_update）
 - [x] 4 个内置团队模板：code-review-team, research-synthesis, debate-analyzer, pair-programming
 - [x] 与 AgentService（P1-3）/ ToolRegistry（V4）/ ApprovalGate（P1-5）集成验证
 - [ ] 与 Workflow V6 集成（agent 步骤类型支持 team 模式）
@@ -4306,7 +4511,6 @@ export const teamAgentDurationMs = new Histogram({
 - [ ] 前端：团队列表页 + 团队编辑器（JSON + 表单双模式）
 - [ ] 前端：团队运行监控面板（Agent 卡片 + Blackboard 面板 + 消息总线日志）
 - [ ] 端到端验证：调研综合团队执行通过（"调研 RAG vs Agent 技术选型"）
-
 
 # 二十、V10 MCP Ecosystem Model Context Protocol
 
@@ -4354,22 +4558,22 @@ const exposedTools = [
   {
     name: "agentforge_memory_search",
     description: "Search user's long-term memory for relevant facts",
-    inputSchema: { query: "string", topK: "number" }
+    inputSchema: { query: "string", topK: "number" },
   },
   {
     name: "agentforge_knowledge_search",
     description: "Search knowledge base for reference documents",
-    inputSchema: { query: "string", kbId: "string?", topK: "number" }
+    inputSchema: { query: "string", kbId: "string?", topK: "number" },
   },
   {
     name: "agentforge_agent_execute",
     description: "Execute an AI agent task with tool access",
-    inputSchema: { task: "string", tools: "string[]?", model: "string?" }
+    inputSchema: { task: "string", tools: "string[]?", model: "string?" },
   },
   {
     name: "agentforge_conversation_history",
     description: "Retrieve conversation history",
-    inputSchema: { conversationId: "string", limit: "number" }
+    inputSchema: { conversationId: "string", limit: "number" },
   },
 ];
 ```
@@ -4430,7 +4634,6 @@ AgentForge:  agentforge:memory/search, agentforge:agent/execute
 - [ ] 至少 3 个 MCP Server 集成验证（如 filesystem、github、postgres）
 - [ ] MCP 工具在 Debug Panel 中展示来源标注
 
-
 # 二十一、持续演进 —— Beyond V10
 
 V1-V10 完成后，AgentForge 已经是一个功能完备的 Agent 平台。以下是更高阶的演进方向：
@@ -4473,7 +4676,6 @@ V1-V10 完成后，AgentForge 已经是一个功能完备的 Agent 平台。以�
 - **Private Deployment**：VPC 内部署，数据不出企业网络
 - **Custom Terms & Policies**：自定义使用条款和 AI 策略
 
-
 # 二十二、执行路线图总览
 
 ## 优先级矩阵
@@ -4499,17 +4701,17 @@ V1-V10 完成后，AgentForge 已经是一个功能完备的 Agent 平台。以�
 
 ## 建议执行顺序
 
-| 批次 | 阶段 | 预估工期 | 关键产出 |
-|------|------|----------|----------|
-| **Batch 1** | P0-1 认证 + P0-2 日志 + P0-3 测试 | 2-3 周 | 多用户可以注册登录，结构化日志，vitest 测试套件 |
-| **Batch 2** | P0-4 CI/CD + P0-5 安全加固 | 1 周 | GitHub Actions 流水线，Rate Limiting，参数校验 |
-| **Batch 3** | P1-3 Agent 推理框架 + P1-4 工作内存 | 2 周 | ReAct 循环，Agent Scratchpad，本质从 chatbot → agent |
-| **Batch 4** | P1-6 工具生态 + P1-5 审批门 | 2-3 周 | 6+ 个生产工具，代码沙箱，人工审批 |
-| **Batch 5** | P1-1 后台队列 + P1-2 可观测性 | 1-2 周 | BullMQ 解耦，Prometheus + Grafana |
-| **Batch 6** | V5 Voice Agent | 2 周 | WebSocket 音频流，ASR/TTS，打断机制 |
-| **Batch 7** | V6 Workflow Engine | 3-4 周 | DAG 执行器，检查点恢复，工作流模板 |
-| **Batch 8** | V9 Multi-Agent | 3-4 周 | 多角色 Agent，消息总线，协作模式 |
-| **Batch 9** | V10 MCP Ecosystem | 2-3 周 | MCP Server/Client，工具热加载 |
+| 批次        | 阶段                                | 预估工期 | 关键产出                                             |
+| ----------- | ----------------------------------- | -------- | ---------------------------------------------------- |
+| **Batch 1** | P0-1 认证 + P0-2 日志 + P0-3 测试   | 2-3 周   | 多用户可以注册登录，结构化日志，vitest 测试套件      |
+| **Batch 2** | P0-4 CI/CD + P0-5 安全加固          | 1 周     | GitHub Actions 流水线，Rate Limiting，参数校验       |
+| **Batch 3** | P1-3 Agent 推理框架 + P1-4 工作内存 | 2 周     | ReAct 循环，Agent Scratchpad，本质从 chatbot → agent |
+| **Batch 4** | P1-6 工具生态 + P1-5 审批门         | 2-3 周   | 6+ 个生产工具，代码沙箱，人工审批                    |
+| **Batch 5** | P1-1 后台队列 + P1-2 可观测性       | 1-2 周   | BullMQ 解耦，Prometheus + Grafana                    |
+| **Batch 6** | V5 Voice Agent                      | 2 周     | WebSocket 音频流，ASR/TTS，打断机制                  |
+| **Batch 7** | V6 Workflow Engine                  | 3-4 周   | DAG 执行器，检查点恢复，工作流模板                   |
+| **Batch 8** | V9 Multi-Agent                      | 3-4 周   | 多角色 Agent，消息总线，协作模式                     |
+| **Batch 9** | V10 MCP Ecosystem                   | 2-3 周   | MCP Server/Client，工具热加载                        |
 
 > **总计预估：** 18-25 周（约 4-6 个月，1 人全职）。可根据实际人力并行推进。
 

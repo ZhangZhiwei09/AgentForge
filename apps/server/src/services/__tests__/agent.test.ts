@@ -22,7 +22,9 @@ vi.mock("../../providers/registry.js", () => ({
   getProvider: vi.fn(() => ({
     streamChat: mockAgentStreamChat,
     chatSync: vi.fn(),
-    listModels: vi.fn(() => [{ id: "gpt-4o", name: "GPT-4o", provider: "openai", max_tokens: 128000 }]),
+    listModels: vi.fn(() => [
+      { id: "gpt-4o", name: "GPT-4o", provider: "openai", max_tokens: 128000 },
+    ]),
   })),
   resolveModel: vi.fn(() => ["openai", "gpt-4o"]),
   listProviders: vi.fn(() => []),
@@ -45,13 +47,17 @@ vi.mock("../../lib/context-window.js", () => ({
 
 // Use real json-utils (no mock needed — it's pure functions)
 vi.mock("../../lib/json-utils.js", async () => {
-  const actual = await vi.importActual<typeof import("../../lib/json-utils.js")>("../../lib/json-utils.js");
+  const actual = await vi.importActual<
+    typeof import("../../lib/json-utils.js")
+  >("../../lib/json-utils.js");
   return actual;
 });
 
 // Use real shared-prompts for react_system_prompt
 vi.mock("@agentforge/shared-prompts", () => ({
-  react_system_prompt: { content: "You are a helpful agent. Use agent_decide for decisions." },
+  react_system_prompt: {
+    content: "You are a helpful agent. Use agent_decide for decisions.",
+  },
 }));
 
 // Mock prisma
@@ -123,8 +129,25 @@ describe("AgentService", () => {
   describe("run", () => {
     it("should yield agent_meta event with session info", async () => {
       mockAgentStreamChat.mockImplementation(async function* () {
-        yield { type: "tool_call", tool_call: { id: "tc", name: "agent_decide", arguments: JSON.stringify({ observation: "obs", analysis: "an", plan: "pl", action: "respond", content: "Done!", summary: "Completed" }) } };
-        yield { type: "done", usage: { prompt_tokens: 10, completion_tokens: 5 } };
+        yield {
+          type: "tool_call",
+          tool_call: {
+            id: "tc",
+            name: "agent_decide",
+            arguments: JSON.stringify({
+              observation: "obs",
+              analysis: "an",
+              plan: "pl",
+              action: "respond",
+              content: "Done!",
+              summary: "Completed",
+            }),
+          },
+        };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        };
       });
 
       const events = await collectAgentEvents(
@@ -139,8 +162,25 @@ describe("AgentService", () => {
 
     it("should yield agent_think event with observation/analysis/plan", async () => {
       mockAgentStreamChat.mockImplementation(async function* () {
-        yield { type: "tool_call", tool_call: { id: "tc", name: "agent_decide", arguments: JSON.stringify({ observation: "The user asked a question", analysis: "Simple query", plan: "Answer directly", action: "respond", content: "Here is your answer.", summary: "Answered question" }) } };
-        yield { type: "done", usage: { prompt_tokens: 10, completion_tokens: 5 } };
+        yield {
+          type: "tool_call",
+          tool_call: {
+            id: "tc",
+            name: "agent_decide",
+            arguments: JSON.stringify({
+              observation: "The user asked a question",
+              analysis: "Simple query",
+              plan: "Answer directly",
+              action: "respond",
+              content: "Here is your answer.",
+              summary: "Answered question",
+            }),
+          },
+        };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        };
       });
 
       const events = await collectAgentEvents(
@@ -158,8 +198,25 @@ describe("AgentService", () => {
 
     it("should handle respond decision from agent_decide", async () => {
       mockAgentStreamChat.mockImplementation(async function* () {
-        yield { type: "tool_call", tool_call: { id: "tc", name: "agent_decide", arguments: JSON.stringify({ observation: "obs", analysis: "an", plan: "pl", action: "respond", content: "Final answer", summary: "Done" }) } };
-        yield { type: "done", usage: { prompt_tokens: 5, completion_tokens: 3 } };
+        yield {
+          type: "tool_call",
+          tool_call: {
+            id: "tc",
+            name: "agent_decide",
+            arguments: JSON.stringify({
+              observation: "obs",
+              analysis: "an",
+              plan: "pl",
+              action: "respond",
+              content: "Final answer",
+              summary: "Done",
+            }),
+          },
+        };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 5, completion_tokens: 3 },
+        };
       });
 
       const events = await collectAgentEvents(
@@ -183,12 +240,47 @@ describe("AgentService", () => {
         if (streamCallCount === 0) {
           streamCallCount++;
           // First call: LLM decides to use a tool
-          yield { type: "tool_call", tool_call: { id: "tc", name: "agent_decide", arguments: JSON.stringify({ observation: "Need to calculate", analysis: "Math required", plan: "Use calculator", action: "tool_call", tool: "calculator", args_json: '{"expr":"2+2"}', reason: "Need math" }) } };
-          yield { type: "done", usage: { prompt_tokens: 10, completion_tokens: 8 } };
+          yield {
+            type: "tool_call",
+            tool_call: {
+              id: "tc",
+              name: "agent_decide",
+              arguments: JSON.stringify({
+                observation: "Need to calculate",
+                analysis: "Math required",
+                plan: "Use calculator",
+                action: "tool_call",
+                tool: "calculator",
+                args_json: '{"expr":"2+2"}',
+                reason: "Need math",
+              }),
+            },
+          };
+          yield {
+            type: "done",
+            usage: { prompt_tokens: 10, completion_tokens: 8 },
+          };
         } else {
           // Second call: LLM responds after tool result
-          yield { type: "tool_call", tool_call: { id: "tc2", name: "agent_decide", arguments: JSON.stringify({ observation: "Got result 4", analysis: "Answer ready", plan: "Respond", action: "respond", content: "The answer is 4", summary: "Calculated 2+2" }) } };
-          yield { type: "done", usage: { prompt_tokens: 15, completion_tokens: 5 } };
+          yield {
+            type: "tool_call",
+            tool_call: {
+              id: "tc2",
+              name: "agent_decide",
+              arguments: JSON.stringify({
+                observation: "Got result 4",
+                analysis: "Answer ready",
+                plan: "Respond",
+                action: "respond",
+                content: "The answer is 4",
+                summary: "Calculated 2+2",
+              }),
+            },
+          };
+          yield {
+            type: "done",
+            usage: { prompt_tokens: 15, completion_tokens: 5 },
+          };
         }
       });
 
@@ -217,8 +309,25 @@ describe("AgentService", () => {
 
     it("should handle ask_user decision — pause session", async () => {
       mockAgentStreamChat.mockImplementation(async function* () {
-        yield { type: "tool_call", tool_call: { id: "tc", name: "agent_decide", arguments: JSON.stringify({ observation: "Ambiguous request", analysis: "Need clarification", plan: "Ask user", action: "ask_user", question: "Which file do you want me to read?", clarify_context: "Multiple files found" }) } };
-        yield { type: "done", usage: { prompt_tokens: 8, completion_tokens: 5 } };
+        yield {
+          type: "tool_call",
+          tool_call: {
+            id: "tc",
+            name: "agent_decide",
+            arguments: JSON.stringify({
+              observation: "Ambiguous request",
+              analysis: "Need clarification",
+              plan: "Ask user",
+              action: "ask_user",
+              question: "Which file do you want me to read?",
+              clarify_context: "Multiple files found",
+            }),
+          },
+        };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 8, completion_tokens: 5 },
+        };
       });
 
       const events = await collectAgentEvents(
@@ -239,12 +348,19 @@ describe("AgentService", () => {
         observation: "task is simple",
         analysis: "no tools needed",
         plan: "respond directly",
-        decision: { action: "respond", content: "Simple answer", summary: "Done" },
+        decision: {
+          action: "respond",
+          content: "Simple answer",
+          summary: "Done",
+        },
       });
 
       mockAgentStreamChat.mockImplementation(async function* () {
         yield { type: "token", content: decisionJSON };
-        yield { type: "done", usage: { prompt_tokens: 5, completion_tokens: 3 } };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 5, completion_tokens: 3 },
+        };
       });
 
       const events = await collectAgentEvents(
@@ -262,8 +378,26 @@ describe("AgentService", () => {
     it("should handle max iterations — stop and yield error", async () => {
       // Always return tool_call to force another iteration
       mockAgentStreamChat.mockImplementation(async function* () {
-        yield { type: "tool_call", tool_call: { id: "tc", name: "agent_decide", arguments: JSON.stringify({ observation: "Still working", analysis: "Need more", plan: "Keep going", action: "tool_call", tool: "calculator", args_json: "{}", reason: "loop" }) } };
-        yield { type: "done", usage: { prompt_tokens: 5, completion_tokens: 3 } };
+        yield {
+          type: "tool_call",
+          tool_call: {
+            id: "tc",
+            name: "agent_decide",
+            arguments: JSON.stringify({
+              observation: "Still working",
+              analysis: "Need more",
+              plan: "Keep going",
+              action: "tool_call",
+              tool: "calculator",
+              args_json: "{}",
+              reason: "loop",
+            }),
+          },
+        };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 5, completion_tokens: 3 },
+        };
       });
 
       mockToolExecute.mockResolvedValue("ok");
@@ -296,8 +430,25 @@ describe("AgentService", () => {
         yield { type: "token", content: "The " };
         yield { type: "token", content: "answer " };
         yield { type: "token", content: "is 42" };
-        yield { type: "tool_call", tool_call: { id: "tc", name: "agent_decide", arguments: JSON.stringify({ observation: "o", analysis: "a", plan: "p", action: "respond", content: "The answer is 42", summary: "done" }) } };
-        yield { type: "done", usage: { prompt_tokens: 5, completion_tokens: 3 } };
+        yield {
+          type: "tool_call",
+          tool_call: {
+            id: "tc",
+            name: "agent_decide",
+            arguments: JSON.stringify({
+              observation: "o",
+              analysis: "a",
+              plan: "p",
+              action: "respond",
+              content: "The answer is 42",
+              summary: "done",
+            }),
+          },
+        };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 5, completion_tokens: 3 },
+        };
       });
 
       const events = await collectAgentEvents(

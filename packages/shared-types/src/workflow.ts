@@ -16,7 +16,13 @@ export interface StepRetryConfig {
   retryOn: string[];
 }
 
-export type StepType = "agent" | "tool" | "condition" | "parallel" | "human_approval" | "transform";
+export type StepType =
+  | "agent"
+  | "tool"
+  | "condition"
+  | "parallel"
+  | "human_approval"
+  | "transform";
 
 export interface BaseStep {
   id: string;
@@ -117,7 +123,12 @@ export interface WorkflowDTO {
   updatedAt: string;
 }
 
-export type WorkflowRunStatus = "running" | "paused" | "completed" | "failed" | "cancelled";
+export type WorkflowRunStatus =
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled";
 
 export interface StepResult {
   status: "completed" | "failed" | "skipped";
@@ -164,7 +175,12 @@ export interface WorkflowRunDTO {
   completedAt?: string;
 }
 
-export type WorkflowStepLogStatus = "pending" | "running" | "completed" | "failed" | "skipped";
+export type WorkflowStepLogStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped";
 
 export interface WorkflowStepLogDTO {
   id: string;

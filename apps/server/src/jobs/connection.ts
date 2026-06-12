@@ -21,7 +21,10 @@ export function getRedisConnection(): IORedis | null {
     return _connection;
   } catch (err) {
     _connectionFailed = true;
-    logger.warn({ err, url: settings.redisUrl }, "Redis unavailable — BullMQ queues disabled (jobs will run synchronously)");
+    logger.warn(
+      { err, url: settings.redisUrl },
+      "Redis unavailable — BullMQ queues disabled (jobs will run synchronously)",
+    );
     return null;
   }
 }

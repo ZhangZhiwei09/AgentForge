@@ -12,20 +12,24 @@ const createConversationSchema = z.object({
 });
 
 // POST /api/conversations —— 创建新对话
-conversationRoutes.post("/api/conversations", zValidator("json", createConversationSchema), async (c) => {
-  const { title } = c.req.valid("json");
-  const user = c.get("user");
+conversationRoutes.post(
+  "/api/conversations",
+  zValidator("json", createConversationSchema),
+  async (c) => {
+    const { title } = c.req.valid("json");
+    const user = c.get("user");
 
-  const conv = await prisma.conversation.create({
-    data: {
-      id: randomUUID(),
-      title: title || "New Conversation",
-      userId: user.id,
-    },
-  });
+    const conv = await prisma.conversation.create({
+      data: {
+        id: randomUUID(),
+        title: title || "New Conversation",
+        userId: user.id,
+      },
+    });
 
-  return c.json(conv, 201);
-});
+    return c.json(conv, 201);
+  },
+);
 
 // GET /api/conversations —— 获取当前用户的所有对话（按更新时间倒序）
 conversationRoutes.get("/api/conversations", async (c) => {

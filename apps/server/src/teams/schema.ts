@@ -4,7 +4,14 @@ import { z } from "zod";
 // ---- Agent Role ----
 
 export const AgentRoleSchema = z.object({
-  name: z.string().min(1).max(50).regex(/^[a-z0-9_]+$/, "Agent name must be lowercase alphanumeric with underscores"),
+  name: z
+    .string()
+    .min(1)
+    .max(50)
+    .regex(
+      /^[a-z0-9_]+$/,
+      "Agent name must be lowercase alphanumeric with underscores",
+    ),
   displayName: z.string().min(1).max(100),
   description: z.string().min(1),
   systemPrompt: z.string().min(1),
@@ -34,51 +41,65 @@ const TeamDebateConfigSchema = z.object({
   maxRounds: z.number().int().min(1).max(10).default(3),
 });
 
-export const TeamDefinitionSchema = z.object({
-  name: z.string().min(1).max(200),
-  version: z.string().min(1),
-  description: z.string().optional(),
-  collaborationMode: z.enum(["orchestrator", "peer", "debate"]),
-  agents: z.array(AgentRoleSchema).min(2).max(10),
-  orchestrator: z.string().optional(),
-  debate: TeamDebateConfigSchema.optional(),
-  maxTotalIterations: z.number().int().min(1).max(500).default(50),
-  stopCondition: z.enum(["all_done", "orchestrator_decides", "consensus"]).optional(),
-  timeout: z.number().int().min(10).max(3600).optional(),
-  onFailure: z.enum(["stop", "continue", "retry"]).optional(),
-  variables: z.record(z.string(), TeamDefinitionVariableSchema).optional(),
-}).refine(
-  (def) => {
-    // Orchestrator mode: at least one agent must have canDelegate=true
-    if (def.collaborationMode === "orchestrator") {
-      return def.agents.some((a) => a.canDelegate);
-    }
-    return true;
-  },
-  { message: "Orchestrator mode requires at least one agent with canDelegate=true", path: ["agents"] },
-).refine(
-  (def) => {
-    // Debate mode: must have proAgent, conAgent, judgeAgent defined in debate config
-    if (def.collaborationMode === "debate") {
-      if (!def.debate) return false;
-      const agentNames = def.agents.map((a) => a.name);
-      return (
-        agentNames.includes(def.debate.proAgent) &&
-        agentNames.includes(def.debate.conAgent) &&
-        agentNames.includes(def.debate.judgeAgent)
-      );
-    }
-    return true;
-  },
-  { message: "Debate mode requires debate config with valid pro/con/judge agent names", path: ["debate"] },
-).refine(
-  (def) => {
-    // Agent names must be unique
-    const names = def.agents.map((a) => a.name);
-    return new Set(names).size === names.length;
-  },
-  { message: "Agent names must be unique", path: ["agents"] },
-);
+export const TeamDefinitionSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    version: z.string().min(1),
+    description: z.string().optional(),
+    collaborationMode: z.enum(["orchestrator", "peer", "debate"]),
+    agents: z.array(AgentRoleSchema).min(2).max(10),
+    orchestrator: z.string().optional(),
+    debate: TeamDebateConfigSchema.optional(),
+    maxTotalIterations: z.number().int().min(1).max(500).default(50),
+    stopCondition: z
+      .enum(["all_done", "orchestrator_decides", "consensus"])
+      .optional(),
+    timeout: z.number().int().min(10).max(3600).optional(),
+    onFailure: z.enum(["stop", "continue", "retry"]).optional(),
+    variables: z.record(z.string(), TeamDefinitionVariableSchema).optional(),
+  })
+  .refine(
+    (def) => {
+      // Orchestrator mode: at least one agent must have canDelegate=true
+      if (def.collaborationMode === "orchestrator") {
+        return def.agents.some((a) => a.canDelegate);
+      }
+      return true;
+    },
+    {
+      message:
+        "Orchestrator mode requires at least one agent with canDelegate=true",
+      path: ["agents"],
+    },
+  )
+  .refine(
+    (def) => {
+      // Debate mode: must have proAgent, conAgent, judgeAgent defined in debate config
+      if (def.collaborationMode === "debate") {
+        if (!def.debate) return false;
+        const agentNames = def.agents.map((a) => a.name);
+        return (
+          agentNames.includes(def.debate.proAgent) &&
+          agentNames.includes(def.debate.conAgent) &&
+          agentNames.includes(def.debate.judgeAgent)
+        );
+      }
+      return true;
+    },
+    {
+      message:
+        "Debate mode requires debate config with valid pro/con/judge agent names",
+      path: ["debate"],
+    },
+  )
+  .refine(
+    (def) => {
+      // Agent names must be unique
+      const names = def.agents.map((a) => a.name);
+      return new Set(names).size === names.length;
+    },
+    { message: "Agent names must be unique", path: ["agents"] },
+  );
 
 // ---- API Request Schemas ----
 
@@ -111,7 +132,10 @@ export const ApprovalDecisionSchema = z.object({
 
 // ---- Validation Function ----
 
-export function validateTeamDefinition(definition: unknown): { valid: boolean; errors?: Array<{ path: string; message: string }> } {
+export function validateTeamDefinition(definition: unknown): {
+  valid: boolean;
+  errors?: Array<{ path: string; message: string }>;
+} {
   const result = TeamDefinitionSchema.safeParse(definition);
   if (result.success) {
     return { valid: true };

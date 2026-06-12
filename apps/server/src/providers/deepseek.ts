@@ -2,7 +2,12 @@
 // 支持 token 流式输出 + function calling（tool calls）
 import OpenAI from "openai";
 import type { ToolDefinition } from "@agentforge/shared-types";
-import type { LLMProvider, StreamChunk, ChatMessage, ChatSyncResult } from "./types.js";
+import type {
+  LLMProvider,
+  StreamChunk,
+  ChatMessage,
+  ChatSyncResult,
+} from "./types.js";
 
 export class DeepSeekProvider implements LLMProvider {
   private client: OpenAI;
@@ -17,8 +22,18 @@ export class DeepSeekProvider implements LLMProvider {
 
   listModels() {
     return [
-      { id: "deepseek-chat", name: "DeepSeek Chat", provider: "deepseek", max_tokens: 65536 },
-      { id: "deepseek-reasoner", name: "DeepSeek Reasoner", provider: "deepseek", max_tokens: 65536 },
+      {
+        id: "deepseek-chat",
+        name: "DeepSeek Chat",
+        provider: "deepseek",
+        max_tokens: 65536,
+      },
+      {
+        id: "deepseek-reasoner",
+        name: "DeepSeek Reasoner",
+        provider: "deepseek",
+        max_tokens: 65536,
+      },
     ];
   }
 
@@ -31,10 +46,12 @@ export class DeepSeekProvider implements LLMProvider {
     maxTokens: number = 4096,
     jsonMode: boolean = false,
   ): Promise<ChatSyncResult> {
-    const fullMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+    const fullMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
+      [];
     // jsonMode: 在system prompt尾部追加JSON格式指令
     const effectivePrompt = jsonMode
-      ? systemPrompt + "\n\nYou must respond with a valid JSON object. No markdown, no explanation, just the JSON."
+      ? systemPrompt +
+        "\n\nYou must respond with a valid JSON object. No markdown, no explanation, just the JSON."
       : systemPrompt;
     if (effectivePrompt) {
       fullMessages.push({ role: "system", content: effectivePrompt });
@@ -68,7 +85,8 @@ export class DeepSeekProvider implements LLMProvider {
     maxTokens: number = 4096,
     tools?: ToolDefinition[],
   ): AsyncGenerator<StreamChunk> {
-    const fullMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+    const fullMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
+      [];
     if (systemPrompt) {
       fullMessages.push({ role: "system", content: systemPrompt });
     }
@@ -84,7 +102,9 @@ export class DeepSeekProvider implements LLMProvider {
       if (m.tool_call_id) {
         om.tool_call_id = m.tool_call_id;
       }
-      fullMessages.push(om as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam);
+      fullMessages.push(
+        om as unknown as OpenAI.Chat.Completions.ChatCompletionMessageParam,
+      );
     }
 
     const params: Record<string, unknown> = {
@@ -99,14 +119,17 @@ export class DeepSeekProvider implements LLMProvider {
       params.tools = tools;
     }
 
-    const stream = await this.client.chat.completions.create(
+    const stream = (await this.client.chat.completions.create(
       params as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParams,
-    ) as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
+    )) as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
 
     let promptTokens = 0;
     let completionTokens = 0;
 
-    const toolCallAcc: Map<number, { id: string; name: string; arguments: string }> = new Map();
+    const toolCallAcc: Map<
+      number,
+      { id: string; name: string; arguments: string }
+    > = new Map();
 
     try {
       for await (const chunk of stream) {
@@ -117,7 +140,11 @@ export class DeepSeekProvider implements LLMProvider {
           for (const tc of delta.tool_calls) {
             const idx = tc.index;
             if (!toolCallAcc.has(idx)) {
-              toolCallAcc.set(idx, { id: tc.id || "", name: "", arguments: "" });
+              toolCallAcc.set(idx, {
+                id: tc.id || "",
+                name: "",
+                arguments: "",
+              });
             }
             const acc = toolCallAcc.get(idx)!;
             if (tc.id) acc.id = tc.id;
@@ -132,7 +159,11 @@ export class DeepSeekProvider implements LLMProvider {
             if (tc.name && tc.arguments) {
               yield {
                 type: "tool_call",
-                tool_call: { id: tc.id, name: tc.name, arguments: tc.arguments },
+                tool_call: {
+                  id: tc.id,
+                  name: tc.name,
+                  arguments: tc.arguments,
+                },
               };
               toolCallAcc.delete(idx);
             }

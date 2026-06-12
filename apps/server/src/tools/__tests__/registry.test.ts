@@ -92,7 +92,9 @@ describe("ToolRegistry", () => {
 
   it("should have sandbox field on code_execute tool", () => {
     const all = toolRegistry.getAll();
-    const codeExec = all.find((t) => t.definition.function.name === "code_execute");
+    const codeExec = all.find(
+      (t) => t.definition.function.name === "code_execute",
+    );
     expect(codeExec).toBeDefined();
     expect(codeExec!.sandbox).toBe(true);
     expect(codeExec!.riskLevel).toBe("destructive");

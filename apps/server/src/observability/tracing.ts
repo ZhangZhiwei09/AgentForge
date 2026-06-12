@@ -2,7 +2,10 @@
 // Enable with OTEL_ENABLED=true in .env
 // When disabled, trace.getTracer() returns a NoopTracer (zero overhead)
 import { trace } from "@opentelemetry/api";
-import { NodeTracerProvider, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-node";
+import {
+  NodeTracerProvider,
+  SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-node";
 import { OTLPTraceExporter } from "@opentelemetry/exporter-trace-otlp-http";
 import { registerInstrumentations } from "@opentelemetry/instrumentation";
 import { HttpInstrumentation } from "@opentelemetry/instrumentation-http";
@@ -23,8 +26,7 @@ export function initTracing(): void {
   if (!enabled) return;
 
   const exporterUrl =
-    process.env.OTEL_EXPORTER_URL ||
-    "http://localhost:4318/v1/traces";
+    process.env.OTEL_EXPORTER_URL || "http://localhost:4318/v1/traces";
 
   const exporter = new OTLPTraceExporter({
     url: exporterUrl,

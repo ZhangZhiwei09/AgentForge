@@ -7,8 +7,8 @@ export class RecursiveCharacterTextSplitter {
   private separators: string[]; // 分隔符优先级：优先在高级边界切分
 
   constructor(
-    chunkSize: number = 500,       // 每个 chunk 最大字符数
-    chunkOverlap: number = 50,     // 相邻 chunk 重叠字符数（保持语义连贯）
+    chunkSize: number = 500, // 每个 chunk 最大字符数
+    chunkOverlap: number = 50, // 相邻 chunk 重叠字符数（保持语义连贯）
     separators?: string[],
   ) {
     if (chunkOverlap >= chunkSize) {
@@ -19,11 +19,17 @@ export class RecursiveCharacterTextSplitter {
     // 分隔符优先级：段落 → 行 → 句子 → 词 → 字符
     this.separators = separators || [
       "\n\n", // 段落分隔
-      "\n",   // 行分隔
-      ".", "！", "？", "；",     // 中文标点
-      ". ", "! ", "? ", "; ",    // 英文标点（带空格）
-      " ",    // 词分隔
-      "",     // 字符级切分（兜底）
+      "\n", // 行分隔
+      ".",
+      "！",
+      "？",
+      "；", // 中文标点
+      ". ",
+      "! ",
+      "? ",
+      "; ", // 英文标点（带空格）
+      " ", // 词分隔
+      "", // 字符级切分（兜底）
     ];
   }
 
@@ -36,8 +42,18 @@ export class RecursiveCharacterTextSplitter {
   // 批量切分文档（返回带 docId 和 chunkIndex 的结构化结果）
   splitDocuments(
     documents: Array<{ id: string; title?: string; content: string }>,
-  ): Array<{ docId: string; title: string; chunkIndex: number; content: string }> {
-    const chunks: Array<{ docId: string; title: string; chunkIndex: number; content: string }> = [];
+  ): Array<{
+    docId: string;
+    title: string;
+    chunkIndex: number;
+    content: string;
+  }> {
+    const chunks: Array<{
+      docId: string;
+      title: string;
+      chunkIndex: number;
+      content: string;
+    }> = [];
     for (const doc of documents) {
       const texts = this.splitText(doc.content);
       for (let i = 0; i < texts.length; i++) {
@@ -137,9 +153,10 @@ export class RecursiveCharacterTextSplitter {
       }
 
       const prev = chunks[i - 1];
-      const overlapText = prev.length > this.chunkOverlap
-        ? prev.slice(-this.chunkOverlap) // 取前一个 chunk 的尾部作为重叠
-        : prev;
+      const overlapText =
+        prev.length > this.chunkOverlap
+          ? prev.slice(-this.chunkOverlap) // 取前一个 chunk 的尾部作为重叠
+          : prev;
 
       if (overlapText.length + chunks[i].length <= this.chunkSize) {
         merged.push(overlapText + chunks[i]);

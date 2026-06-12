@@ -37,7 +37,9 @@ export class VariableResolver {
           return typeof result === "string" ? result : JSON.stringify(result);
         }
         // Remove leading dot and resolve nested path
-        const cleanPath = fieldPath.startsWith(".") ? fieldPath.slice(1) : fieldPath;
+        const cleanPath = fieldPath.startsWith(".")
+          ? fieldPath.slice(1)
+          : fieldPath;
         const value = this.getNestedValue(result, cleanPath);
         if (value === undefined) return `{{${trimmed}}}`;
         return typeof value === "string" ? value : JSON.stringify(value);
@@ -74,7 +76,10 @@ export class VariableResolver {
           // Return raw value for non-string types
           const resolved = this.resolve(obj, context);
           // Try to parse as JSON if it looks like an object/array
-          if ((resolved.startsWith("{") || resolved.startsWith("[")) && resolved !== obj) {
+          if (
+            (resolved.startsWith("{") || resolved.startsWith("[")) &&
+            resolved !== obj
+          ) {
             try {
               return JSON.parse(resolved);
             } catch {
@@ -99,7 +104,9 @@ export class VariableResolver {
     }
     if (obj && typeof obj === "object") {
       const result: Record<string, unknown> = {};
-      for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
+      for (const [key, value] of Object.entries(
+        obj as Record<string, unknown>,
+      )) {
         result[key] = this.resolveObject(value, context);
       }
       return result;
@@ -132,7 +139,10 @@ export class VariableResolver {
 // ---- Safe Evaluator ----
 
 export class SafeEvaluator {
-  private static COMPARATORS: Record<string, (a: unknown, b: unknown) => boolean> = {
+  private static COMPARATORS: Record<
+    string,
+    (a: unknown, b: unknown) => boolean
+  > = {
     ">": (a, b) => Number(a) > Number(b),
     "<": (a, b) => Number(a) < Number(b),
     ">=": (a, b) => Number(a) >= Number(b),
@@ -172,7 +182,10 @@ export class SafeEvaluator {
     return this.evaluateSimple(resolved, context);
   }
 
-  private static evaluateSimple(expression: string, context: VariableContext): boolean {
+  private static evaluateSimple(
+    expression: string,
+    context: VariableContext,
+  ): boolean {
     const trimmed = expression.trim();
 
     // Boolean literals
@@ -185,7 +198,9 @@ export class SafeEvaluator {
     }
 
     // Find the comparison operator (longest first to avoid partial matches)
-    const operators = Object.keys(this.COMPARATORS).sort((a, b) => b.length - a.length);
+    const operators = Object.keys(this.COMPARATORS).sort(
+      (a, b) => b.length - a.length,
+    );
     for (const op of operators) {
       // Find the operator in the expression (not inside quotes)
       const idx = this.findOperatorOutsideQuotes(trimmed, ` ${op} `);
@@ -255,10 +270,7 @@ export class SafeEvaluator {
    * Parse a JSON-like template string into a real value using the context.
    * Used by transform steps for building output objects.
    */
-  static evaluateTemplate(
-    template: string,
-    context: VariableContext,
-  ): unknown {
+  static evaluateTemplate(template: string, context: VariableContext): unknown {
     const resolver = new VariableResolver();
     const resolved = resolver.resolve(template, context);
     try {

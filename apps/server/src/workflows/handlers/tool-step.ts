@@ -1,5 +1,9 @@
 // Tool Step Handler — executes a ToolRegistry tool as a workflow step
-import type { WorkflowToolStep, StepResult, WorkflowStep } from "@agentforge/shared-types";
+import type {
+  WorkflowToolStep,
+  StepResult,
+  WorkflowStep,
+} from "@agentforge/shared-types";
 import { toolRegistry } from "../../tools/registry.js";
 import { variableResolver } from "../variable-resolver.js";
 import type { StepHandler, StepContext } from "./types.js";

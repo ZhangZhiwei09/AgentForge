@@ -1,6 +1,11 @@
 // DAG Executor — topology sort + level-based parallel execution + checkpoint + retry
 // Core engine for running workflow definitions step by step
-import type { WorkflowStep, StepResult, WorkflowDefinition, ProgressSummary } from "@agentforge/shared-types";
+import type {
+  WorkflowStep,
+  StepResult,
+  WorkflowDefinition,
+  ProgressSummary,
+} from "@agentforge/shared-types";
 import { logger } from "@agentforge/logger";
 import {
   AgentStepHandler,
@@ -18,7 +23,12 @@ import type { VariableContext } from "./variable-resolver.js";
 export interface DAGExecutionContext extends StepContext {
   definition: WorkflowDefinition;
   emit: (event: unknown) => void;
-  pauseForApproval: (stepId: string, message: string, details: Record<string, unknown> | undefined, timeoutMs: number) => Promise<{
+  pauseForApproval: (
+    stepId: string,
+    message: string,
+    details: Record<string, unknown> | undefined,
+    timeoutMs: number,
+  ) => Promise<{
     action: "approved" | "rejected" | "timed_out";
     modifiedArgs?: Record<string, unknown>;
   }>;
@@ -50,7 +60,8 @@ export class DAGExecutor {
   constructor() {
     // Initialize handlers
     const parallelHandler = new ParallelStepHandler(
-      (step: WorkflowStep, ctx: StepContext) => this.executeSingleStep(step, ctx),
+      (step: WorkflowStep, ctx: StepContext) =>
+        this.executeSingleStep(step, ctx),
     );
 
     this.handlers = {
@@ -105,13 +116,20 @@ export class DAGExecutor {
           const startTime = Date.now();
 
           try {
-            const result = await this.executeWithRetry(step, context, definition);
+            const result = await this.executeWithRetry(
+              step,
+              context,
+              definition,
+            );
             const durationMs = Date.now() - startTime;
 
             return {
               stepId: step.id,
               stepType: step.type,
-              result: { ...result, durationMs: result.durationMs || durationMs },
+              result: {
+                ...result,
+                durationMs: result.durationMs || durationMs,
+              },
             };
           } catch (err) {
             return {
@@ -120,7 +138,8 @@ export class DAGExecutor {
               result: {
                 status: "failed" as const,
                 output: null,
-                error: err instanceof Error ? err.message : "Step execution failed",
+                error:
+                  err instanceof Error ? err.message : "Step execution failed",
                 durationMs: Date.now() - startTime,
               },
             };
@@ -180,7 +199,10 @@ export class DAGExecutor {
             typeof result.output === "object" &&
             (result.output as Record<string, unknown>).subSteps
           ) {
-            const conditionOutput = result.output as { branch: string; subSteps: WorkflowStep[] };
+            const conditionOutput = result.output as {
+              branch: string;
+              subSteps: WorkflowStep[];
+            };
             // Store branch info
             context.stepResults[`${step.id}_branch`] = conditionOutput.branch;
           }
@@ -291,15 +313,29 @@ export class DAGExecutor {
         pendingSteps.map(async (step) => {
           const startTime = Date.now();
           try {
-            const result = await this.executeWithRetry(step, context, definition);
+            const result = await this.executeWithRetry(
+              step,
+              context,
+              definition,
+            );
             const durationMs = Date.now() - startTime;
-            return { stepId: step.id, stepType: step.type, result: { ...result, durationMs: result.durationMs || durationMs } };
+            return {
+              stepId: step.id,
+              stepType: step.type,
+              result: {
+                ...result,
+                durationMs: result.durationMs || durationMs,
+              },
+            };
           } catch (err) {
             return {
-              stepId: step.id, stepType: step.type,
+              stepId: step.id,
+              stepType: step.type,
               result: {
-                status: "failed" as const, output: null,
-                error: err instanceof Error ? err.message : "Step execution failed",
+                status: "failed" as const,
+                output: null,
+                error:
+                  err instanceof Error ? err.message : "Step execution failed",
                 durationMs: Date.now() - startTime,
               },
             };
@@ -332,20 +368,47 @@ export class DAGExecutor {
           }
 
           if (result.status === "completed") {
-            yield { type: "workflow_step_completed", stepId: step.id, status: "completed", output: result.output, durationMs: result.durationMs };
+            yield {
+              type: "workflow_step_completed",
+              stepId: step.id,
+              status: "completed",
+              output: result.output,
+              durationMs: result.durationMs,
+            };
           } else if (result.status === "skipped") {
-            yield { type: "workflow_step_completed", stepId: step.id, status: "skipped", output: result.output, durationMs: result.durationMs };
+            yield {
+              type: "workflow_step_completed",
+              stepId: step.id,
+              status: "skipped",
+              output: result.output,
+              durationMs: result.durationMs,
+            };
           } else {
-            yield { type: "workflow_step_failed", stepId: step.id, error: result.error || "Unknown error", retryCount: result.retryCount || 0 };
+            yield {
+              type: "workflow_step_failed",
+              stepId: step.id,
+              error: result.error || "Unknown error",
+              retryCount: result.retryCount || 0,
+            };
           }
         } else {
           failedCount++;
-          yield { type: "workflow_step_failed", stepId: step.id, error: settled.reason?.message || "Execution rejected" };
+          yield {
+            type: "workflow_step_failed",
+            stepId: step.id,
+            error: settled.reason?.message || "Execution rejected",
+          };
         }
       }
     }
 
-    const progress: ProgressSummary = { completed: completedCount, total: totalSteps, failed: failedCount, skipped: skippedCount, running: 0 };
+    const progress: ProgressSummary = {
+      completed: completedCount,
+      total: totalSteps,
+      failed: failedCount,
+      skipped: skippedCount,
+      running: 0,
+    };
     yield {
       type: "workflow_completed",
       runId: context.runId,
@@ -384,7 +447,7 @@ export class DAGExecutor {
         const unresolved = [...remaining.keys()].join(", ");
         throw new Error(
           `Circular or unresolved dependency detected in steps: ${unresolved}. ` +
-          `Completed: ${[...completed].join(", ")}`,
+            `Completed: ${[...completed].join(", ")}`,
         );
       }
 
@@ -407,7 +470,13 @@ export class DAGExecutor {
     context: StepContext,
     definition?: WorkflowDefinition,
   ): Promise<StepResult> {
-    const retry = step.retry || { maxAttempts: 1, backoff: "fixed" as const, initialDelay: 0, maxDelay: 0, retryOn: [] };
+    const retry = step.retry || {
+      maxAttempts: 1,
+      backoff: "fixed" as const,
+      initialDelay: 0,
+      maxDelay: 0,
+      retryOn: [],
+    };
     const maxAttempts = retry.maxAttempts || 1;
     let lastError: Error | null = null;
 
@@ -422,7 +491,12 @@ export class DAGExecutor {
         if (attempt < maxAttempts - 1) {
           const delay = this.calculateRetryDelay(retry, attempt + 1);
           logger.warn(
-            { stepId: step.id, attempt: attempt + 1, maxAttempts, delayMs: delay },
+            {
+              stepId: step.id,
+              attempt: attempt + 1,
+              maxAttempts,
+              delayMs: delay,
+            },
             "Retrying failed step",
           );
           await this.sleep(delay);
@@ -446,9 +520,16 @@ export class DAGExecutor {
           (s: WorkflowStep) => s.id === step.fallback_step,
         );
         if (fallbackStep) {
-          logger.info({ stepId: step.id, fallbackStepId: fallbackStep.id }, "Executing fallback step");
+          logger.info(
+            { stepId: step.id, fallbackStepId: fallbackStep.id },
+            "Executing fallback step",
+          );
           try {
-            const fbResult = await this.executeWithRetry(fallbackStep, context, definition);
+            const fbResult = await this.executeWithRetry(
+              fallbackStep,
+              context,
+              definition,
+            );
             return { ...fbResult, retryCount: maxAttempts };
           } catch {
             return {
@@ -481,7 +562,9 @@ export class DAGExecutor {
 
     return new Promise<StepResult>((resolve, reject) => {
       const timer = setTimeout(() => {
-        reject(new Error(`Step ${step.id} timed out after ${step.timeout || 60}s`));
+        reject(
+          new Error(`Step ${step.id} timed out after ${step.timeout || 60}s`),
+        );
       }, timeoutMs);
 
       this.executeSingleStep(step, context)
@@ -499,7 +582,10 @@ export class DAGExecutor {
   /**
    * Execute a single workflow step (no retry, no timeout — those are handled by executeWithRetry).
    */
-  async executeSingleStep(step: WorkflowStep, context: StepContext): Promise<StepResult> {
+  async executeSingleStep(
+    step: WorkflowStep,
+    context: StepContext,
+  ): Promise<StepResult> {
     const handler = this.handlers[step.type];
     if (!handler) {
       return {
@@ -559,7 +645,10 @@ export class DAGExecutor {
       case "linear":
         return Math.min(retry.initialDelay * attempt, retry.maxDelay);
       case "exponential":
-        return Math.min(retry.initialDelay * Math.pow(2, attempt - 1), retry.maxDelay);
+        return Math.min(
+          retry.initialDelay * Math.pow(2, attempt - 1),
+          retry.maxDelay,
+        );
       default:
         return retry.initialDelay;
     }

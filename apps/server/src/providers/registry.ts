@@ -37,9 +37,25 @@ export function getProvider(name: string): LLMProvider {
 }
 
 // 列出所有可用 Provider 及其支持的模型（给前端 /api/providers 用）
-export function listProviders(): Array<{ type: string; models: Array<{ id: string; name: string; provider: string; max_tokens: number }> }> {
+export function listProviders(): Array<{
+  type: string;
+  models: Array<{
+    id: string;
+    name: string;
+    provider: string;
+    max_tokens: number;
+  }>;
+}> {
   initProviders();
-  const result: Array<{ type: string; models: Array<{ id: string; name: string; provider: string; max_tokens: number }> }> = [];
+  const result: Array<{
+    type: string;
+    models: Array<{
+      id: string;
+      name: string;
+      provider: string;
+      max_tokens: number;
+    }>;
+  }> = [];
   for (const [name, p] of Object.entries(providers)) {
     result.push({ type: name, models: p.listModels() });
   }

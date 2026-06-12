@@ -4,7 +4,11 @@ import { z } from "zod";
 import { zValidator } from "@hono/zod-validator";
 import { authService } from "../services/auth.js";
 import { VoiceService } from "../services/voice.js";
-import { getASRProvider, getTTSProvider, listVoices } from "../services/audio-providers.js";
+import {
+  getASRProvider,
+  getTTSProvider,
+  listVoices,
+} from "../services/audio-providers.js";
 import { pcmToWav } from "../lib/audio-utils.js";
 import { logger } from "@agentforge/logger";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -62,15 +66,11 @@ voiceRoutes.post(
       const tts = getTTSProvider();
       const result = await tts.synthesize(text, { voice, speed });
 
-      return c.body(
-        new Uint8Array(result.audioBuffer),
-        200,
-        {
-          "Content-Type": `audio/${result.format}`,
-          "Content-Length": String(result.audioBuffer.length),
-          "X-Audio-Duration-Sec": String(result.durationSec),
-        },
-      );
+      return c.body(new Uint8Array(result.audioBuffer), 200, {
+        "Content-Type": `audio/${result.format}`,
+        "Content-Length": String(result.audioBuffer.length),
+        "X-Audio-Duration-Sec": String(result.durationSec),
+      });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       logger.error({ error: msg }, "Synthesize endpoint error");
@@ -132,11 +132,7 @@ voiceRoutes.get("/api/voice/stream", async (c) => {
       }
     };
 
-    const voiceService = new VoiceService(
-      conversationId,
-      user.id,
-      sendFn,
-    );
+    const voiceService = new VoiceService(conversationId, user.id, sendFn);
 
     ws.on("message", (data: Buffer | string) => {
       try {
@@ -151,10 +147,7 @@ voiceRoutes.get("/api/voice/stream", async (c) => {
 
     ws.on("close", () => {
       voiceService.close().catch((err: unknown) => {
-        logger.warn(
-          { error: (err as Error)?.message },
-          "Voice close error",
-        );
+        logger.warn({ error: (err as Error)?.message }, "Voice close error");
       });
     });
 
@@ -170,7 +163,11 @@ voiceRoutes.get("/api/voice/stream", async (c) => {
   });
 
   // Perform the upgrade manually using the raw socket
-  const socket = (req as IncomingMessage & { socket: { on: Function; removeListener?: Function } }).socket;
+  const socket = (
+    req as IncomingMessage & {
+      socket: { on: Function; removeListener?: Function };
+    }
+  ).socket;
   const head = Buffer.alloc(0);
 
   wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {

@@ -5,10 +5,7 @@ import { prisma } from "../db.js";
 import { logger } from "@agentforge/logger";
 import { DAGExecutor } from "./dag-executor.js";
 import type { CheckpointData, DAGExecutionContext } from "./dag-executor.js";
-import {
-  WorkflowDefinitionSchema,
-  CreateWorkflowSchema,
-} from "./schema.js";
+import { WorkflowDefinitionSchema, CreateWorkflowSchema } from "./schema.js";
 import type {
   WorkflowDefinition,
   WorkflowDTO,
@@ -21,7 +18,10 @@ import type {
 // ---- Types ----
 
 interface PendingApproval {
-  resolve: (decision: { action: "approved" | "rejected" | "timed_out"; modifiedArgs?: Record<string, unknown> }) => void;
+  resolve: (decision: {
+    action: "approved" | "rejected" | "timed_out";
+    modifiedArgs?: Record<string, unknown>;
+  }) => void;
   timeout: ReturnType<typeof setTimeout>;
   stepId: string;
 }
@@ -63,7 +63,12 @@ export class WorkflowService {
   /** List workflows for a user */
   async list(
     userId: string,
-    options: { status?: string; tag?: string; page?: number; limit?: number } = {},
+    options: {
+      status?: string;
+      tag?: string;
+      page?: number;
+      limit?: number;
+    } = {},
   ): Promise<{ items: WorkflowDTO[]; total: number; page: number }> {
     const page = options.page || 1;
     const limit = options.limit || 20;
@@ -116,7 +121,8 @@ export class WorkflowService {
     const updateData: Record<string, unknown> = {};
 
     if (data.name !== undefined) updateData.name = data.name;
-    if (data.description !== undefined) updateData.description = data.description;
+    if (data.description !== undefined)
+      updateData.description = data.description;
     if (data.tags !== undefined) updateData.tags = data.tags;
     if (data.definition !== undefined) {
       // Validate the definition before saving
@@ -145,15 +151,19 @@ export class WorkflowService {
   }
 
   /** Validate a workflow definition without saving */
-  validateDefinition(definition: unknown): { valid: boolean; errors?: Array<{ path: string; message: string }> } {
+  validateDefinition(definition: unknown): {
+    valid: boolean;
+    errors?: Array<{ path: string; message: string }>;
+  } {
     try {
       WorkflowDefinitionSchema.parse(definition);
       return { valid: true };
     } catch (err: any) {
-      const errors = err?.issues?.map((issue: any) => ({
-        path: issue.path?.join(".") || "",
-        message: issue.message || "Unknown validation error",
-      })) || [];
+      const errors =
+        err?.issues?.map((issue: any) => ({
+          path: issue.path?.join(".") || "",
+          message: issue.message || "Unknown validation error",
+        })) || [];
       return { valid: false, errors };
     }
   }
@@ -189,7 +199,13 @@ export class WorkflowService {
         userId,
         status: "running",
         input: inputVariables as object,
-        progress: { completed: 0, total: totalSteps, failed: 0, skipped: 0, running: 0 },
+        progress: {
+          completed: 0,
+          total: totalSteps,
+          failed: 0,
+          skipped: 0,
+          running: 0,
+        },
       },
     });
 
@@ -246,7 +262,10 @@ export class WorkflowService {
         const ev = event as Record<string, string>;
 
         // Save step logs on completion/failure
-        if (ev.type === "workflow_step_completed" || ev.type === "workflow_step_failed") {
+        if (
+          ev.type === "workflow_step_completed" ||
+          ev.type === "workflow_step_failed"
+        ) {
           const stepId = ev.stepId;
           if (stepId) {
             completedStepIds.push(stepId);
@@ -258,7 +277,9 @@ export class WorkflowService {
             total: totalSteps,
             failed: completedStepIds.filter((id) => {
               const r = stepResults[id];
-              return r && typeof r === "object" && (r as any).status === "failed";
+              return (
+                r && typeof r === "object" && (r as any).status === "failed"
+              );
             }).length,
             skipped: 0,
             running: 0,
@@ -270,10 +291,14 @@ export class WorkflowService {
               progress: progress as any,
               currentStepId: stepId,
               checkpoint: this.dagExecutor.buildCheckpoint(
-                runId, workflowId,
+                runId,
+                workflowId,
                 completedStepIds,
                 allStepIds.filter((id) => !completedStepIds.includes(id)),
-                [], variables, stepResults, totalSteps,
+                [],
+                variables,
+                stepResults,
+                totalSteps,
               ) as any,
             },
           });
@@ -302,7 +327,13 @@ export class WorkflowService {
               output: context.stepResults as any,
               durationMs,
               completedAt: new Date(),
-              progress: { completed: totalSteps, total: totalSteps, failed: 0, skipped: 0, running: 0 } as any,
+              progress: {
+                completed: totalSteps,
+                total: totalSteps,
+                failed: 0,
+                skipped: 0,
+                running: 0,
+              } as any,
             },
           });
 
@@ -311,7 +342,10 @@ export class WorkflowService {
             data: { runCount: { increment: 1 }, lastRunAt: new Date() },
           });
 
-          yield { ...(event as Record<string, unknown>), totalDurationMs: durationMs };
+          yield {
+            ...(event as Record<string, unknown>),
+            totalDurationMs: durationMs,
+          };
           return;
         }
 
@@ -358,7 +392,9 @@ export class WorkflowService {
     rejectionReason?: string,
   ): AsyncGenerator<unknown> {
     // Find the pending approval
-    const pendingKeys = [...this.pendingApprovals.keys()].filter((k) => k.startsWith(`${runId}:`));
+    const pendingKeys = [...this.pendingApprovals.keys()].filter((k) =>
+      k.startsWith(`${runId}:`),
+    );
 
     for (const key of pendingKeys) {
       const pending = this.pendingApprovals.get(key);
@@ -391,17 +427,28 @@ export class WorkflowService {
 
     // Check if the run is paused
     if (run.status !== "paused") {
-      yield { type: "workflow_failed", runId, error: `Run is ${run.status}, not paused` };
+      yield {
+        type: "workflow_failed",
+        runId,
+        error: `Run is ${run.status}, not paused`,
+      };
       return;
     }
 
     // The run will be resumed by the caller re-invoking runWorkflow
     // with the checkpoint data, or we need to continue the generator
-    yield { type: "workflow_resumed", runId, resumedFrom: run.currentStepId || "checkpoint" };
+    yield {
+      type: "workflow_resumed",
+      runId,
+      resumedFrom: run.currentStepId || "checkpoint",
+    };
   }
 
   /** Pause a running workflow */
-  async pauseRun(runId: string, userId: string): Promise<WorkflowRunDTO | null> {
+  async pauseRun(
+    runId: string,
+    userId: string,
+  ): Promise<WorkflowRunDTO | null> {
     const run = await prisma.workflowRun.findFirst({
       where: { id: runId, userId },
     });
@@ -425,7 +472,11 @@ export class WorkflowService {
       return;
     }
     if (run.status !== "paused") {
-      yield { type: "workflow_failed", runId, error: `Run is ${run.status}, not paused` };
+      yield {
+        type: "workflow_failed",
+        runId,
+        error: `Run is ${run.status}, not paused`,
+      };
       return;
     }
 
@@ -440,9 +491,12 @@ export class WorkflowService {
 
     const definition = workflow.definition as unknown as WorkflowDefinition;
     const checkpoint = (run.checkpoint || {}) as Record<string, unknown>;
-    const completedStepIds: string[] = (checkpoint.completedSteps as string[]) || [];
-    const savedVariables = (checkpoint.variables as Record<string, unknown>) || {};
-    const savedStepResults = (checkpoint.stepResults as Record<string, unknown>) || {};
+    const completedStepIds: string[] =
+      (checkpoint.completedSteps as string[]) || [];
+    const savedVariables =
+      (checkpoint.variables as Record<string, unknown>) || {};
+    const savedStepResults =
+      (checkpoint.stepResults as Record<string, unknown>) || {};
 
     // Rebuild context from checkpoint
     const variables = { ...savedVariables };
@@ -491,11 +545,17 @@ export class WorkflowService {
       }
     }
 
-    for await (const ev of this.dagExecutor.executeWithSkip(context, new Set(completedStepIds))) {
+    for await (const ev of this.dagExecutor.executeWithSkip(
+      context,
+      new Set(completedStepIds),
+    )) {
       const event = ev as Record<string, unknown>;
 
       // Update progress
-      if (event.type !== "workflow_approval_required" && event.type !== "workflow_completed") {
+      if (
+        event.type !== "workflow_approval_required" &&
+        event.type !== "workflow_completed"
+      ) {
         const stepId = event.stepId as string;
         if (stepId && !completedStepIds.includes(stepId)) {
           completedStepIds.push(stepId);
@@ -512,10 +572,14 @@ export class WorkflowService {
               progress: progress as any,
               currentStepId: stepId,
               checkpoint: this.dagExecutor.buildCheckpoint(
-                runId, run.workflowId,
+                runId,
+                run.workflowId,
                 completedStepIds,
                 allStepIds.filter((id) => !completedStepIds.includes(id)),
-                [], variables, stepResults, totalSteps,
+                [],
+                variables,
+                stepResults,
+                totalSteps,
               ) as any,
             },
           });
@@ -540,7 +604,13 @@ export class WorkflowService {
             status: "completed",
             output: stepResults as any,
             completedAt: new Date(),
-            progress: { completed: totalSteps, total: totalSteps, failed: 0, skipped: 0, running: 0 } as any,
+            progress: {
+              completed: totalSteps,
+              total: totalSteps,
+              failed: 0,
+              skipped: 0,
+              running: 0,
+            } as any,
           },
         });
         yield event;
@@ -551,7 +621,11 @@ export class WorkflowService {
       if (event.type === "workflow_failed") {
         await prisma.workflowRun.update({
           where: { id: runId },
-          data: { status: "failed", error: (event.error as string) || "Workflow failed", completedAt: new Date() },
+          data: {
+            status: "failed",
+            error: (event.error as string) || "Workflow failed",
+            completedAt: new Date(),
+          },
         });
         yield event;
         return;
@@ -562,11 +636,15 @@ export class WorkflowService {
   }
 
   /** Cancel a running or paused workflow */
-  async cancelRun(runId: string, userId: string): Promise<WorkflowRunDTO | null> {
+  async cancelRun(
+    runId: string,
+    userId: string,
+  ): Promise<WorkflowRunDTO | null> {
     const run = await prisma.workflowRun.findFirst({
       where: { id: runId, userId },
     });
-    if (!run || (run.status !== "running" && run.status !== "paused")) return null;
+    if (!run || (run.status !== "running" && run.status !== "paused"))
+      return null;
 
     const updated = await prisma.workflowRun.update({
       where: { id: runId },
@@ -621,7 +699,10 @@ export class WorkflowService {
   }
 
   /** Get a single run with step logs */
-  async getRun(runId: string, userId: string): Promise<{ run: WorkflowRunDTO; stepLogs: WorkflowStepLogDTO[] } | null> {
+  async getRun(
+    runId: string,
+    userId: string,
+  ): Promise<{ run: WorkflowRunDTO; stepLogs: WorkflowStepLogDTO[] } | null> {
     const run = await prisma.workflowRun.findFirst({
       where: { id: runId, userId },
     });
@@ -653,7 +734,8 @@ export class WorkflowService {
           stepId,
           stepType,
           status: result.status,
-          output: result.output !== undefined ? (result.output as object) : undefined,
+          output:
+            result.output !== undefined ? (result.output as object) : undefined,
           error: result.error || null,
           retryCount: result.retryCount || 0,
           durationMs: result.durationMs || 0,
@@ -694,7 +776,13 @@ export class WorkflowService {
       output: (r.output as Record<string, unknown>) || undefined,
       checkpoint: r.checkpoint ? (r.checkpoint as unknown as any) : undefined,
       currentStepId: r.currentStepId || undefined,
-      progress: (r.progress as ProgressSummary) || { completed: 0, total: 0, failed: 0, skipped: 0, running: 0 },
+      progress: (r.progress as ProgressSummary) || {
+        completed: 0,
+        total: 0,
+        failed: 0,
+        skipped: 0,
+        running: 0,
+      },
       error: r.error || undefined,
       durationMs: r.durationMs || undefined,
       startedAt: r.startedAt.toISOString(),

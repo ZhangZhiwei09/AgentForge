@@ -7,7 +7,12 @@ export class Blackboard {
   private history: BlackboardEntry[] = [];
 
   /** Write a value to the blackboard (with version control) */
-  write(key: string, value: unknown, agentName: string, metadata?: BlackboardEntry["metadata"]): BlackboardEntry {
+  write(
+    key: string,
+    value: unknown,
+    agentName: string,
+    metadata?: BlackboardEntry["metadata"],
+  ): BlackboardEntry {
     const prevEntry = this.entries.get(key);
     const entry: BlackboardEntry = {
       key,
@@ -93,7 +98,9 @@ export class Blackboard {
     let ctx = "## 共享 Blackboard (最新值):\n";
     for (const [key, entry] of this.entries) {
       const val =
-        typeof entry.value === "string" ? entry.value : JSON.stringify(entry.value);
+        typeof entry.value === "string"
+          ? entry.value
+          : JSON.stringify(entry.value);
       ctx += `- **${key}** (由 ${entry.writtenBy} 写入, v${entry.version}): ${val.substring(0, 300)}\n`;
     }
     return ctx;

@@ -1,24 +1,16 @@
 {
-    "extends": "../../tsconfig.base.json",
-    "compilerOptions": {
-        "target": "ES2022",
-        "lib": [
-            "ES2022",
-            "DOM",
-            "DOM.Iterable"
-        ],
-        "jsx": "react-jsx",
-        "module": "ESNext",
-        "moduleResolution": "bundler",
-        "paths": {
-            "@/*": [
-                "./src/*"
-            ]
-        },
-        "outDir": "./dist",
-        "noEmit": true
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "paths": {
+      "@/*": ["./src/*"]
     },
-    "include": [
-        "src"
-    ]
+    "outDir": "./dist",
+    "noEmit": true
+  },
+  "include": ["src"]
 }

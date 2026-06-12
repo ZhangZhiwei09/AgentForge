@@ -20,7 +20,10 @@ import type { ExecutionContext } from "./modes/types.js";
 // ---- Types ----
 
 interface PendingApproval {
-  resolve: (decision: { action: "approved" | "rejected" | "timed_out"; modifiedArgs?: Record<string, unknown> }) => void;
+  resolve: (decision: {
+    action: "approved" | "rejected" | "timed_out";
+    modifiedArgs?: Record<string, unknown>;
+  }) => void;
   timeout: ReturnType<typeof setTimeout>;
   stepId: string;
 }
@@ -60,7 +63,12 @@ export class TeamService {
   /** List teams for a user */
   async list(
     userId: string,
-    options: { status?: string; mode?: string; page?: number; limit?: number } = {},
+    options: {
+      status?: string;
+      mode?: string;
+      page?: number;
+      limit?: number;
+    } = {},
   ): Promise<{ items: TeamDTO[]; total: number; page: number }> {
     const page = options.page || 1;
     const limit = options.limit || 20;
@@ -83,7 +91,9 @@ export class TeamService {
     // Filter by mode if specified (mode is inside JSON definition)
     let items = teams.map((t) => this.toDTO(t));
     if (options.mode) {
-      items = items.filter((t) => t.definition.collaborationMode === options.mode);
+      items = items.filter(
+        (t) => t.definition.collaborationMode === options.mode,
+      );
     }
 
     return { items, total, page };
@@ -112,7 +122,8 @@ export class TeamService {
     const updateData: Record<string, unknown> = {};
 
     if (data.name !== undefined) updateData.name = data.name;
-    if (data.description !== undefined) updateData.description = data.description;
+    if (data.description !== undefined)
+      updateData.description = data.description;
     if (data.tags !== undefined) updateData.tags = data.tags;
     if (data.status !== undefined) updateData.status = data.status;
     if (data.definition !== undefined) {
@@ -141,7 +152,10 @@ export class TeamService {
   }
 
   /** Validate a team definition without saving */
-  validateDefinition(definition: unknown): { valid: boolean; errors?: Array<{ path: string; message: string }> } {
+  validateDefinition(definition: unknown): {
+    valid: boolean;
+    errors?: Array<{ path: string; message: string }>;
+  } {
     const result = TeamDefinitionSchema.safeParse(definition);
     if (result.success) {
       return { valid: true };
@@ -166,7 +180,11 @@ export class TeamService {
   }
 
   /** Create a team from a template */
-  async createFromTemplate(userId: string, templateId: string, overrides?: { name?: string; description?: string }): Promise<TeamDTO | null> {
+  async createFromTemplate(
+    userId: string,
+    templateId: string,
+    overrides?: { name?: string; description?: string },
+  ): Promise<TeamDTO | null> {
     const template = getTeamTemplate(templateId);
     if (!template) return null;
 
@@ -240,7 +258,11 @@ export class TeamService {
     let failed = false;
 
     try {
-      for await (const event of this.teamExecutor.execute(definition, task, context)) {
+      for await (const event of this.teamExecutor.execute(
+        definition,
+        task,
+        context,
+      )) {
         // Count rounds
         if (event.type === "team_round_start") {
           roundsCount++;
@@ -335,7 +357,8 @@ export class TeamService {
     const run = await prisma.agentTeamRun.findFirst({
       where: { id: runId, userId },
     });
-    if (!run || (run.status !== "running" && run.status !== "paused")) return null;
+    if (!run || (run.status !== "running" && run.status !== "paused"))
+      return null;
 
     const updated = await prisma.agentTeamRun.update({
       where: { id: runId },

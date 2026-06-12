@@ -65,5 +65,10 @@ export interface LLMProvider {
   ): Promise<ChatSyncResult>;
 
   // 返回该厂商支持的模型列表
-  listModels(): Array<{ id: string; name: string; provider: string; max_tokens: number }>;
+  listModels(): Array<{
+    id: string;
+    name: string;
+    provider: string;
+    max_tokens: number;
+  }>;
 }

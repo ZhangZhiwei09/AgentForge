@@ -74,7 +74,11 @@ export interface AgentMessagePayload {
   feedback?: {
     verdict: "pass" | "revise" | "reject";
     score: number;
-    issues: Array<{ severity: string; description: string; suggestion: string }>;
+    issues: Array<{
+      severity: string;
+      description: string;
+      suggestion: string;
+    }>;
     summary: string;
   };
   context?: Record<string, unknown>;

@@ -9,9 +9,7 @@ import type { RegisteredTool } from "./types.js";
 
 // Workspace root — all file operations are restricted to this directory
 // Default: project root. Override with FILE_WORKSPACE env var.
-const WORKSPACE_ROOT = resolve(
-  process.env.FILE_WORKSPACE || process.cwd(),
-);
+const WORKSPACE_ROOT = resolve(process.env.FILE_WORKSPACE || process.cwd());
 
 function safeResolve(userPath: string): string {
   const resolved = resolve(WORKSPACE_ROOT, userPath.replace(/^[\/\\]+/, ""));
@@ -53,9 +51,7 @@ const fileReadDef: ToolDefinition = {
   },
 };
 
-async function fileReadExecute(
-  args: Record<string, unknown>,
-): Promise<string> {
+async function fileReadExecute(args: Record<string, unknown>): Promise<string> {
   const userPath = (args.path as string) || "";
   const maxLines = Math.min(
     Math.max(1, (args.max_lines as number) || 500),
@@ -126,9 +122,12 @@ async function fileWriteExecute(
     const filePath = safeResolve(userPath);
 
     // Ensure parent directory exists
-    const dir = filePath.substring(0, filePath.lastIndexOf("\\") > -1
-      ? filePath.lastIndexOf("\\")
-      : filePath.lastIndexOf("/"));
+    const dir = filePath.substring(
+      0,
+      filePath.lastIndexOf("\\") > -1
+        ? filePath.lastIndexOf("\\")
+        : filePath.lastIndexOf("/"),
+    );
     if (dir && !existsSync(dir)) {
       await mkdir(dir, { recursive: true });
     }
@@ -201,13 +200,16 @@ async function fileSearchExecute(
         const entries = await readdir(dir, { withFileTypes: true });
         for (const entry of entries) {
           if (matches.length >= maxResults) return;
-          if (entry.name.startsWith(".") || entry.name === "node_modules") continue;
+          if (entry.name.startsWith(".") || entry.name === "node_modules")
+            continue;
 
           const fullPath = join(dir, entry.name);
           if (entry.isDirectory()) {
             await scanDir(fullPath, currentPattern);
           } else if (entry.isFile()) {
-            const relPath = fullPath.replace(WORKSPACE_ROOT, "").replace(/^[\/\\]/, "");
+            const relPath = fullPath
+              .replace(WORKSPACE_ROOT, "")
+              .replace(/^[\/\\]/, "");
             // Simple glob matching
             if (matchSimpleGlob(relPath, currentPattern)) {
               // If content search is requested, check file contents

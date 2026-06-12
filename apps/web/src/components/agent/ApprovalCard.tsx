@@ -68,7 +68,9 @@ export function ApprovalCard() {
         });
 
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+          const err = await res
+            .json()
+            .catch(() => ({ detail: "Unknown error" }));
           throw new Error(err.detail ?? `HTTP ${res.status}`);
         }
       } catch (err) {
@@ -99,7 +101,9 @@ export function ApprovalCard() {
         <div className="flex items-center justify-between border-b border-gray-700 px-5 py-4">
           <div className="flex items-center gap-2">
             <Shield className="h-5 w-5 text-red-400" />
-            <h3 className="text-sm font-semibold text-gray-200">工具执行审批</h3>
+            <h3 className="text-sm font-semibold text-gray-200">
+              工具执行审批
+            </h3>
           </div>
           <span
             className={`rounded-md border px-2 py-0.5 text-xs font-medium ${riskColor}`}
@@ -114,7 +118,9 @@ export function ApprovalCard() {
           <div>
             <div className="flex items-center gap-1.5 mb-1">
               <Wrench className="h-3.5 w-3.5 text-gray-400" />
-              <span className="text-xs font-medium text-gray-400">工具名称</span>
+              <span className="text-xs font-medium text-gray-400">
+                工具名称
+              </span>
             </div>
             <p className="text-sm font-mono text-gray-200">
               {pendingApproval.toolName}
@@ -124,7 +130,9 @@ export function ApprovalCard() {
           {/* Reason */}
           <div>
             <span className="text-xs font-medium text-gray-400">执行原因</span>
-            <p className="mt-1 text-sm text-gray-300">{pendingApproval.reason}</p>
+            <p className="mt-1 text-sm text-gray-300">
+              {pendingApproval.reason}
+            </p>
           </div>
 
           {/* Arguments */}

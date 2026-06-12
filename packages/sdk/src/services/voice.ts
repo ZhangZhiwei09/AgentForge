@@ -34,7 +34,9 @@ export class VoiceService {
 
     if (!res.ok) {
       const err = await res.json();
-      throw new Error((err as { detail?: string }).detail || "Transcription failed");
+      throw new Error(
+        (err as { detail?: string }).detail || "Transcription failed",
+      );
     }
 
     return res.json();
@@ -53,7 +55,9 @@ export class VoiceService {
 
     if (!res.ok) {
       const err = await res.json();
-      throw new Error((err as { detail?: string }).detail || "Synthesis failed");
+      throw new Error(
+        (err as { detail?: string }).detail || "Synthesis failed",
+      );
     }
 
     return res.arrayBuffer();

@@ -15,7 +15,8 @@ export interface WorkflowTemplate {
 const contentSummarizer: WorkflowTemplate = {
   id: "content-summarizer",
   name: "Content Summarizer",
-  description: "多源内容聚合并生成结构化摘要。输入 URL 列表，输出包含关键主题、摘要和矛盾点的综合报告。",
+  description:
+    "多源内容聚合并生成结构化摘要。输入 URL 列表，输出包含关键主题、摘要和矛盾点的综合报告。",
   category: "content",
   definition: {
     name: "Content Summarizer",
@@ -46,7 +47,8 @@ const contentSummarizer: WorkflowTemplate = {
       {
         id: "summarize_each",
         type: "agent",
-        prompt: "Summarize each article in 2-3 sentences. Language: {{language}}.\n\nArticles: {{raw_contents}}",
+        prompt:
+          "Summarize each article in 2-3 sentences. Language: {{language}}.\n\nArticles: {{raw_contents}}",
         model: "gpt-4o-mini",
         output_as: "summaries",
       },
@@ -73,7 +75,8 @@ Format as markdown with:
 const dataAnalysis: WorkflowTemplate = {
   id: "data-analysis",
   name: "Data Analysis Pipeline",
-  description: "数据分析流水线：采集 → 清洗 → 分析 → 生成报告。自动处理原始数据并输出专业报告。",
+  description:
+    "数据分析流水线：采集 → 清洗 → 分析 → 生成报告。自动处理原始数据并输出专业报告。",
   category: "analysis",
   definition: {
     name: "Data Analysis Pipeline",
@@ -102,13 +105,15 @@ const dataAnalysis: WorkflowTemplate = {
       {
         id: "clean_data",
         type: "agent",
-        prompt: "Clean and structure the following data into a CSV-like format. Remove noise, handle missing values, and normalize.\n\nData: {{raw_data}}",
+        prompt:
+          "Clean and structure the following data into a CSV-like format. Remove noise, handle missing values, and normalize.\n\nData: {{raw_data}}",
         output_as: "clean_data",
       },
       {
         id: "analyze",
         type: "agent",
-        prompt: "Analyze the data to answer: {{analysis_question}}\n\nData: {{clean_data}}\n\nProvide statistical insights, trends, and patterns. Include specific numbers.",
+        prompt:
+          "Analyze the data to answer: {{analysis_question}}\n\nData: {{clean_data}}\n\nProvide statistical insights, trends, and patterns. Include specific numbers.",
         output_as: "analysis",
       },
       {
@@ -137,7 +142,8 @@ Include:
 const codeReview: WorkflowTemplate = {
   id: "code-review",
   name: "Automated Code Review",
-  description: "多维度代码审查：安全、性能、可维护性并行检查，输出综合审计报告。",
+  description:
+    "多维度代码审查：安全、性能、可维护性并行检查，输出综合审计报告。",
   category: "engineering",
   definition: {
     name: "Automated Code Review",

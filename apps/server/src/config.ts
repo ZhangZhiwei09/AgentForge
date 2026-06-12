@@ -11,13 +11,16 @@ config({ path: resolve(__dirname, "../.env") });
 
 export const settings = {
   // PostgreSQL 连接字符串，端口 5434 避免和本地其他 PG 实例冲突
-  databaseUrl: process.env.DATABASE_URL || "postgresql://postgres:postgres@localhost:5434/agentforge",
+  databaseUrl:
+    process.env.DATABASE_URL ||
+    "postgresql://postgres:postgres@localhost:5434/agentforge",
   // OpenAI API 配置（用于 LLM 对话 + Embedding）
   openaiApiKey: process.env.OPENAI_API_KEY || "",
   openaiBaseUrl: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
   // DeepSeek API 配置（性价比更高的备选 LLM）
   deepseekApiKey: process.env.DEEPSEEK_API_KEY || "",
-  deepseekBaseUrl: process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
+  deepseekBaseUrl:
+    process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
   // 默认使用的模型 ID，会从所有 provider 的模型列表中匹配
   defaultModel: process.env.DEFAULT_MODEL || "gpt-4o-mini",
   debug: process.env.DEBUG === "true",

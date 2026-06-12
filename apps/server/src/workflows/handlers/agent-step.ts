@@ -1,5 +1,9 @@
 // Agent Step Handler — executes an AgentService ReAct loop as a workflow step
-import type { WorkflowAgentStep, StepResult, WorkflowStep } from "@agentforge/shared-types";
+import type {
+  WorkflowAgentStep,
+  StepResult,
+  WorkflowStep,
+} from "@agentforge/shared-types";
 import { AgentService } from "../../services/agent.js";
 import { variableResolver } from "../variable-resolver.js";
 import type { StepHandler, StepContext } from "./types.js";
@@ -28,11 +32,15 @@ export class AgentStepHandler implements StepHandler {
     let tokensUsed = 0;
 
     try {
-      for await (const event of agentService.run(context.conversationId, resolvedPrompt, {
-        model: agentStep.model ?? null,
-        maxIterations: agentStep.max_iterations ?? 10,
-        tools: agentStep.tools ?? null,
-      })) {
+      for await (const event of agentService.run(
+        context.conversationId,
+        resolvedPrompt,
+        {
+          model: agentStep.model ?? null,
+          maxIterations: agentStep.max_iterations ?? 10,
+          tools: agentStep.tools ?? null,
+        },
+      )) {
         events.push(event);
 
         // Forward agent events as workflow step progress
@@ -85,13 +93,18 @@ export class AgentStepHandler implements StepHandler {
         }
 
         // Rough token usage estimate
-        if (agentEvent.type === "agent_respond" || agentEvent.type === "agent_token") {
+        if (
+          agentEvent.type === "agent_respond" ||
+          agentEvent.type === "agent_token"
+        ) {
           tokensUsed += 50;
         }
       }
 
       // If loop finished without agent_done, take the last event's output
-      const lastEvent = events[events.length - 1] as Record<string, unknown> | undefined;
+      const lastEvent = events[events.length - 1] as
+        | Record<string, unknown>
+        | undefined;
       return {
         status: "completed",
         output: lastEvent?.result || null,

@@ -102,7 +102,11 @@
       "fieldConfig": {
         "defaults": {
           "unit": "short",
-          "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "stacking": { "mode": "normal" } }
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "stacking": { "mode": "normal" }
+          }
         }
       }
     },

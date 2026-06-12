@@ -49,7 +49,12 @@ teamRoutes.get("/api/teams", async (c) => {
   const limit = parseInt(c.req.query("limit") || "20", 10);
 
   try {
-    const result = await teamService.list(user.id, { status, mode, page, limit });
+    const result = await teamService.list(user.id, {
+      status,
+      mode,
+      page,
+      limit,
+    });
     return c.json(result);
   } catch (err) {
     logger.error({ error: err }, "Failed to list teams");
@@ -94,7 +99,10 @@ teamRoutes.post("/api/teams/validate", async (c) => {
     const result = teamService.validateDefinition(body.definition || body);
     return c.json(result);
   } catch (err) {
-    return c.json({ valid: false, errors: [{ path: "", message: "Invalid request body" }] }, 400);
+    return c.json(
+      { valid: false, errors: [{ path: "", message: "Invalid request body" }] },
+      400,
+    );
   }
 });
 
@@ -169,7 +177,13 @@ teamRoutes.post("/api/teams/:id/run", async (c) => {
     const conversationId = parsed.conversationId;
 
     return streamSSE(c, async (stream) => {
-      for await (const event of teamService.runTeam(id, user.id, task, variables, conversationId)) {
+      for await (const event of teamService.runTeam(
+        id,
+        user.id,
+        task,
+        variables,
+        conversationId,
+      )) {
         await stream.writeSSE({
           data: JSON.stringify(event),
           event: event.type,
@@ -199,7 +213,11 @@ teamRoutes.get("/api/teams/:id/runs", async (c) => {
   const limit = parseInt(c.req.query("limit") || "20", 10);
 
   try {
-    const result = await teamService.listRuns(id, user.id, { status, page, limit });
+    const result = await teamService.listRuns(id, user.id, {
+      status,
+      page,
+      limit,
+    });
     return c.json(result);
   } catch (err) {
     logger.error({ error: err }, "Failed to list team runs");

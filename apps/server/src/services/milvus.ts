@@ -33,10 +33,10 @@ export async function ensureMemoryCollection(): Promise<void> {
       collection_name: MILVUS_MEMORY_COLLECTION,
       fields: [
         { name: "id", data_type: "Int64", is_primary_key: true, autoID: true },
-        { name: "memory_id", data_type: "VarChar", max_length: 64 },   // 对应 PG memories 表的 ID
-        { name: "user_id", data_type: "VarChar", max_length: 64 },     // 用于搜索时过滤用户
+        { name: "memory_id", data_type: "VarChar", max_length: 64 }, // 对应 PG memories 表的 ID
+        { name: "user_id", data_type: "VarChar", max_length: 64 }, // 用于搜索时过滤用户
         { name: "embedding", data_type: "FloatVector", dim: EMBEDDING_DIM }, // 文本语义向量
-        { name: "content", data_type: "VarChar", max_length: 4096 },   // 原始文本（截断 4096 字符）
+        { name: "content", data_type: "VarChar", max_length: 4096 }, // 原始文本（截断 4096 字符）
       ],
     });
 
@@ -46,7 +46,7 @@ export async function ensureMemoryCollection(): Promise<void> {
       field_name: "embedding",
       index_name: "embedding_idx",
       index_type: "IVF_FLAT",
-      metric_type: "COSINE",  // 余弦相似度
+      metric_type: "COSINE", // 余弦相似度
       params: { nlist: 128 },
     });
   }
@@ -71,8 +71,8 @@ export async function ensureKnowledgeCollection(): Promise<void> {
       collection_name: MILVUS_KNOWLEDGE_COLLECTION,
       fields: [
         { name: "id", data_type: "Int64", is_primary_key: true, autoID: true },
-        { name: "chunk_id", data_type: "VarChar", max_length: 64 },      // 对应 PG knowledge_chunks 表的 ID
-        { name: "kb_id", data_type: "VarChar", max_length: 64 },          // 所属知识库 ID
+        { name: "chunk_id", data_type: "VarChar", max_length: 64 }, // 对应 PG knowledge_chunks 表的 ID
+        { name: "kb_id", data_type: "VarChar", max_length: 64 }, // 所属知识库 ID
         { name: "dense_vector", data_type: "FloatVector", dim: EMBEDDING_DIM }, // 语义向量（embedding）
         { name: "content", data_type: "VarChar", max_length: 4096 },
       ],

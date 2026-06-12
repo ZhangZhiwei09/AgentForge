@@ -14,10 +14,12 @@ const PUBLIC_PATHS = [
 
 // Prefix-based public paths (any path starting with these is public)
 const PUBLIC_PREFIXES = [
-  "/api/customer-chat",  // Anonymous customer chat + FAQ + rate + analytics
+  "/api/customer-chat", // Anonymous customer chat + FAQ + rate + analytics
 ];
 
-export const authMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
+export const authMiddleware: MiddlewareHandler<{
+  Variables: AppVariables;
+}> = async (c, next) => {
   // Skip auth for public routes (exact match)
   if (PUBLIC_PATHS.some((p) => c.req.path === p)) {
     return next();
@@ -28,8 +30,9 @@ export const authMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = as
     return next();
   }
 
-  const token = c.req.header("Authorization")?.replace("Bearer ", "")
-    ?? c.req.query("api_key");
+  const token =
+    c.req.header("Authorization")?.replace("Bearer ", "") ??
+    c.req.query("api_key");
 
   if (!token) {
     return c.json({ detail: "Unauthorized — missing token" }, 401);
@@ -42,8 +45,8 @@ export const authMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = as
 
   // Inject user into context for downstream handlers
   c.set("user", user);
-  c.set("requestId", c.get("requestId") || "");  // Ensure requestId from earlier middleware
+  c.set("requestId", c.get("requestId") || ""); // Ensure requestId from earlier middleware
 
   logger.debug({ userId: user.id, path: c.req.path }, "Auth OK");
   await next();
-}
+};

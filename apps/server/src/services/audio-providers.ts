@@ -127,10 +127,7 @@ class OpenAITTSProvider implements TTSProvider {
     ];
   }
 
-  async synthesize(
-    text: string,
-    options?: TTSOptions,
-  ): Promise<TTSResult> {
+  async synthesize(text: string, options?: TTSOptions): Promise<TTSResult> {
     if (!text || text.trim().length === 0) {
       throw new Error("TTS text cannot be empty");
     }

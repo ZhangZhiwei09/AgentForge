@@ -13,7 +13,9 @@ describe("AuthService", () => {
   // Clean up test user after all tests
   afterAll(async () => {
     try {
-      const user = await prisma.user.findUnique({ where: { email: TEST_EMAIL } });
+      const user = await prisma.user.findUnique({
+        where: { email: TEST_EMAIL },
+      });
       if (user) {
         await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
         await prisma.apiKey.deleteMany({ where: { userId: user.id } });
@@ -42,7 +44,9 @@ describe("AuthService", () => {
     });
 
     it("should store password as hash, not plaintext", async () => {
-      const user = await prisma.user.findUnique({ where: { email: TEST_EMAIL } });
+      const user = await prisma.user.findUnique({
+        where: { email: TEST_EMAIL },
+      });
       expect(user).toBeDefined();
       expect(user!.passwordHash).toBeTruthy();
       expect(user!.passwordHash).not.toBe(TEST_PASSWORD);
@@ -73,7 +77,10 @@ describe("AuthService", () => {
 
   describe("validateToken", () => {
     it("should validate a valid access token", async () => {
-      const { accessToken } = await authService.signIn(TEST_EMAIL, TEST_PASSWORD);
+      const { accessToken } = await authService.signIn(
+        TEST_EMAIL,
+        TEST_PASSWORD,
+      );
       const user = await authService.validateToken(accessToken);
       expect(user).toBeDefined();
       expect(user!.email).toBe(TEST_EMAIL);
@@ -93,14 +100,17 @@ describe("AuthService", () => {
   describe("refreshAccessToken", () => {
     // Clean up tokens from previous tests before starting
     beforeEach(async () => {
-      const user = await prisma.user.findUnique({ where: { email: TEST_EMAIL } });
+      const user = await prisma.user.findUnique({
+        where: { email: TEST_EMAIL },
+      });
       if (user) {
         await prisma.refreshToken.deleteMany({ where: { userId: user.id } });
       }
     });
 
     it("should refresh access token with valid refresh token", async () => {
-      const { refreshToken, accessToken: oldAccessToken } = await authService.signIn(TEST_EMAIL, TEST_PASSWORD);
+      const { refreshToken, accessToken: oldAccessToken } =
+        await authService.signIn(TEST_EMAIL, TEST_PASSWORD);
       // Small delay to ensure different JWT iat
       await new Promise((r) => setTimeout(r, 1100));
       const result = await authService.refreshAccessToken(refreshToken);
@@ -111,7 +121,10 @@ describe("AuthService", () => {
 
     it("should reject already-used refresh token", async () => {
       // Fresh signIn to get a clean token
-      const { refreshToken } = await authService.signIn(TEST_EMAIL, TEST_PASSWORD);
+      const { refreshToken } = await authService.signIn(
+        TEST_EMAIL,
+        TEST_PASSWORD,
+      );
       // Use it once — this revokes the stored token
       await authService.refreshAccessToken(refreshToken);
       // Second use of the SAME JWT should fail
@@ -121,10 +134,13 @@ describe("AuthService", () => {
     });
 
     it("should reject access token used as refresh token", async () => {
-      const { accessToken } = await authService.signIn(TEST_EMAIL, TEST_PASSWORD);
-      await expect(
-        authService.refreshAccessToken(accessToken),
-      ).rejects.toThrow("Invalid refresh token");
+      const { accessToken } = await authService.signIn(
+        TEST_EMAIL,
+        TEST_PASSWORD,
+      );
+      await expect(authService.refreshAccessToken(accessToken)).rejects.toThrow(
+        "Invalid refresh token",
+      );
     });
   });
 
@@ -136,7 +152,9 @@ describe("AuthService", () => {
     });
 
     it("should return null for non-existent user", async () => {
-      const user = await authService.getUser("00000000-0000-0000-0000-000000000000");
+      const user = await authService.getUser(
+        "00000000-0000-0000-0000-000000000000",
+      );
       expect(user).toBeNull();
     });
   });
@@ -180,7 +198,10 @@ describe("AuthService", () => {
 
   describe("signOut", () => {
     it("should revoke refresh token", async () => {
-      const { refreshToken } = await authService.signIn(TEST_EMAIL, TEST_PASSWORD);
+      const { refreshToken } = await authService.signIn(
+        TEST_EMAIL,
+        TEST_PASSWORD,
+      );
       await authService.revokeRefreshToken(refreshToken);
       await expect(
         authService.refreshAccessToken(refreshToken),

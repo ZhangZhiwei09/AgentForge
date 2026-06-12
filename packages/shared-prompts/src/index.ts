@@ -1,17 +1,17 @@
 export interface Prompt {
-    id: string;
-    name: string;
-    content: string;
-    version: string;
-    tags: string[];
+  id: string;
+  name: string;
+  content: string;
+  version: string;
+  tags: string[];
 }
 
 export const system_prompt: Prompt = {
-    id: "system-default",
-    name: "Default System Prompt",
-    version: "1.0.0",
-    tags: ["system", "default"],
-    content: `你是一个乐于助人的 AI 助手。请提供清晰、准确、结构良好的回答。
+  id: "system-default",
+  name: "Default System Prompt",
+  version: "1.0.0",
+  tags: ["system", "default"],
+  content: `你是一个乐于助人的 AI 助手。请提供清晰、准确、结构良好的回答。
 
 准则：
 - 直接简洁地回答问题
@@ -22,15 +22,15 @@ export const system_prompt: Prompt = {
 };
 
 export const chat_prompt_template = (user_message: string): string => {
-    return user_message;
+  return user_message;
 };
 
 export function getPrompt(id: string): Prompt | undefined {
-    return registry[id];
+  return registry[id];
 }
 
 export function listPrompts(): Prompt[] {
-    return Object.values(registry);
+  return Object.values(registry);
 }
 
 export const react_system_prompt: Prompt = {
@@ -75,6 +75,6 @@ export const react_system_prompt: Prompt = {
 };
 
 const registry: Record<string, Prompt> = {
-    [system_prompt.id]: system_prompt,
-    [react_system_prompt.id]: react_system_prompt,
+  [system_prompt.id]: system_prompt,
+  [react_system_prompt.id]: react_system_prompt,
 };
