@@ -2,6 +2,7 @@
 // Exposed at GET /api/metrics for Prometheus scraping
 import {
   Counter,
+  Gauge,
   Histogram,
   Registry,
   collectDefaultMetrics,
@@ -62,6 +63,21 @@ export const toolCallsTotal = new Counter({
   name: "tool_calls_total",
   help: "Total number of tool executions",
   labelNames: ["tool_name", "status"], // status = success | error | timeout
+  registers: [registry],
+});
+
+export const toolExecutionDurationMs = new Histogram({
+  name: "tool_execution_duration_ms",
+  help: "Tool execution duration in milliseconds",
+  labelNames: ["tool_name"],
+  buckets: [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000, 30000, 60000],
+  registers: [registry],
+});
+
+export const circuitBreakerState = new Gauge({
+  name: "circuit_breaker_state",
+  help: "Circuit breaker state per tool (0=closed, 1=open)",
+  labelNames: ["tool_name"],
   registers: [registry],
 });
 

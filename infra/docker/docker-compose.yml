@@ -106,6 +106,14 @@ services:
     env_file:
       - ../../apps/server/.env
 
+  # ── Code Execution Sandbox (build-only, not running) ─────
+  sandbox:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.sandbox
+    image: agentforge-sandbox:latest
+    command: ["echo", "Sandbox image built"]
+
 volumes:
   pgdata:
   pgadmin_data:

@@ -29,4 +29,15 @@ export const settings = {
   port: parseInt(process.env.PORT || "8000", 10),
   // Redis 连接 URL（可选，用于限流存储等场景）
   redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
+  // 代码执行沙箱配置（Docker 容器中执行 Python/JavaScript）
+  sandboxImage: process.env.SANDBOX_IMAGE || "agentforge-sandbox:latest",
+  sandboxTimeoutSec: parseInt(process.env.SANDBOX_TIMEOUT_SEC || "60", 10),
+  sandboxMemoryMb: parseInt(process.env.SANDBOX_MEMORY_MB || "256", 10),
+  sandboxCpuShares: parseInt(process.env.SANDBOX_CPU_SHARES || "512", 10), // 0.5 CPU
+  // 语音 Agent (V5) — 复用 openaiApiKey，无需额外密钥
+  voiceEnabled: process.env.VOICE_ENABLED !== "false",
+  asrModel: process.env.ASR_MODEL || "whisper-1",
+  ttsModel: process.env.TTS_MODEL || "tts-1",
+  ttsVoice: process.env.TTS_VOICE || "alloy",
+  ttsSpeed: parseFloat(process.env.TTS_SPEED || "1.0"),
 };

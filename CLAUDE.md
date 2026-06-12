@@ -143,15 +143,17 @@ Browser (React) ←SSE/HTTP→ Hono (8000) → LLMProvider (abstract) → OpenAI
 
 10. **DB schema** uses Prisma with `@@map`/`@map` for snake_case column names. IDs are `@db.VarChar(36)` (not UUID type), so UUIDs are generated in application code.
 
-11. **Tool Calling** (`apps/server/src/tools/`): Server-side multi-round tool calling loop in `ChatService.streamChat()` (max 5 rounds). Tools are registered via `ToolRegistry` singleton and sent to LLM only when explicitly requested via `tools` param. The SSE protocol extends with `tool_call` and `tool_result` event types. Built-in tools include `get_current_time`, `calculator`, `web_search` (Tavily API), `http_request`, `file_read`, `file_write`, `file_search`. Each tool has riskLevel, timeout, and optional approval requirement. Circuit breaker trips after 5 consecutive failures (60s cooldown). The `LLMProvider` interface was extended with `ChatMessage` type (supporting `tool_calls` and `tool_call_id` fields) and an optional `tools` parameter.
+11. **Tool Calling + P1-6 Tool Ecosystem ✅** (`apps/server/src/tools/`): 10 production tools — `get_current_time`, `calculator`, `web_search` (Tavily API), `http_request`, `file_read`, `file_write`, `file_search`, `db_query` (read-only SQL via Prisma), `web_fetch` (URL content retrieval), `code_execute` (Docker sandbox, supports Python/JavaScript). Server-side multi-round tool calling loop in `ChatService.streamChat()` (max 5 rounds). Tools are registered via `ToolRegistry` singleton and sent to LLM only when explicitly requested via `tools` param. Each tool has riskLevel, timeout, optional requireApproval, and sandbox flag. Circuit breaker trips after 5 consecutive failures (60s cooldown). Prometheus metrics: `tool_calls_total`, `tool_execution_duration_ms`, `circuit_breaker_state`. Docker sandbox (`apps/server/src/services/sandbox.ts`) provides isolated code execution with no network, read-only filesystem, 256MB memory limit, and 60s timeout. Build sandbox image: `docker build -t agentforge-sandbox:latest -f infra/docker/Dockerfile.sandbox .`
 
 12. **Agent Kernel (P1-3 ✅ + P1-4 ✅):** `AgentService` (`apps/server/src/services/agent.ts`) implements ReAct (Reasoning + Acting) loop with structured JSON decision output. Agent sessions are persisted in `agent_sessions` table with full scratchpad of reasoning steps. Agent panel in frontend shows reasoning chain (observation → analysis → plan → decision → result). SSE protocol extended with `agent_think`, `agent_act`, `agent_observe`, `agent_respond`, `agent_ask_user`, `agent_done` event types. Supports max iterations (default 10), ask_user pauses, and graceful error handling.
 
-13. **Testing (P0-3 ✅):** 42 tests across 6 test files — AuthService (20 tests), AgentService (12 tests), AgentService Approval/P1-5 (6 tests), ToolRegistry (11 tests), BM25 (5 tests). Run via `pnpm test` in server package. (Auth tests require test DB config.)
+13. **Testing (P0-3 ✅):** 12 test files with 159 tests total (132 pass, 20 auth integration tests require test DB, 7 skipped). Key files: AuthService (20), ToolRegistry (12+), AgentService (12), AgentApproval/P1-5 (6), ChatService (12), MemoryEngine (14), KnowledgeService, BM25 (5), OpenAI provider (13), DeepSeek provider (12), customer-chat-eval, rate-limit-store. Run via `pnpm test` in server package. (Auth integration tests require test DB config.)
 
 14. **Content Safety (P0-5 ✅):** Prompt injection detection middleware with 20+ pattern rules, message length limits (16k chars), and Zod validation on all input routes.
 
 15. **Observability (P1-2 ✅):** Prometheus metrics at `GET /api/metrics` (HTTP request count/duration, LLM call/token counts, tool execution, memory extraction, Milvus search latency). OpenTelemetry tracing with conditional OTLP export to Jaeger (enable via `OTEL_ENABLED=true`). Grafana dashboard template at `apps/server/dashboards/agentforge.json`.
+
+16. **Voice Agent (V5 ✅):** WebSocket-based real-time voice via `WS /api/voice/stream`. Pipeline: Browser PCM → VAD → WebSocket → ASR (Whisper) → LLM (ChatService) → TTS (OpenAI, 6 voices) → MP3 playback. `VoiceService` (`apps/server/src/services/voice.ts`) manages turn state machine with `AbortController`-based interruption. Audio providers (`apps/server/src/services/audio-providers.ts`) follow lazy registry pattern. Voice sessions in `voice_sessions` table. Frontend: `VoicePanel` with mic, waveform, voice selector, transcript. HTTP: `POST /api/voice/transcribe`, `POST /api/voice/synthesize`, `GET /api/voice/voices`. Backward compatible — text chat unaffected.
 
 
 ### Keeping CLAUDE.md in Sync with plan.md
@@ -178,14 +180,14 @@ The `plan.md` defines the full V1→V10 + P0-P2 roadmap. Completed phases are ma
 - **P1-3 Agent Reasoning:** ✅ ReAct loop with structured decision output
 - **P1-4 Working Memory:** ✅ Agent scratchpad for multi-step task context
 - **P1-5 Human-in-the-Loop:** ✅ Approval gates for high-risk tool operations with 5-min timeout auto-reject, audit log
-- **P1-6 Tool Ecosystem:** 🔄 7 production tools with timeouts/circuit-breakers (code sandbox pending)
+- **P1-6 Tool Ecosystem:** ✅ 10 production tools with Docker sandbox, circuit-breakers, and Prometheus metrics
 
 **Agent Capabilities:**
 - **V1 ChatGPT Clone:** Multi-turn chat, streaming, model switching, provider abstraction ✅
 - **V2 Memory:** PostgreSQL + Milvus for long-term memory ✅
 - **V3 RAG:** Document ingestion, hybrid search, knowledge UI, customer chat ✅
 - **V4 Tool Calling:** Tool registry and execution engine ✅
-- **V5 Voice Agent:** WebSocket real-time audio, ASR/TTS, interruption handling
+- **V5 Voice Agent:** ✅ WebSocket real-time audio, Whisper ASR, OpenAI TTS (6 voices), VAD, interruption handling
 - **V6 Workflow Engine:** DAG-based orchestration, checkpoint/resume, human approval nodes
 - **V9 Multi-Agent:** Role-based agent teams, message bus, 3 collaboration patterns
 - **V10 MCP Ecosystem:** MCP Server + Client, dynamic tool discovery, hot-reload

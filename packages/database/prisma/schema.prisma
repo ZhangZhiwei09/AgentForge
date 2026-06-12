@@ -71,6 +71,7 @@ model Conversation {
   agentSessions  AgentSession[]
   ratings        SatisfactionRating[]
   approvals      AgentApproval[]
+  voiceSessions  VoiceSession[]
 
   @@index([sessionId], map: "ix_conversations_session_id")
   @@index([userId], map: "ix_conversations_user_id")
@@ -228,6 +229,23 @@ model SatisfactionRating {
 
   @@index([conversationId], map: "ix_satisfaction_ratings_conversation_id")
   @@map("satisfaction_ratings")
+}
+
+model VoiceSession {
+  id               String       @id @db.VarChar(36)
+  conversationId   String       @map("conversation_id") @db.VarChar(36)
+  status           String       @default("active") @db.VarChar(20)
+  audioDurationSec Int          @default(0) @map("audio_duration_sec")
+  asrTokenCount    Int          @default(0) @map("asr_token_count")
+  ttsCharCount     Int          @default(0) @map("tts_char_count")
+  transcript       Json         @default("[]")
+  voice            String?      @db.VarChar(32)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId], map: "ix_voice_sessions_conversation_id")
+  @@map("voice_sessions")
 }
 
 model alembic_version {

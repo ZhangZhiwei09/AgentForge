@@ -14,6 +14,8 @@ toolRoutes.get("/api/tools", (c) => {
     timeout_ms: t.timeout,
     require_approval: t.requireApproval,
     category: t.category,
+    sandbox: t.sandbox || false,
+    parallelizable: t.parallelizable,
   }));
 
   const circuitBreakers = toolRegistry.getCircuitBreakerStates();

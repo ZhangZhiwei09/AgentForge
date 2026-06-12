@@ -19,7 +19,7 @@ P0 Platform Foundation  ✅ 认证 / 测试 / 日志 / CI
 ↓
 P1 Agent Kernel         ✅ 推理 / 规划 / 工作内存 (P1-3 ✅ P1-4 ✅ P1-5 ✅ P1-6 ✅, P1-1 ✅, P1-2 ✅)
 ↓
-V5 Voice Agent
+V5 Voice Agent         ✅
 ↓
 V6 Workflow Engine
 ↓
@@ -945,13 +945,13 @@ const authMiddleware = createMiddleware(async (c, next) => {
 
 ### 验收标准
 
-- [ ] 用户注册/登录 API 完成（JWT + bcrypt）
-- [ ] Refresh Token 轮转机制完成
-- [ ] API Key 管理完成（CRUD + 吊销）
-- [ ] Auth 中间件注入用户上下文到所有路由
-- [ ] 现有 API 全部迁移为 per-user 数据隔离（conversation/memory/knowledge 按 user_id 过滤）
-- [ ] 前端登录/注册页面完成
-- [ ] 前端 Auth 状态管理（Zustand store + 请求拦截器自动附带 Token）
+- [x] 用户注册/登录 API 完成（JWT + bcrypt）
+- [x] Refresh Token 轮转机制完成
+- [x] API Key 管理完成（CRUD + 吊销）
+- [x] Auth 中间件注入用户上下文到所有路由
+- [x] 现有 API 全部迁移为 per-user 数据隔离（conversation/memory/knowledge 按 user_id 过滤）
+- [x] 前端登录/注册页面完成
+- [x] 前端 Auth 状态管理（Zustand store + 请求拦截器自动附带 Token）
 
 ---
 
@@ -1003,11 +1003,11 @@ app.use("*", async (c, next) => {
 
 ### 验收标准
 
-- [ ] `packages/logger` 共享包创建完成（pino 封装）
-- [ ] Request ID 中间件完成，自动注入到所有日志
-- [ ] 关键路径日志替换完成：ChatService、MemoryEngine、KnowledgeService、ToolRegistry
-- [ ] 日志级别分级：正常流 info，异常 warn/error，LLM 调用 debug
-- [ ] 前端 Console 日志替换为分级日志（开发环境输出，生产环境抑制）
+- [x] `packages/logger` 共享包创建完成（pino 封装）
+- [x] Request ID 中间件完成，自动注入到所有日志
+- [x] 关键路径日志替换完成：ChatService、MemoryEngine、KnowledgeService、ToolRegistry
+- [x] 日志级别分级：正常流 info，异常 warn/error，LLM 调用 debug
+- [x] 前端 Console 日志替换为分级日志（开发环境输出，生产环境抑制）
 
 ---
 
@@ -1061,13 +1061,13 @@ app.use("*", async (c, next) => {
 
 ### 验收标准
 
-- [ ] vitest 配置完成，`pnpm test` 可运行
-- [ ] `packages/database` 测试辅助工具（测试数据库初始化/清理）完成
-- [ ] ToolRegistry 单元测试覆盖 ≥ 90%
-- [ ] ChatService 集成测试覆盖核心流程（含 Mock Provider）
-- [ ] MemoryEngine 集成测试覆盖 CRUD + 搜索
-- [ ] API 路由测试覆盖所有端点（至少 happy path + 错误场景各 1 个）
-- [ ] `pnpm test` 在 CI 中运行（见 P0-4）
+- [x] vitest 配置完成，`pnpm test` 可运行
+- [x] `packages/database` 测试辅助工具（测试数据库初始化/清理）完成
+- [x] ToolRegistry 单元测试覆盖 ≥ 90%
+- [x] ChatService 集成测试覆盖核心流程（含 Mock Provider）
+- [x] MemoryEngine 集成测试覆盖 CRUD + 搜索
+- [x] API 路由测试覆盖所有端点（至少 happy path + 错误场景各 1 个）
+- [x] `pnpm test` 在 CI 中运行（见 P0-4）
 
 ---
 
@@ -1123,12 +1123,12 @@ jobs:
 
 ### 验收标准
 
-- [ ] `.github/workflows/ci.yml` 创建并通过
-- [ ] `pnpm typecheck` 全量通过
-- [ ] `pnpm lint` 配置完成（ESLint flat config）
-- [ ] `pnpm format --check` 配置完成（Prettier）
-- [ ] `pnpm test` 在 CI 中通过
-- [ ] PR 门禁：所有 Quality 检查必须通过才能合并
+- [x] `.github/workflows/ci.yml` 创建并通过
+- [x] `pnpm typecheck` 全量通过
+- [x] `pnpm lint` 配置完成（ESLint flat config）
+- [x] `pnpm format --check` 配置完成（Prettier）
+- [x] `pnpm test` 在 CI 中通过
+- [x] PR 门禁：所有 Quality 检查必须通过才能合并
 
 ---
 
@@ -1171,11 +1171,11 @@ app.use("/api/chat", rateLimiter({
 
 ### 验收标准
 
-- [ ] 全局 Rate Limiting 中间件完成
-- [ ] Chat API 特殊 Rate Limiting 完成（更高优先级保护）
-- [ ] 所有 POST/PUT/PATCH 路由有 Zod 参数校验
-- [ ] 输入长度限制和特殊字符转义
-- [ ] Rate Limit 超限时返回标准 `429 Too Many Requests` + Retry-After 头
+- [x] 全局 Rate Limiting 中间件完成
+- [x] Chat API 特殊 Rate Limiting 完成（更高优先级保护）
+- [x] 所有 POST/PUT/PATCH 路由有 Zod 参数校验
+- [x] 输入长度限制和特殊字符转义
+- [x] Rate Limit 超限时返回标准 `429 Too Many Requests` + Retry-After 头
 
 ---
 
@@ -1238,13 +1238,13 @@ await memoryQueue.add("extract", {
 
 ### 验收标准
 
-- [ ] Redis 容器添加到 `infra/docker/compose.yml`
-- [ ] BullMQ 队列创建完成（memory-extraction + knowledge-ingestion）
-- [ ] Worker 进程独立启动（`pnpm server:worker`）
-- [ ] ChatService 中记忆提取改为异步投递
-- [ ] 知识库文档摄取改为异步投递
-- [ ] Bull Board 监控面板集成到 Debug Panel
-- [ ] 向后兼容：Worker 不可用时不影响 Chat 主流程（graceful degradation）
+- [x] Redis 容器添加到 `infra/docker/compose.yml`
+- [x] BullMQ 队列创建完成（memory-extraction + knowledge-ingestion）
+- [x] Worker 进程独立启动（`pnpm server:worker`）
+- [x] ChatService 中记忆提取改为异步投递
+- [x] 知识库文档摄取改为异步投递
+- [x] Bull Board 监控面板集成到 Debug Panel
+- [x] 向后兼容：Worker 不可用时不影响 Chat 主流程（graceful degradation）
 
 ---
 
@@ -1399,12 +1399,12 @@ class AgentService {
 
 ### 验收标准
 
-- [ ] AgentService 实现完成，支持 ReAct 循环
-- [ ] 结构化决策 JSON 输出 + Zod 校验
-- [ ] System Prompt 模板注册到 `shared-prompts`
-- [ ] 前端流式渲染适配 Agent 事件类型（think/act/observe/respond）
-- [ ] Debug Panel 展示 Agent 推理步骤（observation → analysis → plan → decision）
-- [ ] 向后兼容：无 tools 参数时回退到普通 Chat 模式
+- [x] AgentService 实现完成，支持 ReAct 循环
+- [x] 结构化决策 JSON 输出 + Zod 校验
+- [x] System Prompt 模板注册到 `shared-prompts`
+- [x] 前端流式渲染适配 Agent 事件类型（think/act/observe/respond）
+- [x] Debug Panel 展示 Agent 推理步骤（observation → analysis → plan → decision）
+- [x] 向后兼容：无 tools 参数时回退到普通 Chat 模式
 
 ---
 
@@ -1469,12 +1469,12 @@ Task Complete
 
 ### 验收标准
 
-- [ ] `agent_sessions` 数据模型 + Prisma 迁移完成
-- [ ] AgentService 每步自动追加 scratchpad
-- [ ] 每轮推理时自动注入 scratchpad 到上下文
-- [ ] API: `GET /api/agent-sessions` 列出历史 Agent 任务
-- [ ] API: `GET /api/agent-sessions/:id` 查看任务详情和推理步骤
-- [ ] 前端：Agent Session 面板展示推理链（类似 Debug Panel 的 Agent 视图）
+- [x] `agent_sessions` 数据模型 + Prisma 迁移完成
+- [x] AgentService 每步自动追加 scratchpad
+- [x] 每轮推理时自动注入 scratchpad 到上下文
+- [x] API: `GET /api/agent-sessions` 列出历史 Agent 任务
+- [x] API: `GET /api/agent-sessions/:id` 查看任务详情和推理步骤
+- [x] 前端：Agent Session 面板展示推理链（类似 Debug Panel 的 Agent 视图）
 
 ---
 
@@ -1522,12 +1522,12 @@ Body: { "action": "approve" | "reject" | "modify", "modified_args": {...} }
 
 ### 验收标准
 
-- [ ] 工具注册扩展 `riskLevel` 和 `requireApproval` 字段
-- [ ] Agent 循环中的审批暂停/恢复机制
-- [ ] SSE 协议扩展 `approval_request` / `approval_result` 事件
-- [ ] 前端审批卡片 UI（显示工具名、参数、风险等级）
-- [ ] 审批超时处理（默认 5 分钟无响应自动拒绝）
-- [ ] 审批历史记录审计日志
+- [x] 工具注册扩展 `riskLevel` 和 `requireApproval` 字段
+- [x] Agent 循环中的审批暂停/恢复机制
+- [x] SSE 协议扩展 `approval_request` / `approval_result` 事件
+- [x] 前端审批卡片 UI（显示工具名、参数、风险等级）
+- [x] 审批超时处理（默认 5 分钟无响应自动拒绝）
+- [x] 审批历史记录审计日志
 
 ---
 
@@ -1585,13 +1585,13 @@ Body: { "action": "approve" | "reject" | "modify", "modified_args": {...} }
 
 ### 验收标准
 
-- [ ] 工具注册扩展：`timeout`、`riskLevel`、`requireApproval`、`sandbox` 字段
-- [ ] 至少 6 个新工具实现并注册
-- [ ] Docker 沙箱集成完成（code_execute 工具）
-- [ ] 工具超时机制完成（每个工具独立 timeout）
-- [ ] 熔断器完成（连续失败自动暂停）
-- [ ] Web Search 真实实现（SerpAPI 或 Tavily 集成）
-- [ ] 工具执行指标记录（调用次数、成功率、平均延迟）
+- [x] 工具注册扩展：`timeout`、`riskLevel`、`requireApproval`、`sandbox` 字段
+- [x] 至少 6 个新工具实现并注册
+- [x] Docker 沙箱集成完成（code_execute 工具）
+- [x] 工具超时机制完成（每个工具独立 timeout）
+- [x] 熔断器完成（连续失败自动暂停）
+- [x] Web Search 真实实现（SerpAPI 或 Tavily 集成）
+- [x] 工具执行指标记录（调用次数、成功率、平均延迟）
 
 
 # 十七、V5 Voice Agent 语音交互
@@ -1694,14 +1694,14 @@ POST /api/voice/synthesize    # 提交文字 → 返回音频
 
 ## 7. 验收标准
 
-- [ ] WebSocket 端点 `/api/voice/stream` 完成
-- [ ] ASR 集成完成（Whisper API，支持中英文）
-- [ ] TTS 集成完成（至少 3 种音色可选）
-- [ ] VAD 语音活动检测集成（前端）
-- [ ] 打断机制完成（AI 说话时可被用户打断）
-- [ ] 前端 Voice Panel 完成（麦克风按钮 + 波形可视化 + 状态指示）
-- [ ] 向后兼容：文本聊天模式不受影响
-- [ ] 语音对话历史可回看（自动保存 transcript）
+- [x] WebSocket 端点 `/api/voice/stream` 完成
+- [x] ASR 集成完成（Whisper API，支持中英文）
+- [x] TTS 集成完成（至少 3 种音色可选）
+- [x] VAD 语音活动检测集成（前端）
+- [x] 打断机制完成（AI 说话时可被用户打断）
+- [x] 前端 Voice Panel 完成（麦克风按钮 + 波形可视化 + 状态指示）
+- [x] 向后兼容：文本聊天模式不受影响
+- [x] 语音对话历史可回看（自动保存 transcript）
 
 
 # 十八、V6 Workflow Engine 工作流引擎
@@ -2279,4 +2279,4 @@ V1-V10 完成后，AgentForge 已经是一个功能完备的 Agent 平台。以�
 
 ## 健壮性说明
 
-本文档中所有带 `✅` 标记的阶段表示已完成并通过自我验证。P0/P1/P2 和 V5-V10 阶段的验收标准均为待完成状态。每个阶段的验收标准设计为可独立验证——任意阶段完成后即可合并到 main 分支，不依赖后续阶段。
+本文档中所有带 `✅` 标记的阶段表示已完成并通过自我验证。V5-V10 阶段的验收标准为待完成状态。每个阶段的验收标准设计为可独立验证——任意阶段完成后即可合并到 main 分支，不依赖后续阶段。

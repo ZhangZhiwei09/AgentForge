@@ -1,0 +1,25 @@
+# AgentForge Code Execution Sandbox
+# Minimal image with Python + Node.js runtimes, running as unprivileged user
+# Build: docker build -t agentforge-sandbox:latest -f infra/docker/Dockerfile.sandbox .
+
+FROM python:3.12-slim
+
+# Install Node.js 22 for JavaScript execution
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl gnupg ca-certificates && \
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Create unprivileged user (container runs with --read-only rootfs,
+# /tmp is mounted as tmpfs for scratch space)
+RUN useradd -m -s /bin/bash sandbox && \
+    mkdir -p /code /tmp && \
+    chown sandbox:sandbox /tmp
+
+# Switch to unprivileged user
+USER sandbox
+WORKDIR /home/sandbox
+
+# Default command (overridden at runtime with language-specific command)
+CMD ["echo", "AgentForge Sandbox ready"]

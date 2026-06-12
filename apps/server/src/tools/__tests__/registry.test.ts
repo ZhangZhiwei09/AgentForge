@@ -1,16 +1,24 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { toolRegistry } from "../registry.js";
 
 describe("ToolRegistry", () => {
   // ToolRegistry is a singleton — tests use the real instance
   // but the init() method is idempotent so it's safe
 
-  it("should register built-in tools on init", () => {
+  it("should register all built-in tools on init", () => {
     const names = toolRegistry.listNames();
     expect(names).toContain("get_current_time");
     expect(names).toContain("calculator");
     expect(names).toContain("web_search");
-    expect(names.length).toBeGreaterThanOrEqual(3);
+    expect(names).toContain("http_request");
+    expect(names).toContain("file_read");
+    expect(names).toContain("file_write");
+    expect(names).toContain("file_search");
+    // New P1-6 tools
+    expect(names).toContain("db_query");
+    expect(names).toContain("web_fetch");
+    expect(names).toContain("code_execute");
+    expect(names.length).toBeGreaterThanOrEqual(10);
   });
 
   it("should get definitions for enabled tools only", () => {
@@ -21,7 +29,7 @@ describe("ToolRegistry", () => {
 
   it("should get all definitions when no filter provided", () => {
     const defs = toolRegistry.getDefinitions();
-    expect(defs.length).toBeGreaterThanOrEqual(3);
+    expect(defs.length).toBeGreaterThanOrEqual(10);
   });
 
   it("should return empty array for unknown tool", () => {
@@ -74,11 +82,29 @@ describe("ToolRegistry", () => {
 
   it("should get all registered tools via getAll", () => {
     const all = toolRegistry.getAll();
-    expect(all.length).toBeGreaterThanOrEqual(3);
+    expect(all.length).toBeGreaterThanOrEqual(10);
     all.forEach((t) => {
       expect(t.definition).toBeDefined();
       expect(t.definition.function.name).toBeTruthy();
       expect(typeof t.execute).toBe("function");
     });
+  });
+
+  it("should have sandbox field on code_execute tool", () => {
+    const all = toolRegistry.getAll();
+    const codeExec = all.find((t) => t.definition.function.name === "code_execute");
+    expect(codeExec).toBeDefined();
+    expect(codeExec!.sandbox).toBe(true);
+    expect(codeExec!.riskLevel).toBe("destructive");
+    expect(codeExec!.requireApproval).toBe(true);
+  });
+
+  it("should have correct metadata on db_query tool", () => {
+    const all = toolRegistry.getAll();
+    const dbQuery = all.find((t) => t.definition.function.name === "db_query");
+    expect(dbQuery).toBeDefined();
+    expect(dbQuery!.riskLevel).toBe("read_only");
+    expect(dbQuery!.category).toBe("database");
+    expect(dbQuery!.requireApproval).toBe(false);
   });
 });

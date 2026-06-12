@@ -17,6 +17,7 @@ import { customerChatRoutes } from "./routes/customer-chat.js";
 import { knowledgeRoutes } from "./routes/knowledge.js";
 import { toolRoutes } from "./routes/tools.js";
 import { agentRoutes } from "./routes/agent.js";
+import { voiceRoutes } from "./routes/voice.js";
 import { registerMetricsEndpoint } from "./observability/metrics.js";
 import type { AuthUser } from "@agentforge/shared-types";
 
@@ -63,6 +64,7 @@ export async function createApp() {
   app.route("/", knowledgeRoutes);       // /api/knowledge/*
   app.route("/", toolRoutes);            // /api/tools
   app.route("/", agentRoutes);           // /api/agent/*, /api/agent-sessions/*
+  app.route("/", voiceRoutes);          // /api/voice/*, WS /api/voice/stream
 
   // P1-1 Bull Board 监控面板 — 仅在 Redis 可用时挂载
   try {
