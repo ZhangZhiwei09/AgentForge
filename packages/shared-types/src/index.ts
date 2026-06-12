@@ -45,3 +45,23 @@ export type {
   AgentApprovalRequest,
   AgentStreamEvent,
 } from "./agent";
+export type {
+  VoiceClientMessage,
+  VoiceServerMessage,
+  VoiceAudioInput,
+  VoiceSpeechEnd,
+  VoiceInterrupt,
+  VoicePing,
+  VoiceTranscript,
+  VoiceResponseText,
+  VoiceAudioOutput,
+  VoiceInterruptedEvent,
+  VoiceDoneEvent,
+  VoiceErrorEvent,
+  VoiceStatusEvent,
+  TranscribeResponse,
+  SynthesizeRequest,
+  SynthesizeResponse,
+  VoiceSessionSummary,
+  VoiceProfile,
+} from "./voice";
