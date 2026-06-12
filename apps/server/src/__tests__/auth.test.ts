@@ -50,7 +50,7 @@ describe("AuthService", () => {
       expect(user).toBeDefined();
       expect(user!.passwordHash).toBeTruthy();
       expect(user!.passwordHash).not.toBe(TEST_PASSWORD);
-      expect(user!.passwordHash).toContain(":"); // salt:hash format
+      expect(user!.passwordHash).toMatch(/^\$2[ab]\$/); // bcrypt format
     });
   });
 
