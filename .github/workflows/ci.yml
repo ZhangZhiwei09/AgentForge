@@ -50,6 +50,11 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm db:generate
 
+      - name: Run Database Migrations
+        run: pnpm --filter @agentforge/database exec prisma migrate deploy
+        env:
+          DATABASE_URL: "postgresql://test:test@localhost:5434/agentforge_test"
+
       - name: Lint
         run: pnpm lint
 
