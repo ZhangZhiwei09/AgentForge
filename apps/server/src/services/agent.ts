@@ -239,61 +239,15 @@ export class AgentService {
           } else if (chunk.type === "tool_call" && chunk.tool_call) {
             const tc = chunk.tool_call;
             if (tc.name === "agent_decide") {
-              // Native tool calling: parse flattened arguments into decision
-              try {
-                const a = JSON.parse(tc.arguments);
-                const action: string = a.action || "respond";
-
-                let decision: AgentDecision;
-                switch (action) {
-                  case "tool_call":
-                    decision = {
-                      action: "tool_call",
-                      tool: String(a.tool || ""),
-                      args: (() => {
-                        try { return JSON.parse(a.args_json || "{}"); }
-                        catch { return {}; }
-                      })(),
-                      reason: String(a.reason || ""),
-                    };
-                    break;
-                  case "ask_user":
-                    decision = {
-                      action: "ask_user",
-                      question: String(a.question || ""),
-                      context: String(a.clarify_context || ""),
-                    };
-                    break;
-                  default: // respond
-                    decision = {
-                      action: "respond",
-                      content: String(a.content || ""),
-                      summary: String(a.summary || ""),
-                    };
-                }
-
-                agentDecision = {
+              agentDecision = this.parseAgentDecideFromArgs(tc.arguments, totalSteps);
+              // Clear any streamed text — the LLM shouldn't have emitted
+              // text when using tool calling, but clear as a safety measure
+              if (agentDecision && llmResponse.trim().length > 0) {
+                yield {
+                  type: "agent_clear_stream",
+                  message_id: streamMsgId,
                   step: totalSteps,
-                  observation: String(a.observation || ""),
-                  analysis: String(a.analysis || ""),
-                  plan: String(a.plan || ""),
-                  decision,
-                  timestamp: new Date().toISOString(),
                 };
-                // Clear any streamed text — the LLM shouldn't have emitted
-                // text when using tool calling, but clear as a safety measure
-                if (llmResponse.trim().length > 0) {
-                  yield {
-                    type: "agent_clear_stream",
-                    message_id: streamMsgId,
-                    step: totalSteps,
-                  };
-                }
-              } catch {
-                logger.warn(
-                  { args: tc.arguments },
-                  "Failed to parse agent_decide tool arguments",
-                );
               }
             } else {
               // Real tool call — execute immediately for agent workflow
@@ -496,13 +450,9 @@ export class AgentService {
         }
 
         // No approval needed — execute directly
-        // Execute the tool
-        let toolResult: string;
-        try {
-          toolResult = await toolRegistry.execute(decision.tool, decision.args);
-        } catch (err) {
-          toolResult = `Error: ${err instanceof Error ? err.message : "Tool execution failed"}`;
-        }
+        const toolResult = await this.executeToolAndRecord(
+          decision.tool, decision.args, conversationMessages,
+        );
 
         // Yield observe event
         yield {
@@ -514,29 +464,6 @@ export class AgentService {
         // Record step in scratchpad
         step.result = toolResult;
         scratchpad.push(step);
-
-        // Add tool call + result to conversation context for next iteration
-        conversationMessages.push({
-          role: "assistant",
-          content: null,
-          tool_calls: [
-            {
-              id: randomUUID(),
-              type: "function",
-              function: {
-                name: decision.tool,
-                arguments: JSON.stringify(decision.args),
-              },
-            },
-          ],
-        });
-        conversationMessages.push({
-          role: "tool",
-          tool_call_id:
-            conversationMessages[conversationMessages.length - 1].tool_calls![0]
-              .id,
-          content: toolResult,
-        });
 
       } else if (decision.action === "ask_user") {
         // Agent needs clarification — pause and wait
@@ -658,7 +585,7 @@ export class AgentService {
 
       // Update session status to running
       await this.saveSession(
-        { id: sessionId, conversationId, task, status: "running", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+        this.sessionRecord(sessionId, conversationId, task),
         scratchpad,
         "running",
         null,
@@ -687,45 +614,10 @@ export class AgentService {
           } else if (chunk.type === "tool_call" && chunk.tool_call) {
             const tc = chunk.tool_call;
             if (tc.name === "agent_decide") {
-              try {
-                const a = JSON.parse(tc.arguments);
-                const action = a.action || "respond";
-                let decision: AgentDecision;
-                switch (action) {
-                  case "tool_call":
-                    decision = {
-                      action: "tool_call",
-                      tool: String(a.tool || ""),
-                      args: (() => { try { return JSON.parse(a.args_json || "{}"); } catch { return {}; } })(),
-                      reason: String(a.reason || ""),
-                    };
-                    break;
-                  case "ask_user":
-                    decision = {
-                      action: "ask_user",
-                      question: String(a.question || ""),
-                      context: String(a.clarify_context || ""),
-                    };
-                    break;
-                  default:
-                    decision = {
-                      action: "respond",
-                      content: String(a.content || ""),
-                      summary: String(a.summary || ""),
-                    };
-                }
-                agentDecision = {
-                  step: totalSteps,
-                  observation: String(a.observation || ""),
-                  analysis: String(a.analysis || ""),
-                  plan: String(a.plan || ""),
-                  decision,
-                  timestamp: new Date().toISOString(),
-                };
-                if (llmResponse.trim().length > 0) {
-                  yield { type: "agent_clear_stream", message_id: streamMsgId, step: totalSteps };
-                }
-              } catch { /* fall through to text parsing */ }
+              agentDecision = this.parseAgentDecideFromArgs(tc.arguments, totalSteps);
+              if (agentDecision && llmResponse.trim().length > 0) {
+                yield { type: "agent_clear_stream", message_id: streamMsgId, step: totalSteps };
+              }
             }
           }
         }
@@ -733,7 +625,7 @@ export class AgentService {
         const msg = err instanceof Error ? err.message : "Unknown error";
         yield { type: "agent_error", error: `LLM error: ${msg}`, step: totalSteps };
         await this.saveSession(
-          { id: sessionId, conversationId, task, status: "failed", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+          this.sessionRecord(sessionId, conversationId, task),
           scratchpad, "failed", null,
         );
         return;
@@ -748,7 +640,7 @@ export class AgentService {
         });
         yield { type: "agent_respond", content: llmResponse, summary: "Agent completed (unstructured)", message_id: streamMsgId };
         await this.saveSession(
-          { id: sessionId, conversationId, task, status: "completed", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+          this.sessionRecord(sessionId, conversationId, task),
           scratchpad, "completed", "Task completed",
         );
         yield { type: "agent_done", total_steps: totalSteps, final_summary: "Task completed", session_id: sessionId };
@@ -769,7 +661,7 @@ export class AgentService {
         scratchpad.push(step);
         yield { type: "agent_respond", content: decision.content, summary: decision.summary, message_id: streamMsgId };
         await this.saveSession(
-          { id: sessionId, conversationId, task, status: "completed", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+          this.sessionRecord(sessionId, conversationId, task),
           scratchpad, "completed", decision.summary,
         );
         yield { type: "agent_done", total_steps: totalSteps, final_summary: decision.summary, session_id: sessionId };
@@ -812,7 +704,7 @@ export class AgentService {
           }
 
           await this.saveSession(
-            { id: sessionId, conversationId, task, status: "paused", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+            this.sessionRecord(sessionId, conversationId, task),
             scratchpad, "paused", null,
           );
 
@@ -830,24 +722,16 @@ export class AgentService {
           return;
         }
 
-        let toolResult: string;
-        try {
-          toolResult = await toolRegistry.execute(decision.tool, decision.args);
-        } catch (err) {
-          toolResult = `Error: ${err instanceof Error ? err.message : "Tool execution failed"}`;
-        }
+        const toolResult = await this.executeToolAndRecord(
+          decision.tool, decision.args, conversationMessages,
+        );
         yield { type: "agent_observe", step: totalSteps, result: toolResult };
         step.result = toolResult;
         scratchpad.push(step);
-        conversationMessages.push({
-          role: "assistant", content: null,
-          tool_calls: [{ id: randomUUID(), type: "function", function: { name: decision.tool, arguments: JSON.stringify(decision.args) } }],
-        });
-        conversationMessages.push({ role: "tool", tool_call_id: conversationMessages[conversationMessages.length - 1].tool_calls![0].id, content: toolResult });
       } else if (decision.action === "ask_user") {
         scratchpad.push(step);
         await this.saveSession(
-          { id: sessionId, conversationId, task, status: "paused", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+          this.sessionRecord(sessionId, conversationId, task),
           scratchpad, "paused", null,
         );
         yield { type: "agent_ask_user", question: decision.question, context: decision.context, session_id: sessionId };
@@ -933,7 +817,7 @@ export class AgentService {
 
       // Save session and continue loop
       await this.saveSession(
-        { id: sessionId, conversationId, task, status: "running", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+        this.sessionRecord(sessionId, conversationId, task),
         scratchpad, "running", null,
       );
 
@@ -1008,7 +892,7 @@ export class AgentService {
 
       // Save session as running and continue
       await this.saveSession(
-        { id: sessionId, conversationId, task, status: "running", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+        this.sessionRecord(sessionId, conversationId, task),
         scratchpad, "running", null,
       );
 
@@ -1042,7 +926,7 @@ export class AgentService {
 
       // Save session as running and continue
       await this.saveSession(
-        { id: sessionId, conversationId, task, status: "running", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+        this.sessionRecord(sessionId, conversationId, task),
         scratchpad, "running", null,
       );
 
@@ -1098,7 +982,7 @@ export class AgentService {
       logger.debug({ sessionId, iteration: totalSteps }, "Agent continue iteration");
 
       await this.saveSession(
-        { id: sessionId, conversationId, task, status: "running", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+        this.sessionRecord(sessionId, conversationId, task),
         scratchpad,
         "running",
         null,
@@ -1126,45 +1010,10 @@ export class AgentService {
           } else if (chunk.type === "tool_call" && chunk.tool_call) {
             const tc = chunk.tool_call;
             if (tc.name === "agent_decide") {
-              try {
-                const a = JSON.parse(tc.arguments);
-                const aAction = a.action || "respond";
-                let decision: AgentDecision;
-                switch (aAction) {
-                  case "tool_call":
-                    decision = {
-                      action: "tool_call",
-                      tool: String(a.tool || ""),
-                      args: (() => { try { return JSON.parse(a.args_json || "{}"); } catch { return {}; } })(),
-                      reason: String(a.reason || ""),
-                    };
-                    break;
-                  case "ask_user":
-                    decision = {
-                      action: "ask_user",
-                      question: String(a.question || ""),
-                      context: String(a.clarify_context || ""),
-                    };
-                    break;
-                  default:
-                    decision = {
-                      action: "respond",
-                      content: String(a.content || ""),
-                      summary: String(a.summary || ""),
-                    };
-                }
-                agentDecision = {
-                  step: totalSteps,
-                  observation: String(a.observation || ""),
-                  analysis: String(a.analysis || ""),
-                  plan: String(a.plan || ""),
-                  decision,
-                  timestamp: new Date().toISOString(),
-                };
-                if (llmResponse.trim().length > 0) {
-                  yield { type: "agent_clear_stream", message_id: streamMsgId, step: totalSteps };
-                }
-              } catch { /* fall through */ }
+              agentDecision = this.parseAgentDecideFromArgs(tc.arguments, totalSteps);
+              if (agentDecision && llmResponse.trim().length > 0) {
+                yield { type: "agent_clear_stream", message_id: streamMsgId, step: totalSteps };
+              }
             } else {
               // Real tool call — execute immediately
               let tcArgs: Record<string, unknown> = {};
@@ -1183,7 +1032,7 @@ export class AgentService {
         const msg = err instanceof Error ? err.message : "Unknown error";
         yield { type: "agent_error", error: `LLM error: ${msg}`, step: totalSteps };
         await this.saveSession(
-          { id: sessionId, conversationId, task, status: "failed", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+          this.sessionRecord(sessionId, conversationId, task),
           scratchpad, "failed", null,
         );
         return;
@@ -1196,7 +1045,7 @@ export class AgentService {
         });
         yield { type: "agent_respond", content: llmResponse, summary: "Agent completed (unstructured)", message_id: streamMsgId };
         await this.saveSession(
-          { id: sessionId, conversationId, task, status: "completed", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+          this.sessionRecord(sessionId, conversationId, task),
           scratchpad, "completed", "Task completed",
         );
         yield { type: "agent_done", total_steps: totalSteps, final_summary: "Task completed", session_id: sessionId };
@@ -1215,7 +1064,7 @@ export class AgentService {
         scratchpad.push(step);
         yield { type: "agent_respond", content: decision.content, summary: decision.summary, message_id: streamMsgId };
         await this.saveSession(
-          { id: sessionId, conversationId, task, status: "completed", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+          this.sessionRecord(sessionId, conversationId, task),
           scratchpad, "completed", decision.summary,
         );
         yield { type: "agent_done", total_steps: totalSteps, final_summary: decision.summary, session_id: sessionId };
@@ -1258,7 +1107,7 @@ export class AgentService {
           }
 
           await this.saveSession(
-            { id: sessionId, conversationId, task, status: "paused", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+            this.sessionRecord(sessionId, conversationId, task),
             scratchpad, "paused", null,
           );
 
@@ -1276,24 +1125,16 @@ export class AgentService {
           return;
         }
 
-        let toolResult: string;
-        try {
-          toolResult = await toolRegistry.execute(decision.tool, decision.args);
-        } catch (err) {
-          toolResult = `Error: ${err instanceof Error ? err.message : "Tool execution failed"}`;
-        }
+        const toolResult = await this.executeToolAndRecord(
+          decision.tool, decision.args, conversationMessages,
+        );
         yield { type: "agent_observe", step: totalSteps, result: toolResult };
         step.result = toolResult;
         scratchpad.push(step);
-        conversationMessages.push({
-          role: "assistant", content: null,
-          tool_calls: [{ id: randomUUID(), type: "function", function: { name: decision.tool, arguments: JSON.stringify(decision.args) } }],
-        });
-        conversationMessages.push({ role: "tool", tool_call_id: conversationMessages[conversationMessages.length - 1].tool_calls![0].id, content: toolResult });
       } else if (decision.action === "ask_user") {
         scratchpad.push(step);
         await this.saveSession(
-          { id: sessionId, conversationId, task, status: "paused", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+          this.sessionRecord(sessionId, conversationId, task),
           scratchpad, "paused", null,
         );
         yield { type: "agent_ask_user", question: decision.question, context: decision.context, session_id: sessionId };
@@ -1335,6 +1176,63 @@ export class AgentService {
     );
 
     return parts.join("\n");
+  }
+
+  /**
+   * Parse agent_decide tool call arguments into a structured AgentStep.
+   * Used by all ReAct loop methods to avoid duplicating the JSON parsing logic.
+   */
+  private parseAgentDecideFromArgs(
+    rawArgs: string,
+    totalSteps: number,
+  ): AgentStep | null {
+    try {
+      const a = JSON.parse(rawArgs);
+      const action: string = a.action || "respond";
+
+      let decision: AgentDecision;
+      switch (action) {
+        case "tool_call":
+          decision = {
+            action: "tool_call",
+            tool: String(a.tool || ""),
+            args: (() => {
+              try { return JSON.parse(a.args_json || "{}"); }
+              catch { return {}; }
+            })(),
+            reason: String(a.reason || ""),
+          };
+          break;
+        case "ask_user":
+          decision = {
+            action: "ask_user",
+            question: String(a.question || ""),
+            context: String(a.clarify_context || ""),
+          };
+          break;
+        default: // respond
+          decision = {
+            action: "respond",
+            content: String(a.content || ""),
+            summary: String(a.summary || ""),
+          };
+      }
+
+      return {
+        step: totalSteps,
+        observation: String(a.observation || ""),
+        analysis: String(a.analysis || ""),
+        plan: String(a.plan || ""),
+        decision,
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      logger.warn(
+        { args: rawArgs },
+        "Failed to parse agent_decide tool arguments",
+      );
+      return null;
+    }
   }
 
   /**
@@ -1383,6 +1281,62 @@ export class AgentService {
       );
       return null;
     }
+  }
+
+  /**
+   * Execute a tool and record the call + result in conversation messages.
+   * Shared by all ReAct loop methods to avoid duplicating tool execution logic.
+   */
+  private async executeToolAndRecord(
+    toolName: string,
+    args: Record<string, unknown>,
+    conversationMessages: ChatMessage[],
+  ): Promise<string> {
+    let result: string;
+    try {
+      result = await toolRegistry.execute(toolName, args);
+    } catch (err) {
+      result = `Error: ${err instanceof Error ? err.message : "Tool execution failed"}`;
+    }
+
+    conversationMessages.push({
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: randomUUID(),
+          type: "function" as const,
+          function: { name: toolName, arguments: JSON.stringify(args) },
+        },
+      ],
+    });
+    conversationMessages.push({
+      role: "tool",
+      tool_call_id: conversationMessages[conversationMessages.length - 1].tool_calls![0].id,
+      content: result,
+    });
+
+    return result;
+  }
+
+  /**
+   * Create a session record object used by saveSession across all loop methods.
+   */
+  private sessionRecord(
+    id: string,
+    conversationId: string,
+    task: string,
+  ) {
+    return {
+      id,
+      conversationId,
+      task,
+      status: "running" as string,
+      scratchpad: [] as AgentStep[],
+      finalSummary: null as string | null,
+      startedAt: new Date(),
+      completedAt: null as Date | null,
+    };
   }
 
   /**
