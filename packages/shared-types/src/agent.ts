@@ -22,6 +22,14 @@ export type AgentDecision =
 
 // ---- Agent Step (Scratchpad Entry) ----
 
+export interface AgentStepError {
+  category: "retryable" | "fatal" | "degradable";
+  message: string;
+  retried: boolean;
+  attempts?: number;
+  degradedTo?: string;
+}
+
 export interface AgentStep {
   step: number;
   observation: string;
@@ -30,6 +38,9 @@ export interface AgentStep {
   decision: AgentDecision;
   result?: string;
   timestamp: string;
+  error?: AgentStepError;
+  /** P0-3: Importance score for memory compression (higher = more likely to retain) */
+  importance?: number;
 }
 
 // ---- Agent Session ----
@@ -41,6 +52,8 @@ export interface AgentSessionDTO {
   status: "running" | "paused" | "completed" | "failed";
   scratchpad: AgentStep[];
   finalSummary?: string | null;
+  /** P0-3: Compressed summary of low-importance scratchpad steps (Chinese) */
+  compressedSummary?: string | null;
   startedAt: string;
   completedAt?: string | null;
 }
@@ -181,6 +194,27 @@ export interface AgentApprovalRequest {
   rejection_reason?: string;
 }
 
+// ---- P0-1 Error Recovery Event ----
+
+export interface AgentDegradedEvent {
+  type: "agent_degraded";
+  step: number;
+  original_tool: string;
+  alternative_tool?: string;
+  reason: string;
+  retried: boolean;
+  attempts?: number;
+}
+
+// ---- P0-2 Security Guard Event ----
+
+export interface AgentGuardBlockEvent {
+  type: "agent_guard_block";
+  step: number;
+  reason: string;
+  detail: string;
+}
+
 // Union type for all agent stream events
 export type AgentStreamEvent =
   | AgentMetaEvent
@@ -194,4 +228,6 @@ export type AgentStreamEvent =
   | AgentErrorEvent
   | AgentDoneEvent
   | AgentApprovalRequiredEvent
-  | AgentApprovalResultEvent;
+  | AgentApprovalResultEvent
+  | AgentDegradedEvent
+  | AgentGuardBlockEvent;

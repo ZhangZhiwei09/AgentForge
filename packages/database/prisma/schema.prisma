@@ -185,16 +185,17 @@ model KnowledgeInvertedIndex {
 }
 
 model AgentSession {
-  id             String       @id @db.VarChar(36)
-  conversationId String       @map("conversation_id") @db.VarChar(36)
-  task           String
-  status         String       @default("running") @db.VarChar(20)
-  scratchpad     Json         @default("[]")
-  finalSummary   String?      @map("final_summary")
-  startedAt      DateTime     @default(now()) @map("started_at") @db.Timestamptz(6)
-  completedAt    DateTime?    @map("completed_at") @db.Timestamptz(6)
-  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  approvals      AgentApproval[]
+  id                String       @id @db.VarChar(36)
+  conversationId    String       @map("conversation_id") @db.VarChar(36)
+  task              String
+  status            String       @default("running") @db.VarChar(20)
+  scratchpad        Json         @default("[]")
+  finalSummary      String?      @map("final_summary")
+  compressedSummary String?      @map("compressed_summary")
+  startedAt         DateTime     @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt       DateTime?    @map("completed_at") @db.Timestamptz(6)
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  approvals         AgentApproval[]
 
   @@index([conversationId], map: "ix_agent_sessions_conversation_id")
   @@map("agent_sessions")

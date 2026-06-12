@@ -41,6 +41,7 @@ export type {
 export type {
   AgentDecision,
   AgentStep,
+  AgentStepError,
   AgentSessionDTO,
   AgentRunRequest,
   AgentRespondRequest,
@@ -57,6 +58,8 @@ export type {
   AgentApprovalResultEvent,
   AgentApprovalDTO,
   AgentApprovalRequest,
+  AgentDegradedEvent,
+  AgentGuardBlockEvent,
   AgentStreamEvent,
 } from "./agent";
 export type {
