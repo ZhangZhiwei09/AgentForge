@@ -5,7 +5,11 @@ import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool, ToolExecutor, CircuitBreakerState } from "./types.js";
 import { builtinTools } from "./builtins.js";
 import { fileTools } from "./file-tools.js";
+import { databaseTools } from "./database-tools.js";
+import { networkTools } from "./network-tools.js";
+import { sandboxTools } from "./sandbox-tools.js";
 import { logger } from "@agentforge/logger";
+import { toolCallsTotal, toolExecutionDurationMs, circuitBreakerState } from "../observability/metrics.js";
 
 // Circuit breaker config
 const CIRCUIT_BREAKER_THRESHOLD = 5; // consecutive failures
@@ -20,7 +24,7 @@ class ToolRegistry {
   init(): void {
     if (this.initialized) return;
 
-    const allTools = [...builtinTools, ...fileTools];
+    const allTools = [...builtinTools, ...fileTools, ...databaseTools, ...networkTools, ...sandboxTools];
     for (const tool of allTools) {
       this.register(tool);
     }
@@ -93,6 +97,7 @@ class ToolRegistry {
           open: false,
           openedAt: 0,
         });
+        circuitBreakerState.set({ tool_name: name }, 0);
       }
 
       logger.debug(
@@ -104,6 +109,8 @@ class ToolRegistry {
         },
         "Tool executed",
       );
+      toolCallsTotal.inc({ tool_name: name, status: "success" });
+      toolExecutionDurationMs.observe({ tool_name: name }, duration);
       return result;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Unknown error";
@@ -124,6 +131,7 @@ class ToolRegistry {
           open: true,
           openedAt: Date.now(),
         });
+        circuitBreakerState.set({ tool_name: name }, 1);
         logger.warn(
           { tool: name, failures },
           "Circuit breaker opened — too many consecutive failures",
@@ -137,6 +145,11 @@ class ToolRegistry {
       }
 
       logger.error({ tool: name, error: msg }, "Tool execution failed");
+
+      // Record timeout vs error
+      const isTimeout = msg.includes("timed out");
+      toolCallsTotal.inc({ tool_name: name, status: isTimeout ? "timeout" : "error" });
+
       return `Error executing tool "${name}": ${msg}`;
     }
   }
@@ -184,6 +197,7 @@ class ToolRegistry {
   // Reset circuit breaker for a tool (manual override)
   resetCircuitBreaker(name: string): void {
     this.circuitBreakers.delete(name);
+    circuitBreakerState.set({ tool_name: name }, 0);
     logger.info({ tool: name }, "Circuit breaker reset");
   }
 }

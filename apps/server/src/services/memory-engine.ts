@@ -8,9 +8,10 @@ import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { getMilvusClient, MILVUS_MEMORY_COLLECTION, EMBEDDING_DIM, ensureMemoryCollection } from "./milvus.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
-import { settings } from "../config.js";
-import OpenAI from "openai";
 import { logger } from "@agentforge/logger";
+import { milvusSearchDurationMs, memoryExtractionsTotal } from "../observability/metrics.js";
+import { getProvider, listProviders } from "../providers/registry.js";
+import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
 
 // 记忆创建参数
 export interface MemoryCreate {
@@ -137,93 +138,92 @@ export class MemoryEngine {
   }
 
   // 搜索记忆：先查 PG 获取候选集 → Milvus 向量搜索 → 合并打分排序
+  // sessionId 可选：传入后只返回 metadata.sessionId 匹配的记忆（客服匿名会话场景）
   async search(
     query: string,
     userId: string,
     topK: number = 5,
+    sessionId?: string,
   ): Promise<MemorySearchResult[]> {
-    // 兜底：从 PG 按重要度和时间排序取候选
-    const memories = await prisma.memory.findMany({
-      where: { userId },
-      orderBy: [{ importance: "desc" }, { createdAt: "desc" }],
-      take: topK,
-    });
+    const MILVUS_WEIGHT = 0.7;
+    const IMPORTANCE_WEIGHT = 0.3;
 
-    // 尝试向量搜索增强
+    // 尝试向量搜索优先：Milvus语义搜索 → PG元数据补充 → 混合打分
     try {
       const vector = await this.embed(query);
       if (vector) {
         await this.ensureCollection();
         const client = getMilvusClient();
 
+        // 搜索更宽候选集（topK×3），避免遗漏低importance但高语义相关的记忆
+        const milvusSearchStart = Date.now();
         const results = await client.search({
           collection_name: MILVUS_MEMORY_COLLECTION,
           vector: vector,
-          limit: topK,
-          filter: `user_id == "${userId}"`,   // 只搜当前用户的记忆
+          limit: topK * 3,
+          filter: `user_id == "${userId}"`,
           output_fields: ["memory_id"],
           params: { nprobe: 16 },
         });
+        milvusSearchDurationMs.observe({ operation: "memory" }, Date.now() - milvusSearchStart);
 
         if (results.results && results.results.length > 0) {
-          // 构建 memory_id → Milvus score 的映射
-          const scored: Record<string, number> = {};
+          // 提取Milvus结果中的memory_id和分数
+          const milvusScores = new Map<string, number>();
+          let maxMilvusScore = 0;
           for (const hit of results.results) {
             const mid = hit.memory_id as string;
-            scored[mid] = hit.score ?? 0;
+            const score = hit.score ?? 0;
+            milvusScores.set(mid, score);
+            if (score > maxMilvusScore) maxMilvusScore = score;
           }
 
-          // 合并 PG 记忆和 Milvus 分数
-          const scoredMemories: MemorySearchResult[] = [];
-          const memoryMap = new Map(memories.map((m) => [m.id, m]));
+          // 从PG批量获取完整记忆记录
+          const memoryIds = Array.from(milvusScores.keys());
+          const pgMemories = await prisma.memory.findMany({
+            where: { id: { in: memoryIds } },
+          });
 
-          for (const [mid, score] of Object.entries(scored)) {
-            const m = memoryMap.get(mid);
-            if (m) {
-              scoredMemories.push({
-                id: m.id,
-                userId: m.userId,
-                type: m.type,
-                content: m.content,
-                importance: m.importance,
-                metadata: m.metadata as Record<string, unknown> | null,
-                conversationId: m.conversationId,
-                createdAt: m.createdAt,
-                updatedAt: m.updatedAt,
-                score,
-              });
-            }
-          }
+          // 混合打分：Milvus语义相似度(0.7) + importance(0.3)
+          const scored: MemorySearchResult[] = pgMemories.map((m) => {
+            const milvusScore = milvusScores.get(m.id) || 0;
+            const normalizedMilvus = maxMilvusScore > 0
+              ? milvusScore / maxMilvusScore
+              : 0;
+            const blendedScore =
+              MILVUS_WEIGHT * normalizedMilvus +
+              IMPORTANCE_WEIGHT * m.importance;
 
-          // 未被向量搜索命中的记忆给 0 分（排在最后）
-          const scoredIds = new Set(Object.keys(scored));
-          for (const m of memories) {
-            if (!scoredIds.has(m.id)) {
-              scoredMemories.push({
-                id: m.id,
-                userId: m.userId,
-                type: m.type,
-                content: m.content,
-                importance: m.importance,
-                metadata: m.metadata as Record<string, unknown> | null,
-                conversationId: m.conversationId,
-                createdAt: m.createdAt,
-                updatedAt: m.updatedAt,
-                score: 0.0,
-              });
-            }
-          }
+            return {
+              id: m.id,
+              userId: m.userId,
+              type: m.type,
+              content: m.content,
+              importance: m.importance,
+              metadata: m.metadata as Record<string, unknown> | null,
+              conversationId: m.conversationId,
+              createdAt: m.createdAt,
+              updatedAt: m.updatedAt,
+              score: Math.round(blendedScore * 10000) / 10000,
+            };
+          });
 
-          scoredMemories.sort((a, b) => b.score - a.score);
-          return scoredMemories.slice(0, topK);
+          scored.sort((a, b) => b.score - a.score);
+          return this.filterBySession(scored.slice(0, topK), sessionId);
         }
       }
     } catch (e) {
       logger.warn(e, "Vector search failed, falling back to PG");
     }
 
-    // 纯 PG 回退：用重要度作为分数
-    return memories.map((m) => ({
+    // 纯 PG 回退：用重要度作为分数（Milvus不可用时的降级策略）
+    const memories = await prisma.memory.findMany({
+      where: { userId },
+      orderBy: [{ importance: "desc" }, { createdAt: "desc" }],
+      take: topK,
+    });
+
+    const fallbackResults = memories.map((m) => ({
       id: m.id,
       userId: m.userId,
       type: m.type,
@@ -235,42 +235,51 @@ export class MemoryEngine {
       updatedAt: m.updatedAt,
       score: m.importance,
     }));
+    return this.filterBySession(fallbackResults, sessionId);
+  }
+
+  // 按 sessionId 过滤记忆（用于客服匿名会话场景）
+  private filterBySession<T extends { metadata: Record<string, unknown> | null }>(
+    results: T[],
+    sessionId?: string,
+  ): T[] {
+    if (!sessionId) return results;
+    return results.filter((r) => {
+      const meta = r.metadata as Record<string, unknown> | null;
+      return meta?.sessionId === sessionId;
+    });
   }
 
   // 从对话中提取记忆：取最近 6 条消息 → LLM 分析 → 逐条存储
+  // sessionId 可选：传入后存入 metadata.sessionId（客服匿名会话场景）
   async extractAndStore(
     messages: Array<{ role: string; content: string }>,
     userId: string,
     conversationId: string,
     providerName: string = "",
+    sessionId?: string,
   ): Promise<MemoryOut[]> {
     if (!messages || messages.length < 2) return []; // 至少一轮对话
 
-    // 选择 LLM：OpenAI > DeepSeek > 放弃
-    let client: OpenAI;
+    // 选择 LLM：通过provider抽象层，避免直接依赖具体厂商SDK
+    let actualProvider = providerName;
     let model: string;
 
-    if (providerName === "openai" && settings.openaiApiKey) {
-      client = new OpenAI({
-        apiKey: settings.openaiApiKey,
-        baseURL: settings.openaiBaseUrl,
-      });
+    if (providerName === "openai") {
       model = "gpt-4o-mini"; // 记忆提取是后台任务，用便宜模型
-    } else if (settings.deepseekApiKey) {
-      client = new OpenAI({
-        apiKey: settings.deepseekApiKey,
-        baseURL: settings.deepseekBaseUrl,
-      });
-      model = "deepseek-chat";
-    } else if (settings.openaiApiKey) {
-      client = new OpenAI({
-        apiKey: settings.openaiApiKey,
-        baseURL: settings.openaiBaseUrl,
-      });
-      model = "gpt-4o-mini";
     } else {
-      return []; // 没有可用的 LLM，静默跳过
+      model = "deepseek-chat";
     }
+
+    // 如果指定的provider不可用，尝试任何可用的provider
+    if (!actualProvider) {
+      const providers = listProviders();
+      if (providers.length === 0) return []; // 没有可用的LLM
+      actualProvider = providers[0].type;
+      model = providers[0].models[0]?.id || model;
+    }
+
+    const provider = getProvider(actualProvider);
 
     // 只取最近 6 条消息（控制 token 消耗）
     const convText = messages
@@ -279,25 +288,20 @@ export class MemoryEngine {
       .join("\n");
 
     try {
-      const response = await client.chat.completions.create({
-        model,
-        messages: [
-          { role: "system", content: SYSTEM_PROMPT_EXTRACT },
+      const result = await provider.chatSync(
+        [
           { role: "user", content: `Extract memories from:\n\n${convText}` },
         ],
-        temperature: 0.1,
-        max_tokens: 500,
-      });
+        model,
+        SYSTEM_PROMPT_EXTRACT,
+        0.1,
+        500,
+        true, // jsonMode for structured memory extraction
+      );
+      const content = result.content;
 
       // 解析 LLM 返回的 JSON（可能被 markdown 代码块包裹）
-      let content = response.choices[0].message.content?.trim() || "";
-      if (content.startsWith("```")) {
-        content = content.split("```")[1];
-        if (content.startsWith("json")) content = content.slice(4);
-        content = content.trim();
-      }
-
-      const items = JSON.parse(content);
+      const items = parseJSONFromLLMResponse(content);
       if (!Array.isArray(items)) return [];
 
       // 逐条存储提取的记忆
@@ -309,6 +313,7 @@ export class MemoryEngine {
           content: item.content,
           importance: parseFloat(item.importance) || 0.5,
           conversationId,
+          metadata: sessionId ? { sessionId } : undefined,
         };
         const result = await this.store(memory, userId);
         results.push(result);
@@ -316,6 +321,7 @@ export class MemoryEngine {
 
       if (results.length > 0) {
         logger.info({ count: results.length }, "Memories extracted from conversation");
+        memoryExtractionsTotal.inc(results.length);
       }
       return results;
     } catch (e) {

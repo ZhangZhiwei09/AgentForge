@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
-import type { AgentStep, AgentSessionDTO } from "@agentforge/shared-types";
+import type { AgentStep, AgentSessionDTO, AgentApprovalDTO } from "@agentforge/shared-types";
 import { client } from "../../lib/api";
+import { useAgentStream } from "../../hooks/useAgentStream";
 
 interface AgentPanelProps {
   conversationId: string | null;
@@ -10,6 +11,9 @@ export function AgentPanel({ conversationId }: AgentPanelProps) {
   const [sessions, setSessions] = useState<AgentSessionDTO[]>([]);
   const [selectedSession, setSelectedSession] = useState<AgentSessionDTO | null>(null);
   const [loading, setLoading] = useState(false);
+  const [agentTask, setAgentTask] = useState("");
+  const [approvals, setApprovals] = useState<AgentApprovalDTO[]>([]);
+  const { startAgentTask } = useAgentStream();
 
   useEffect(() => {
     if (conversationId) {
@@ -40,6 +44,15 @@ export function AgentPanel({ conversationId }: AgentPanelProps) {
     try {
       const data = await client.request<AgentSessionDTO>(`/api/agent-sessions/${id}`);
       setSelectedSession(data);
+      // Also load approval history for this session
+      try {
+        const approvalData = await client.request<AgentApprovalDTO[]>(
+          `/api/agent/approvals?session_id=${encodeURIComponent(id)}`,
+        );
+        setApprovals(approvalData);
+      } catch {
+        setApprovals([]);
+      }
     } catch {
       // Ignore
     }
@@ -74,15 +87,44 @@ export function AgentPanel({ conversationId }: AgentPanelProps) {
   return (
     <div className="h-full flex flex-col bg-gray-900 text-gray-200">
       {/* Header */}
-      <div className="p-3 border-b border-gray-700 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-300">🧠 Agent Sessions</h3>
-        <button
-          onClick={loadSessions}
-          className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
-          disabled={loading}
-        >
-          {loading ? "Loading..." : "Refresh"}
-        </button>
+      <div className="p-3 border-b border-gray-700 space-y-2">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-gray-300">🧠 Agent Sessions</h3>
+          <button
+            onClick={loadSessions}
+            className="text-xs text-gray-500 hover:text-gray-300 transition-colors"
+            disabled={loading}
+          >
+            {loading ? "Loading..." : "Refresh"}
+          </button>
+        </div>
+        {/* Task Input */}
+        <div className="flex gap-1">
+          <input
+            value={agentTask}
+            onChange={(e) => setAgentTask(e.target.value)}
+            placeholder="输入任务描述..."
+            className="flex-1 rounded border border-gray-700 bg-gray-800 px-2 py-1 text-xs text-gray-200 placeholder:text-gray-500 focus:outline-none focus:border-blue-600"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && agentTask.trim()) {
+                startAgentTask(agentTask.trim());
+                setAgentTask("");
+              }
+            }}
+          />
+          <button
+            onClick={() => {
+              if (agentTask.trim()) {
+                startAgentTask(agentTask.trim());
+                setAgentTask("");
+              }
+            }}
+            disabled={!agentTask.trim()}
+            className="rounded bg-blue-600 px-2.5 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-40 transition-colors"
+          >
+            Run
+          </button>
+        </div>
       </div>
 
       {/* Session List */}
@@ -196,6 +238,47 @@ export function AgentPanel({ conversationId }: AgentPanelProps) {
               <p className="text-xs text-gray-500 text-center py-4">
                 No reasoning steps recorded.
               </p>
+            )}
+
+            {/* P1-5 Approval History */}
+            {approvals.length > 0 && (
+              <div className="mt-4 border-t border-gray-700 pt-2">
+                <h4 className="text-xs font-semibold text-gray-400 mb-2 px-1">🛡️ Approval History</h4>
+                {approvals.map((approval) => (
+                  <div
+                    key={approval.id}
+                    className="mb-2 border border-gray-700 rounded bg-gray-800/50 p-2"
+                  >
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-medium text-gray-300">
+                        Step {approval.stepNumber}: {approval.toolName}
+                      </span>
+                      <span
+                        className={`text-xs px-1.5 py-0.5 rounded ${
+                          approval.status === "approved"
+                            ? "bg-green-900/50 text-green-400"
+                            : approval.status === "rejected"
+                              ? "bg-red-900/50 text-red-400"
+                              : approval.status === "timed_out"
+                                ? "bg-gray-700 text-gray-400"
+                                : "bg-yellow-900/50 text-yellow-400"
+                        }`}
+                      >
+                        {approval.status}
+                      </span>
+                    </div>
+                    <p className="text-xs text-gray-500">Risk: {approval.riskLevel} | Reason: {approval.reason}</p>
+                    {approval.rejectionReason && (
+                      <p className="text-xs text-red-400 mt-0.5">Rejection: {approval.rejectionReason}</p>
+                    )}
+                    {approval.decidedAt && (
+                      <p className="text-xs text-gray-600 mt-0.5">
+                        Decided: {new Date(approval.decidedAt).toLocaleString()}
+                      </p>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>

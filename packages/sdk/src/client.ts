@@ -1,4 +1,5 @@
 import type { AuthResponse, ChatRequest, ChatStreamChunk, Conversation, CreateConversationDTO, LLMProviderInfo, Message, Memory, MemorySearchResult, ApiKeyDTO, CreateApiKeyResponse, AuthUser } from "@agentforge/shared-types";
+import { VoiceService } from "./services/voice.js";
 
 export interface AgentForgeConfig {
     baseUrl: string;
@@ -10,11 +11,16 @@ export class AgentForgeClient {
     private baseUrl: string;
     private getAccessToken: () => string | null;
     private onAuthError: (() => void) | undefined;
+    public voice: VoiceService;
 
     constructor(config: AgentForgeConfig) {
         this.baseUrl = config.baseUrl.replace(/\/$/, "");
         this.getAccessToken = config.getAccessToken ?? (() => null);
         this.onAuthError = config.onAuthError;
+        this.voice = new VoiceService(
+            this.baseUrl,
+            () => this.getAccessToken(),
+        );
     }
 
     private authHeaders(): Record<string, string> {

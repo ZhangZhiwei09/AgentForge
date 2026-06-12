@@ -1,7 +1,20 @@
 import { create } from "zustand";
 import type { Conversation, DebugInfo, Message, MemoryInfo, ProviderType, ToolCallRecord } from "@/types";
 
-type PanelMode = "debug" | "memory" | "knowledge" | "agent";
+type PanelMode = "debug" | "memory" | "knowledge" | "agent" | "voice";
+
+export type VoiceStatus = "idle" | "listening" | "processing" | "speaking";
+
+export interface PendingApproval {
+  approvalId: string;
+  sessionId: string;
+  step: number;
+  toolName: string;
+  toolArgs: Record<string, unknown>;
+  riskLevel: string;
+  reason: string;
+  timeoutMs: number;
+}
 
 interface ChatState {
     conversations: Conversation[];
@@ -16,6 +29,12 @@ interface ChatState {
     panelMode: PanelMode;
     toolCalls: ToolCallRecord[];
     enabledTools: string[];
+    // P1-5 Approval state
+    pendingApproval: PendingApproval | null;
+    // V5 Voice state
+    isVoiceActive: boolean;
+    voiceStatus: VoiceStatus;
+    voiceTranscript: Array<{ role: string; content: string }>;
 
     setConversations: (convs: Conversation[]) => void;
     setCurrentConversation: (id: string | null) => void;
@@ -34,6 +53,14 @@ interface ChatState {
     setToolResult: (id: string, result: string) => void;
     toggleTool: (name: string) => void;
     setEnabledTools: (tools: string[]) => void;
+    // P1-5 Approval actions
+    setPendingApproval: (approval: PendingApproval | null) => void;
+    clearPendingApproval: () => void;
+    // V5 Voice actions
+    setVoiceActive: (v: boolean) => void;
+    setVoiceStatus: (status: VoiceStatus) => void;
+    appendVoiceTranscript: (entry: { role: string; content: string }) => void;
+    clearVoiceTranscript: () => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -49,6 +76,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     panelMode: "debug",
     toolCalls: [],
     enabledTools: [],
+    pendingApproval: null,
+    isVoiceActive: false,
+    voiceStatus: "idle" as VoiceStatus,
+    voiceTranscript: [],
 
     setConversations: (convs) => set({ conversations: convs }),
     setCurrentConversation: (id) => set({ currentConversationId: id }),
@@ -93,4 +124,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 tc.id === id ? { ...tc, result, status: "done" as const } : tc,
             ),
         })),
+    setPendingApproval: (approval) => set({ pendingApproval: approval }),
+    clearPendingApproval: () => set({ pendingApproval: null }),
+    setVoiceActive: (v) => set({ isVoiceActive: v }),
+    setVoiceStatus: (status) => set({ voiceStatus: status }),
+    appendVoiceTranscript: (entry) =>
+        set((s) => ({ voiceTranscript: [...s.voiceTranscript, entry] })),
+    clearVoiceTranscript: () => set({ voiceTranscript: [] }),
 }));

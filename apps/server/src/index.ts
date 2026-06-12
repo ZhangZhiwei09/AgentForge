@@ -5,6 +5,7 @@ import { settings } from "./config.js";
 import { prisma } from "./db.js";
 import { logger } from "@agentforge/logger";
 import { authService } from "./services/auth.js";
+import { initTracing } from "./observability/tracing.js";
 
 // Dev seed: ensure default users exist with known passwords
 // In production, users register via /api/auth/signup
@@ -25,6 +26,9 @@ async function seedDefaultUsers() {
 }
 
 async function main() {
+  // 第零步：初始化可观测性（条件启用，OTEL_ENABLED=true 时生效）
+  initTracing();
+
   // 第一步：检查数据库连接
   try {
     await prisma.$connect();
@@ -44,8 +48,21 @@ async function main() {
     logger.warn({ error: (err as Error).message }, "Knowledge base seeding skipped");
   }
 
+  // 检查并构建倒排索引（已有 chunk 但无索引时自动重建）
+  try {
+    const chunkCount = await prisma.knowledgeChunk.count({ where: { enabled: true } });
+    const indexCount = await prisma.knowledgeInvertedIndex.count();
+    if (chunkCount > 0 && indexCount === 0) {
+      logger.info({ chunks: chunkCount }, "Building initial inverted index for existing chunks");
+      const { KnowledgeIngestionService } = await import("./services/knowledge-ingestion.js");
+      await KnowledgeIngestionService.rebuildInvertedIndex();
+    }
+  } catch (err) {
+    logger.warn({ error: (err as Error).message }, "Inverted index build skipped");
+  }
+
   // 第三步：创建 Hono 应用并启动 HTTP 服务
-  const app = createApp();
+  const app = await createApp();
 
   logger.info({ port: settings.port }, "AgentForge TS backend starting");
   serve({

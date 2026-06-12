@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from "react";
 import { MessageCircle, X, Send, Trash2, BookOpen, ChevronDown, ChevronUp } from "lucide-react";
+import { QuickReplies } from "./QuickReplies";
 
 // 知识库检索结果（后端返回）
 interface KnowledgeResult {
@@ -39,6 +40,7 @@ export function CustomerChat() {
     ]);
     const [input, setInput] = useState("");
     const [isTyping, setIsTyping] = useState(false);
+    const [suggestions, setSuggestions] = useState<string[]>([]);
     // 展开/收起知识库参考来源（按消息 ID）
     const [expandedKnowledge, setExpandedKnowledge] = useState<Set<string>>(new Set());
     const [sessionId, setSessionId] = useState<string>(() => {
@@ -61,6 +63,7 @@ export function CustomerChat() {
             },
         ]);
         setExpandedKnowledge(new Set());
+        setSuggestions([]);
     }
 
     // 新消息时自动滚动到底部
@@ -96,6 +99,12 @@ export function CustomerChat() {
     async function handleSend() {
         const trimmed = input.trim();
         if (!trimmed) return;
+        sendMessage(trimmed);
+    }
+
+    async function sendMessage(text: string) {
+        const trimmed = text.trim();
+        if (!trimmed) return;
 
         const userMsg: ChatMessage = {
             id: `msg-${Date.now()}`,
@@ -106,6 +115,7 @@ export function CustomerChat() {
 
         setMessages((prev) => [...prev, userMsg]);
         setInput("");
+        setSuggestions([]);
         setIsTyping(true);
 
         try {
@@ -242,6 +252,29 @@ export function CustomerChat() {
                                     },
                                 ];
                             });
+                        } else if (chunk.type === "done") {
+                            // 服务端已完成校验，streamContent 已是干净的回答文本
+                            if (chunk.suggestions && Array.isArray(chunk.suggestions)) {
+                                setSuggestions(chunk.suggestions);
+                            }
+                            if (chunk.message_id) {
+                                setMessages((prev) => {
+                                    const last = prev[prev.length - 1];
+                                    if (last?.id === "__stream__") {
+                                        return [
+                                            ...prev.slice(0, -1),
+                                            {
+                                                ...last,
+                                                id: chunk.message_id as string,
+                                                content: streamContent,
+                                                knowledge: knowledgeResults,
+                                                toolCalls: [...toolCalls],
+                                            },
+                                        ];
+                                    }
+                                    return prev;
+                                });
+                            }
                         } else if (chunk.type === "error") {
                             console.error("Stream error:", chunk.content);
                         }
@@ -433,6 +466,16 @@ export function CustomerChat() {
                                         <span className="h-2 w-2 animate-bounce rounded-full bg-gray-400 [animation-delay:300ms]" />
                                     </div>
                                 </div>
+                            </div>
+                        )}
+
+                        {/* 快捷追问建议 */}
+                        {!isTyping && suggestions.length > 0 && (
+                            <div className="flex justify-start animate-fade-in">
+                                <QuickReplies
+                                    suggestions={suggestions}
+                                    onSelect={(text) => sendMessage(text)}
+                                />
                             </div>
                         )}
 

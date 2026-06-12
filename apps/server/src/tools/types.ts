@@ -22,7 +22,9 @@ export interface RegisteredTool {
   riskLevel: RiskLevel;
   timeout: number; // ms
   requireApproval: boolean;
-  category: string; // e.g. "utility", "file", "network", "database"
+  category: string; // e.g. "utility", "file", "network", "database", "sandbox"
+  parallelizable: boolean; // true if this tool can be executed in parallel with others
+  sandbox?: boolean; // true if this tool requires Docker sandbox isolation
 }
 
 // Circuit breaker state for a tool

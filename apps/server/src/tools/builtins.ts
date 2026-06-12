@@ -368,6 +368,7 @@ export const builtinTools: RegisteredTool[] = [
     timeout: 5_000,
     requireApproval: false,
     category: "utility",
+    parallelizable: true,
   },
   {
     definition: calculatorDef,
@@ -376,6 +377,7 @@ export const builtinTools: RegisteredTool[] = [
     timeout: 5_000,
     requireApproval: false,
     category: "utility",
+    parallelizable: true,
   },
   {
     definition: webSearchDef,
@@ -384,6 +386,7 @@ export const builtinTools: RegisteredTool[] = [
     timeout: 15_000,
     requireApproval: false,
     category: "search",
+    parallelizable: true,
   },
   {
     definition: httpRequestDef,
@@ -392,5 +395,6 @@ export const builtinTools: RegisteredTool[] = [
     timeout: 20_000,
     requireApproval: false,
     category: "network",
+    parallelizable: false,
   },
 ];

@@ -17,15 +17,11 @@ V4 Tool Calling       ✅
 ↓
 P0 Platform Foundation  ✅ 认证 / 测试 / 日志 / CI
 ↓
-P1 Agent Kernel         🔄 推理 / 规划 / 工作内存 (P1-3 ✅ P1-4 ✅ P1-6 ✅, P1-1/P1-2/P1-5 pending)
+P1 Agent Kernel         ✅ 推理 / 规划 / 工作内存 (P1-3 ✅ P1-4 ✅ P1-5 ✅ P1-6 ✅, P1-1 ✅, P1-2 ✅)
 ↓
-V5 Voice Agent
+V5 Voice Agent         ✅
 ↓
 V6 Workflow Engine
-↓
-V7 Browser Extension
-↓
-V8 Browser Agent
 ↓
 V9 Multi-Agent
 ↓
@@ -949,13 +945,13 @@ const authMiddleware = createMiddleware(async (c, next) => {
 
 ### 验收标准
 
-- [ ] 用户注册/登录 API 完成（JWT + bcrypt）
-- [ ] Refresh Token 轮转机制完成
-- [ ] API Key 管理完成（CRUD + 吊销）
-- [ ] Auth 中间件注入用户上下文到所有路由
-- [ ] 现有 API 全部迁移为 per-user 数据隔离（conversation/memory/knowledge 按 user_id 过滤）
-- [ ] 前端登录/注册页面完成
-- [ ] 前端 Auth 状态管理（Zustand store + 请求拦截器自动附带 Token）
+- [x] 用户注册/登录 API 完成（JWT + bcrypt）
+- [x] Refresh Token 轮转机制完成
+- [x] API Key 管理完成（CRUD + 吊销）
+- [x] Auth 中间件注入用户上下文到所有路由
+- [x] 现有 API 全部迁移为 per-user 数据隔离（conversation/memory/knowledge 按 user_id 过滤）
+- [x] 前端登录/注册页面完成
+- [x] 前端 Auth 状态管理（Zustand store + 请求拦截器自动附带 Token）
 
 ---
 
@@ -1007,11 +1003,11 @@ app.use("*", async (c, next) => {
 
 ### 验收标准
 
-- [ ] `packages/logger` 共享包创建完成（pino 封装）
-- [ ] Request ID 中间件完成，自动注入到所有日志
-- [ ] 关键路径日志替换完成：ChatService、MemoryEngine、KnowledgeService、ToolRegistry
-- [ ] 日志级别分级：正常流 info，异常 warn/error，LLM 调用 debug
-- [ ] 前端 Console 日志替换为分级日志（开发环境输出，生产环境抑制）
+- [x] `packages/logger` 共享包创建完成（pino 封装）
+- [x] Request ID 中间件完成，自动注入到所有日志
+- [x] 关键路径日志替换完成：ChatService、MemoryEngine、KnowledgeService、ToolRegistry
+- [x] 日志级别分级：正常流 info，异常 warn/error，LLM 调用 debug
+- [x] 前端 Console 日志替换为分级日志（开发环境输出，生产环境抑制）
 
 ---
 
@@ -1065,13 +1061,13 @@ app.use("*", async (c, next) => {
 
 ### 验收标准
 
-- [ ] vitest 配置完成，`pnpm test` 可运行
-- [ ] `packages/database` 测试辅助工具（测试数据库初始化/清理）完成
-- [ ] ToolRegistry 单元测试覆盖 ≥ 90%
-- [ ] ChatService 集成测试覆盖核心流程（含 Mock Provider）
-- [ ] MemoryEngine 集成测试覆盖 CRUD + 搜索
-- [ ] API 路由测试覆盖所有端点（至少 happy path + 错误场景各 1 个）
-- [ ] `pnpm test` 在 CI 中运行（见 P0-4）
+- [x] vitest 配置完成，`pnpm test` 可运行
+- [x] `packages/database` 测试辅助工具（测试数据库初始化/清理）完成
+- [x] ToolRegistry 单元测试覆盖 ≥ 90%
+- [x] ChatService 集成测试覆盖核心流程（含 Mock Provider）
+- [x] MemoryEngine 集成测试覆盖 CRUD + 搜索
+- [x] API 路由测试覆盖所有端点（至少 happy path + 错误场景各 1 个）
+- [x] `pnpm test` 在 CI 中运行（见 P0-4）
 
 ---
 
@@ -1127,12 +1123,12 @@ jobs:
 
 ### 验收标准
 
-- [ ] `.github/workflows/ci.yml` 创建并通过
-- [ ] `pnpm typecheck` 全量通过
-- [ ] `pnpm lint` 配置完成（ESLint flat config）
-- [ ] `pnpm format --check` 配置完成（Prettier）
-- [ ] `pnpm test` 在 CI 中通过
-- [ ] PR 门禁：所有 Quality 检查必须通过才能合并
+- [x] `.github/workflows/ci.yml` 创建并通过
+- [x] `pnpm typecheck` 全量通过
+- [x] `pnpm lint` 配置完成（ESLint flat config）
+- [x] `pnpm format --check` 配置完成（Prettier）
+- [x] `pnpm test` 在 CI 中通过
+- [x] PR 门禁：所有 Quality 检查必须通过才能合并
 
 ---
 
@@ -1175,11 +1171,11 @@ app.use("/api/chat", rateLimiter({
 
 ### 验收标准
 
-- [ ] 全局 Rate Limiting 中间件完成
-- [ ] Chat API 特殊 Rate Limiting 完成（更高优先级保护）
-- [ ] 所有 POST/PUT/PATCH 路由有 Zod 参数校验
-- [ ] 输入长度限制和特殊字符转义
-- [ ] Rate Limit 超限时返回标准 `429 Too Many Requests` + Retry-After 头
+- [x] 全局 Rate Limiting 中间件完成
+- [x] Chat API 特殊 Rate Limiting 完成（更高优先级保护）
+- [x] 所有 POST/PUT/PATCH 路由有 Zod 参数校验
+- [x] 输入长度限制和特殊字符转义
+- [x] Rate Limit 超限时返回标准 `429 Too Many Requests` + Retry-After 头
 
 ---
 
@@ -1242,13 +1238,13 @@ await memoryQueue.add("extract", {
 
 ### 验收标准
 
-- [ ] Redis 容器添加到 `infra/docker/compose.yml`
-- [ ] BullMQ 队列创建完成（memory-extraction + knowledge-ingestion）
-- [ ] Worker 进程独立启动（`pnpm server:worker`）
-- [ ] ChatService 中记忆提取改为异步投递
-- [ ] 知识库文档摄取改为异步投递
-- [ ] Bull Board 监控面板集成到 Debug Panel
-- [ ] 向后兼容：Worker 不可用时不影响 Chat 主流程（graceful degradation）
+- [x] Redis 容器添加到 `infra/docker/compose.yml`
+- [x] BullMQ 队列创建完成（memory-extraction + knowledge-ingestion）
+- [x] Worker 进程独立启动（`pnpm server:worker`）
+- [x] ChatService 中记忆提取改为异步投递
+- [x] 知识库文档摄取改为异步投递
+- [x] Bull Board 监控面板集成到 Debug Panel
+- [x] 向后兼容：Worker 不可用时不影响 Chat 主流程（graceful degradation）
 
 ---
 
@@ -1297,11 +1293,11 @@ await memoryQueue.add("extract", {
 
 ### 验收标准
 
-- [ ] `GET /api/metrics` 端点完成，暴露 Prometheus 格式指标
-- [ ] 核心指标埋点完成（HTTP、Chat、Tool、Memory）
-- [ ] OpenTelemetry SDK 集成，自动插桩 HTTP + 手动插桩 Chat/Memory
-- [ ] Jaeger 容器添加到 infra（可选，或直接用 Grafana Cloud 免费层）
-- [ ] Grafana Dashboard JSON 模板创建
+- [x] `GET /api/metrics` 端点完成，暴露 Prometheus 格式指标
+- [x] 核心指标埋点完成（HTTP、Chat、Tool、Memory）
+- [x] OpenTelemetry SDK 集成，自动插桩 HTTP + 手动插桩 Chat/Memory
+- [x] Jaeger 容器添加到 infra（可选，或直接用 Grafana Cloud 免费层）
+- [x] Grafana Dashboard JSON 模板创建
 
 ---
 
@@ -1403,12 +1399,12 @@ class AgentService {
 
 ### 验收标准
 
-- [ ] AgentService 实现完成，支持 ReAct 循环
-- [ ] 结构化决策 JSON 输出 + Zod 校验
-- [ ] System Prompt 模板注册到 `shared-prompts`
-- [ ] 前端流式渲染适配 Agent 事件类型（think/act/observe/respond）
-- [ ] Debug Panel 展示 Agent 推理步骤（observation → analysis → plan → decision）
-- [ ] 向后兼容：无 tools 参数时回退到普通 Chat 模式
+- [x] AgentService 实现完成，支持 ReAct 循环
+- [x] 结构化决策 JSON 输出 + Zod 校验
+- [x] System Prompt 模板注册到 `shared-prompts`
+- [x] 前端流式渲染适配 Agent 事件类型（think/act/observe/respond）
+- [x] Debug Panel 展示 Agent 推理步骤（observation → analysis → plan → decision）
+- [x] 向后兼容：无 tools 参数时回退到普通 Chat 模式
 
 ---
 
@@ -1473,12 +1469,12 @@ Task Complete
 
 ### 验收标准
 
-- [ ] `agent_sessions` 数据模型 + Prisma 迁移完成
-- [ ] AgentService 每步自动追加 scratchpad
-- [ ] 每轮推理时自动注入 scratchpad 到上下文
-- [ ] API: `GET /api/agent-sessions` 列出历史 Agent 任务
-- [ ] API: `GET /api/agent-sessions/:id` 查看任务详情和推理步骤
-- [ ] 前端：Agent Session 面板展示推理链（类似 Debug Panel 的 Agent 视图）
+- [x] `agent_sessions` 数据模型 + Prisma 迁移完成
+- [x] AgentService 每步自动追加 scratchpad
+- [x] 每轮推理时自动注入 scratchpad 到上下文
+- [x] API: `GET /api/agent-sessions` 列出历史 Agent 任务
+- [x] API: `GET /api/agent-sessions/:id` 查看任务详情和推理步骤
+- [x] 前端：Agent Session 面板展示推理链（类似 Debug Panel 的 Agent 视图）
 
 ---
 
@@ -1526,12 +1522,12 @@ Body: { "action": "approve" | "reject" | "modify", "modified_args": {...} }
 
 ### 验收标准
 
-- [ ] 工具注册扩展 `riskLevel` 和 `requireApproval` 字段
-- [ ] Agent 循环中的审批暂停/恢复机制
-- [ ] SSE 协议扩展 `approval_request` / `approval_result` 事件
-- [ ] 前端审批卡片 UI（显示工具名、参数、风险等级）
-- [ ] 审批超时处理（默认 5 分钟无响应自动拒绝）
-- [ ] 审批历史记录审计日志
+- [x] 工具注册扩展 `riskLevel` 和 `requireApproval` 字段
+- [x] Agent 循环中的审批暂停/恢复机制
+- [x] SSE 协议扩展 `approval_request` / `approval_result` 事件
+- [x] 前端审批卡片 UI（显示工具名、参数、风险等级）
+- [x] 审批超时处理（默认 5 分钟无响应自动拒绝）
+- [x] 审批历史记录审计日志
 
 ---
 
@@ -1589,13 +1585,13 @@ Body: { "action": "approve" | "reject" | "modify", "modified_args": {...} }
 
 ### 验收标准
 
-- [ ] 工具注册扩展：`timeout`、`riskLevel`、`requireApproval`、`sandbox` 字段
-- [ ] 至少 6 个新工具实现并注册
-- [ ] Docker 沙箱集成完成（code_execute 工具）
-- [ ] 工具超时机制完成（每个工具独立 timeout）
-- [ ] 熔断器完成（连续失败自动暂停）
-- [ ] Web Search 真实实现（SerpAPI 或 Tavily 集成）
-- [ ] 工具执行指标记录（调用次数、成功率、平均延迟）
+- [x] 工具注册扩展：`timeout`、`riskLevel`、`requireApproval`、`sandbox` 字段
+- [x] 至少 6 个新工具实现并注册
+- [x] Docker 沙箱集成完成（code_execute 工具）
+- [x] 工具超时机制完成（每个工具独立 timeout）
+- [x] 熔断器完成（连续失败自动暂停）
+- [x] Web Search 真实实现（SerpAPI 或 Tavily 集成）
+- [x] 工具执行指标记录（调用次数、成功率、平均延迟）
 
 
 # 十七、V5 Voice Agent 语音交互
@@ -1698,14 +1694,14 @@ POST /api/voice/synthesize    # 提交文字 → 返回音频
 
 ## 7. 验收标准
 
-- [ ] WebSocket 端点 `/api/voice/stream` 完成
-- [ ] ASR 集成完成（Whisper API，支持中英文）
-- [ ] TTS 集成完成（至少 3 种音色可选）
-- [ ] VAD 语音活动检测集成（前端）
-- [ ] 打断机制完成（AI 说话时可被用户打断）
-- [ ] 前端 Voice Panel 完成（麦克风按钮 + 波形可视化 + 状态指示）
-- [ ] 向后兼容：文本聊天模式不受影响
-- [ ] 语音对话历史可回看（自动保存 transcript）
+- [x] WebSocket 端点 `/api/voice/stream` 完成
+- [x] ASR 集成完成（Whisper API，支持中英文）
+- [x] TTS 集成完成（至少 3 种音色可选）
+- [x] VAD 语音活动检测集成（前端）
+- [x] 打断机制完成（AI 说话时可被用户打断）
+- [x] 前端 Voice Panel 完成（麦克风按钮 + 波形可视化 + 状态指示）
+- [x] 向后兼容：文本聊天模式不受影响
+- [x] 语音对话历史可回看（自动保存 transcript）
 
 
 # 十八、V6 Workflow Engine 工作流引擎
@@ -1943,117 +1939,7 @@ GET    /api/workflows/runs/:run_id/stream  # SSE 实时流（步骤执行事件�
 - [ ] 至少 3 个内置工作流模板
 
 
-# 十九、V7-V8 Browser Agent 浏览器智能体
-
-## V7 Browser Extension 浏览器扩展
-
-### 核心目标
-
-开发 Chrome/Edge 浏览器扩展，让 AgentForge 可以伴随用户浏览网页，提供上下文感知的 AI 辅助。
-
-### 扩展能力
-
-- **页面内容获取**：获取当前页面标题、正文、选中文本
-- **右键菜单集成**：选中文本 → "Ask AgentForge"
-- **侧边栏面板**：在任意网页侧边注入 AgentForge Chat UI
-- **页面摘要**：一键生成当前页面摘要
-- **上下文感知**：AI 知道用户正在看什么页面，提供更精准的回答
-
-### 技术选型
-
-| 组件 | 技术 | 用途 |
-|------|------|------|
-| 扩展框架 | WXT (Web eXtension Tools) | 现代化浏览器扩展开发框架 |
-| 通信 | chrome.runtime.sendMessage | 扩展 ↔ AgentForge Server |
-| UI | React (同 web 共享组件) | 侧边栏和弹出窗口 |
-
-### 验收标准
-
-- [ ] Chrome 扩展项目创建（`apps/extension`）
-- [ ] 侧边栏面板完成（复用 ChatArea 组件）
-- [ ] 页面内容获取 API（标题、正文、选中文本）
-- [ ] 右键菜单 "Ask AgentForge" 完成
-- [ ] 页面摘要功能完成
-- [ ] 上下文自动注入到 Chat（当前页面 URL + 标题）
-
----
-
-## V8 Browser Agent 浏览器自动化
-
-### 核心目标
-
-让 Agent 能够自主操控浏览器完成任务：浏览网页、填写表单、提取信息、执行 Web 操作。
-
-### 架构
-
-```text
-┌─────────────────────────────────────────────────┐
-│              Browser Agent                       │
-│                                                  │
-│  ┌──────────────────────────────────────────┐   │
-│  │         Agent Loop (ReAct)                │   │
-│  │  THINK → ACT → OBSERVE → THINK → ...     │   │
-│  └──────────────┬───────────────────────────┘   │
-│                 │                                │
-│                 ▼                                │
-│  ┌──────────────────────────────────────────┐   │
-│  │        Playwright Controller              │   │
-│  │  ┌────────────────────────────────────┐  │   │
-│  │  │   Browser Sandbox (Docker)         │  │   │
-│  │  │  ┌──────────────────────────────┐  │  │   │
-│  │  │  │  Chromium (headless)         │  │  │   │
-│  │  │  │  - navigate / click / type   │  │  │   │
-│  │  │  │  - screenshot / extract      │  │  │   │
-│  │  │  │  - waitFor / evaluate        │  │  │   │
-│  │  │  └──────────────────────────────┘  │  │   │
-│  │  └────────────────────────────────────┘  │   │
-│  └──────────────────────────────────────────┘   │
-│                                                  │
-│  ┌──────────────────────────────────────────┐   │
-│  │      DOM Understanding Module            │   │
-│  │  - accessibility tree → structured JSON  │   │
-│  │  - interactive element detection         │   │
-│  │  - form field identification             │   │
-│  └──────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────┘
-```
-
-### 浏览器操作工具集
-
-```typescript
-const browserTools = [
-  { name: "browser_navigate",   args: { url: "string" } },
-  { name: "browser_click",      args: { selector: "string" } },
-  { name: "browser_type",       args: { selector: "string", text: "string" } },
-  { name: "browser_screenshot", args: { fullPage: "boolean" } },
-  { name: "browser_extract",    args: { selector: "string" } },
-  { name: "browser_scroll",     args: { direction: "up|down", amount: "number" } },
-  { name: "browser_wait",       args: { ms: "number" } },
-  { name: "browser_get_state",  args: {} },  // 返回当前页面的可交互元素
-  { name: "browser_execute_js", args: { code: "string" } },
-  { name: "browser_fill_form",  args: { fields: "Record<string,string>" } },
-];
-```
-
-### 安全沙箱
-
-- Playwright 运行在独立 Docker 容器中
-- 网络可配置（完全隔离 / 仅白名单域名 / 完全开放）
-- 操作录制：所有浏览器操作自动录屏（供审计）
-- 敏感数据检测：自动检测 Agent 是否尝试输入密码/信用卡号（阻止并警告）
-
-### 验收标准
-
-- [ ] Playwright 集成完成，Docker 沙箱启动
-- [ ] 浏览器工具集（10 个工具）全部实现
-- [ ] DOM 理解模块完成（accessibility tree → 结构化 JSON）
-- [ ] Agent Loop 集成（Agent 可以自主操控浏览器）
-- [ ] 操作录制与回放完成
-- [ ] 前端：浏览器操作实时预览（screenshot 流）
-- [ ] 电商自动下单、信息采集等 demo 场景验证通过
-
-
-# 二十、V9 Multi-Agent 多智能体协作
+# 十九、V9 Multi-Agent 多智能体协作
 
 ## 1. 核心目标
 
@@ -2184,7 +2070,7 @@ CREATE TABLE agent_team_runs (
 - [ ] 复杂任务 demo 验证（如：研究一个主题 → 写报告 → 审查修改）
 
 
-# 二十一、V10 MCP Ecosystem Model Context Protocol
+# 二十、V10 MCP Ecosystem Model Context Protocol
 
 ## 1. 核心目标
 
@@ -2307,7 +2193,7 @@ AgentForge:  agentforge:memory/search, agentforge:agent/execute
 - [ ] MCP 工具在 Debug Panel 中展示来源标注
 
 
-# 二十二、持续演进 —— Beyond V10
+# 二十一、持续演进 —— Beyond V10
 
 V1-V10 完成后，AgentForge 已经是一个功能完备的 Agent 平台。以下是更高阶的演进方向：
 
@@ -2350,7 +2236,7 @@ V1-V10 完成后，AgentForge 已经是一个功能完备的 Agent 平台。以�
 - **Custom Terms & Policies**：自定义使用条款和 AI 策略
 
 
-# 二十三、执行路线图总览
+# 二十二、执行路线图总览
 
 ## 优先级矩阵
 
@@ -2368,10 +2254,7 @@ V1-V10 完成后，AgentForge 已经是一个功能完备的 Agent 平台。以�
                       │
          P1-1 后台队列│
          P1-2 可观测  │    V5  Voice Agent
-         P1-5 审批门  │    V7  Browser Extension
-                      │
-         V8  Browser  │    V10 MCP Ecosystem
-          Agent       │
+         P1-5 审批门  │    V10 MCP Ecosystem
                       │
                     低影响
 ```
@@ -2387,15 +2270,13 @@ V1-V10 完成后，AgentForge 已经是一个功能完备的 Agent 平台。以�
 | **Batch 5** | P1-1 后台队列 + P1-2 可观测性 | 1-2 周 | BullMQ 解耦，Prometheus + Grafana |
 | **Batch 6** | V5 Voice Agent | 2 周 | WebSocket 音频流，ASR/TTS，打断机制 |
 | **Batch 7** | V6 Workflow Engine | 3-4 周 | DAG 执行器，检查点恢复，工作流模板 |
-| **Batch 8** | V7 Browser Extension | 1-2 周 | Chrome 扩展，侧边栏，页面上下文 |
-| **Batch 9** | V8 Browser Agent | 2-3 周 | Playwright 沙箱，浏览器工具集 |
-| **Batch 10** | V9 Multi-Agent | 3-4 周 | 多角色 Agent，消息总线，协作模式 |
-| **Batch 11** | V10 MCP Ecosystem | 2-3 周 | MCP Server/Client，工具热加载 |
+| **Batch 8** | V9 Multi-Agent | 3-4 周 | 多角色 Agent，消息总线，协作模式 |
+| **Batch 9** | V10 MCP Ecosystem | 2-3 周 | MCP Server/Client，工具热加载 |
 
-> **总计预估：** 22-30 周（约 5-7 个月，1 人全职）。可根据实际人力并行推进。
+> **总计预估：** 18-25 周（约 4-6 个月，1 人全职）。可根据实际人力并行推进。
 
 ---
 
 ## 健壮性说明
 
-本文档中所有带 `✅` 标记的阶段表示已完成并通过自我验证。P0/P1/P2 和 V5-V10 阶段的验收标准均为待完成状态。每个阶段的验收标准设计为可独立验证——任意阶段完成后即可合并到 main 分支，不依赖后续阶段。
+本文档中所有带 `✅` 标记的阶段表示已完成并通过自我验证。V5-V10 阶段的验收标准为待完成状态。每个阶段的验收标准设计为可独立验证——任意阶段完成后即可合并到 main 分支，不依赖后续阶段。

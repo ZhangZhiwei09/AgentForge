@@ -5,7 +5,7 @@
 ### Prerequisites
 - Node.js >= 20
 - pnpm >= 9
-- Python >= 3.12
+- Docker Desktop
 - PostgreSQL 16
 
 ### Install
@@ -17,15 +17,15 @@ pnpm install
 ### Environment
 
 ```bash
-cp apps/api/.env.example apps/api/.env
-# Edit apps/api/.env with your API keys
+cp apps/server/.env.example apps/server/.env
+# Edit apps/server/.env with your API keys
 ```
 
 ### Database
 
 ```bash
-cd apps/api
-alembic upgrade head
+pnpm db:generate
+pnpm db:migrate
 ```
 
 ### Dev

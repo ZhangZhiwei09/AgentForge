@@ -271,6 +271,7 @@ export const fileTools: RegisteredTool[] = [
     timeout: 10_000,
     requireApproval: false,
     category: "file",
+    parallelizable: true,
   },
   {
     definition: fileWriteDef,
@@ -279,6 +280,7 @@ export const fileTools: RegisteredTool[] = [
     timeout: 10_000,
     requireApproval: true, // Requires human approval
     category: "file",
+    parallelizable: false,
   },
   {
     definition: fileSearchDef,
@@ -287,5 +289,6 @@ export const fileTools: RegisteredTool[] = [
     timeout: 15_000,
     requireApproval: false,
     category: "file",
+    parallelizable: true,
   },
 ];

@@ -11,7 +11,7 @@ config({ path: resolve(__dirname, "../.env") });
 
 export const settings = {
   // PostgreSQL 连接字符串，端口 5434 避免和本地其他 PG 实例冲突
-  databaseUrl: process.env.DATABASE_URL || "postgresql://postgres:postgres@127.0.0.1:5434/agentforge",
+  databaseUrl: process.env.DATABASE_URL || "postgresql://postgres:postgres@localhost:5434/agentforge",
   // OpenAI API 配置（用于 LLM 对话 + Embedding）
   openaiApiKey: process.env.OPENAI_API_KEY || "",
   openaiBaseUrl: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
@@ -27,4 +27,17 @@ export const settings = {
   // Embedding 模型名称
   embeddingModel: process.env.EMBEDDING_MODEL || "text-embedding-v2",
   port: parseInt(process.env.PORT || "8000", 10),
+  // Redis 连接 URL（可选，用于限流存储等场景）
+  redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
+  // 代码执行沙箱配置（Docker 容器中执行 Python/JavaScript）
+  sandboxImage: process.env.SANDBOX_IMAGE || "agentforge-sandbox:latest",
+  sandboxTimeoutSec: parseInt(process.env.SANDBOX_TIMEOUT_SEC || "60", 10),
+  sandboxMemoryMb: parseInt(process.env.SANDBOX_MEMORY_MB || "256", 10),
+  sandboxCpuShares: parseInt(process.env.SANDBOX_CPU_SHARES || "512", 10), // 0.5 CPU
+  // 语音 Agent (V5) — 复用 openaiApiKey，无需额外密钥
+  voiceEnabled: process.env.VOICE_ENABLED !== "false",
+  asrModel: process.env.ASR_MODEL || "whisper-1",
+  ttsModel: process.env.TTS_MODEL || "tts-1",
+  ttsVoice: process.env.TTS_VOICE || "alloy",
+  ttsSpeed: parseFloat(process.env.TTS_SPEED || "1.0"),
 };

@@ -11,12 +11,14 @@
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
+    "test": "turbo test",
     "clean": "turbo clean",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "infra:up": "docker compose -f infra/docker/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker/docker-compose.yml down",
     "infra:restart": "docker compose -f infra/docker/docker-compose.yml down && docker compose -f infra/docker/docker-compose.yml up -d",
     "server:dev": "pnpm --filter @agentforge/server dev",
+    "server:worker": "pnpm --filter @agentforge/server worker",
     "web:dev": "pnpm --filter @agentforge/web dev",
     "db:migrate": "pnpm --filter @agentforge/database db:migrate",
     "db:seed": "pnpm --filter @agentforge/database db:seed",
@@ -25,8 +27,8 @@
     "start": "powershell -ExecutionPolicy Bypass -File start.ps1"
   },
   "devDependencies": {
-    "turbo": "^2.4.0",
     "prettier": "^3.4.2",
+    "turbo": "^2.4.0",
     "typescript": "^5.7.0"
   }
 }

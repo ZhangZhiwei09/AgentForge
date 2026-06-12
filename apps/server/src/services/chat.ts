@@ -7,6 +7,8 @@ import type { ChatMessage } from "../providers/types.js";
 import { MemoryEngine } from "./memory-engine.js";
 import { toolRegistry } from "../tools/registry.js";
 import { logger } from "@agentforge/logger";
+import { truncateHistory } from "../lib/context-window.js";
+import { chatMessagesTotal, chatTokensTotal } from "../observability/metrics.js";
 
 // 拼在 system prompt 后面的记忆上下文前缀
 const MEMORY_PROMPT_PREFIX = "\n\n# User Context (from memory)\nThe following is what you know about the user from past conversations:\n";
@@ -141,11 +143,13 @@ export class ChatService {
       orderBy: { createdAt: "asc" },
     });
 
-    // 7. 构建初始对话消息列表（用于 LLM 上下文）
-    const conversationMessages: ChatMessage[] = history.map((msg) => ({
+    // 7. 构建初始对话消息列表（用于 LLM 上下文），并截断以适应token预算
+    const rawMessages: ChatMessage[] = history.map((msg) => ({
       role: msg.role,
       content: msg.content,
     }));
+    // 8000 token预算：为system prompt + context + response留出空间
+    const conversationMessages = truncateHistory(rawMessages, 8000);
 
     // 8. 获取启用的工具定义（仅当显式指定 tools 参数时才发送工具）
     const toolDefs = enabledTools && enabledTools.length > 0
@@ -177,12 +181,18 @@ export class ChatService {
     // 11. 工具调用循环：最多 MAX_TOOL_ROUNDS 轮
     for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
       let roundContent = "";
+      // Collect tool calls first, execute after stream completes
+      const pendingToolCalls: Array<{
+        id: string;
+        name: string;
+        args: Record<string, unknown>;
+      }> = [];
       const executedTools: Array<{
         tc: { id: string; name: string; arguments: string };
         result: string;
       }> = [];
 
-      // 调用 LLM（流式）
+      // 调用 LLM（流式） — 收集token和tool_call，延迟执行
       for await (const chunk of provider.streamChat(
         conversationMessages,
         resolvedModel,
@@ -205,26 +215,64 @@ export class ChatService {
           const tc = chunk.tool_call;
           logger.debug({ tool: tc.name, args: tc.arguments.slice(0, 100) }, "Tool call");
 
-          // 解析参数
           let args: Record<string, unknown> = {};
           try {
             args = JSON.parse(tc.arguments);
           } catch {
             logger.warn({ arguments: tc.arguments }, "Failed to parse tool arguments");
           }
+          pendingToolCalls.push({ id: tc.id, name: tc.name, args });
+        } else if (chunk.type === "done") {
+          // 累积 token 用量
+          totalPromptTokens += chunk.usage?.prompt_tokens || 0;
+          totalCompletionTokens += chunk.usage?.completion_tokens || 0;
+        }
+      }
 
-          // 执行工具（立即执行，立即通知前端）
-          const result = await toolRegistry.execute(tc.name, args);
-          executedTools.push({ tc, result });
+      // Execute pending tool calls — parallel for parallelizable tools
+      if (pendingToolCalls.length > 0) {
+        const allTools = toolRegistry.getAll();
+        const toolMetaMap = new Map(allTools.map((t) => [t.definition.function.name, t]));
 
-          // 通知前端：工具调用
+        // Split into parallelizable and sequential
+        const parallel: typeof pendingToolCalls = [];
+        const sequential: typeof pendingToolCalls = [];
+        for (const ptc of pendingToolCalls) {
+          const meta = toolMetaMap.get(ptc.name);
+          if (meta?.parallelizable) {
+            parallel.push(ptc);
+          } else {
+            sequential.push(ptc);
+          }
+        }
+
+        // Execute parallelizable tools concurrently
+        if (parallel.length > 0) {
+          const parallelResults = await Promise.all(
+            parallel.map(async (ptc) => ({
+              tc: { id: ptc.id, name: ptc.name, arguments: JSON.stringify(ptc.args) },
+              result: await toolRegistry.execute(ptc.name, ptc.args),
+            })),
+          );
+          executedTools.push(...parallelResults);
+        }
+
+        // Execute sequential tools one by one
+        for (const ptc of sequential) {
+          const result = await toolRegistry.execute(ptc.name, ptc.args);
+          executedTools.push({
+            tc: { id: ptc.id, name: ptc.name, arguments: JSON.stringify(ptc.args) },
+            result,
+          });
+        }
+
+        // Yield tool_call and tool_result events to frontend
+        for (const { tc, result } of executedTools) {
           yield {
             type: "tool_call",
             tool_call: { id: tc.id, name: tc.name, arguments: tc.arguments },
             message_id: assistantMsgId,
           };
-
-          // 通知前端：工具结果
           yield {
             type: "tool_result",
             tool_result: {
@@ -234,10 +282,6 @@ export class ChatService {
             },
             message_id: assistantMsgId,
           };
-        } else if (chunk.type === "done") {
-          // 累积 token 用量
-          totalPromptTokens += chunk.usage?.prompt_tokens || 0;
-          totalCompletionTokens += chunk.usage?.completion_tokens || 0;
         }
       }
 
@@ -289,28 +333,45 @@ export class ChatService {
       });
     }
 
-    // 14. 阶段三：从对话中提取新的长期记忆
+    // 14. 阶段三：异步投递记忆提取任务（P1-1 BullMQ 后台队列）
     let newMemoryCount = 0;
     try {
-      const engine = new MemoryEngine();
-      const extracted = await engine.extractAndStore(
-        conversationMessages
-          .filter((m) => m.role === "user" || m.role === "assistant")
-          .map((m) => ({ role: m.role, content: m.content || "" })),
-        userId,
-        conversationId,
-        providerName,
-      );
-      newMemoryCount = extracted.length;
+      const { getMemoryQueue } = await import("../jobs/queues.js");
+      const queue = getMemoryQueue();
+      const msgs = conversationMessages
+        .filter((m) => m.role === "user" || m.role === "assistant")
+        .map((m) => ({ role: m.role, content: m.content || "" }));
+      if (queue) {
+        // 投递到 BullMQ 后台队列，立即返回
+        await queue.add("extract", {
+          messages: msgs,
+          userId,
+          conversationId,
+          providerName,
+        });
+        logger.debug({ conversationId }, "Memory extraction job dispatched");
+      } else {
+        // 优雅降级：Redis 不可用，回退同步提取
+        const engine = new MemoryEngine();
+        const extracted = await engine.extractAndStore(
+          msgs, userId, conversationId, providerName,
+        );
+        newMemoryCount = extracted.length;
+      }
     } catch (e) {
-      logger.warn(e, "Memory extraction failed");
+      logger.warn(e, "Memory extraction dispatch failed");
     }
 
     // 15. 延迟统计
     const latencyMs = Date.now() - startTs;
     const firstTokenMs = firstTokenTs ? firstTokenTs - startTs : latencyMs;
 
-    // 16. 发送 done 事件：携带用量统计、工具调用统计和记忆处理结果
+    // 16. 记录指标
+    chatMessagesTotal.inc({ provider: providerName, model: resolvedModel });
+    chatTokensTotal.inc({ provider: providerName, type: "prompt" }, totalPromptTokens);
+    chatTokensTotal.inc({ provider: providerName, type: "completion" }, totalCompletionTokens);
+
+    // 17. 发送 done 事件：携带用量统计、工具调用统计和记忆处理结果
     yield {
       type: "done",
       message_id: assistantMsgId,

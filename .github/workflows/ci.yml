@@ -8,6 +8,9 @@ on:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: "postgresql://test:test@localhost:5434/agentforge_test"
+
     services:
       postgres:
         image: pgvector/pgvector:pg16
@@ -27,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 9.15.4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
@@ -35,10 +38,17 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Wait for PostgreSQL
+        run: |
+          until pg_isready -h localhost -p 5434 -U test; do
+            echo "Waiting for postgres..."
+            sleep 2
+          done
+        env:
+          PGPASSWORD: test
+
       - name: Generate Prisma Client
         run: pnpm db:generate
-        env:
-          DATABASE_URL: "postgresql://test:test@localhost:5434/agentforge_test"
 
       - name: Lint
         run: pnpm lint
@@ -52,7 +62,6 @@ jobs:
       - name: Test
         run: pnpm test
         env:
-          DATABASE_URL: "postgresql://test:test@localhost:5434/agentforge_test"
           JWT_SECRET: "ci-test-secret"
           LOG_LEVEL: "warn"
 

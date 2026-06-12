@@ -65,6 +65,29 @@ services:
       - etcd
       - minio
 
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Jaeger Tracing ──────────────────────────────────────
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4318:4318"     # OTLP HTTP receiver
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    volumes:
+      - jaeger_data:/tmp
+
   server:
     build:
       context: ../../
@@ -75,11 +98,21 @@ services:
       DATABASE_URL: postgresql://postgres:postgres@db:5432/agentforge
       MILVUS_HOST: milvus
       MILVUS_PORT: "19530"
+      REDIS_URL: redis://redis:6379
     depends_on:
       - db
       - milvus
+      - redis
     env_file:
       - ../../apps/server/.env
+
+  # ── Code Execution Sandbox (build-only, not running) ─────
+  sandbox:
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.sandbox
+    image: agentforge-sandbox:latest
+    command: ["echo", "Sandbox image built"]
 
 volumes:
   pgdata:
@@ -87,3 +120,5 @@ volumes:
   etcd_data:
   minio_data:
   milvus_data:
+  redis_data:
+  jaeger_data:

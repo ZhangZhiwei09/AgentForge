@@ -1,5 +1,5 @@
 import { PrismaClient } from "@prisma/client";
-import { randomUUID, createHash } from "crypto";
+import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
@@ -8,9 +8,7 @@ const CUSTOMER_USER_ID = "00000000-0000-0000-0000-000000000002";
 const DEFAULT_PASSWORD = "agentforge";
 
 function hashPassword(password: string): string {
-  const salt = randomUUID();
-  const hash = createHash("sha256").update(salt + password).digest("hex");
-  return `${salt}:${hash}`;
+  return bcrypt.hashSync(password, 12);
 }
 
 async function main() {

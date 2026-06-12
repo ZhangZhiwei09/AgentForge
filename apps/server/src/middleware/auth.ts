@@ -10,15 +10,21 @@ const PUBLIC_PATHS = [
   "/api/auth/signin",
   "/api/auth/refresh",
   "/api/health",
-  "/api/customer-chat",  // Anonymous customer chat
 ];
 
 // Prefix-based public paths (any path starting with these is public)
-const PUBLIC_PREFIXES = [];
+const PUBLIC_PREFIXES = [
+  "/api/customer-chat",  // Anonymous customer chat + FAQ + rate + analytics
+];
 
 export const authMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
-  // Skip auth for public routes
+  // Skip auth for public routes (exact match)
   if (PUBLIC_PATHS.some((p) => c.req.path === p)) {
+    return next();
+  }
+
+  // Skip auth for public prefixes (starts with)
+  if (PUBLIC_PREFIXES.some((prefix) => c.req.path.startsWith(prefix))) {
     return next();
   }
 

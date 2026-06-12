@@ -2,7 +2,7 @@
 // 支持 token 流式输出 + function calling（tool calls）
 import OpenAI from "openai";
 import type { ToolDefinition } from "@agentforge/shared-types";
-import type { LLMProvider, StreamChunk, ChatMessage } from "./types.js";
+import type { LLMProvider, StreamChunk, ChatMessage, ChatSyncResult } from "./types.js";
 
 export class OpenAIProvider implements LLMProvider {
   private client: OpenAI;
@@ -21,6 +21,48 @@ export class OpenAIProvider implements LLMProvider {
       { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "openai", max_tokens: 128000 },
       { id: "gpt-4-turbo", name: "GPT-4 Turbo", provider: "openai", max_tokens: 128000 },
     ];
+  }
+
+  // 非流式聊天：用于记忆提取、Rerank、结构化JSON输出等场景
+  async chatSync(
+    messages: ChatMessage[],
+    model: string,
+    systemPrompt: string = "",
+    temperature: number = 0.7,
+    maxTokens: number = 4096,
+    jsonMode: boolean = false,
+  ): Promise<ChatSyncResult> {
+    const fullMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [];
+    if (systemPrompt) {
+      fullMessages.push({ role: "system", content: systemPrompt });
+    }
+    for (const m of messages) {
+      fullMessages.push({ role: m.role as any, content: m.content });
+    }
+
+    const params: Record<string, unknown> = {
+      model,
+      messages: fullMessages,
+      temperature,
+      max_tokens: maxTokens,
+    };
+
+    // OpenAI原生JSON模式
+    if (jsonMode) {
+      params.response_format = { type: "json_object" };
+    }
+
+    const response = await this.client.chat.completions.create(
+      params as any,
+    );
+
+    return {
+      content: response.choices[0].message.content?.trim() || "",
+      usage: {
+        prompt_tokens: response.usage?.prompt_tokens || 0,
+        completion_tokens: response.usage?.completion_tokens || 0,
+      },
+    };
   }
 
   // 核心方法：异步生成器，逐个 yield token/tool_call/done 片段给上层

@@ -17,3 +17,6 @@ venv/
 .trae/
 .DS_Store
 Thumbs.db
+
+# Runtime eval logs
+apps/logs/

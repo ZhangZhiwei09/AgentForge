@@ -4,9 +4,9 @@ import { DebugPanel } from "../debug/DebugPanel";
 import { MemoryPanel } from "../memory/MemoryPanel";
 import { KnowledgePanel } from "../knowledge/KnowledgePanel";
 import { AgentPanel } from "../agent/AgentPanel";
-import { CustomerChat } from "../customer-chat/CustomerChat";
+import { VoicePanel } from "../voice/VoicePanel";
 import { useChatStore } from "@/stores/chat";
-import { Braces, Brain, BookOpen, Bot } from "lucide-react";
+import { Braces, Brain, BookOpen, Bot, Mic } from "lucide-react";
 
 export function ChatLayout() {
     const isDebugOpen = useChatStore((s) => s.isDebugOpen);
@@ -15,7 +15,7 @@ export function ChatLayout() {
     const currentConversationId = useChatStore((s) => s.currentConversationId);
 
     return (
-        <div className="flex h-screen w-screen overflow-hidden">
+        <div className="flex flex-1 overflow-hidden">
             <ConversationList />
             <ChatArea />
             {isDebugOpen && (
@@ -66,6 +66,17 @@ export function ChatLayout() {
                             <Bot className="h-3.5 w-3.5" />
                             Agent
                         </button>
+                        <button
+                            onClick={() => setPanelMode("voice")}
+                            className={`flex items-center gap-1 px-3 py-2 text-xs font-medium transition-colors ${
+                                panelMode === "voice"
+                                    ? "border-b-2 border-foreground text-foreground"
+                                    : "text-muted-foreground hover:text-foreground"
+                            }`}
+                        >
+                            <Mic className="h-3.5 w-3.5" />
+                            Voice
+                        </button>
                     </div>
                     {panelMode === "debug" ? (
                       <DebugPanel />
@@ -73,12 +84,13 @@ export function ChatLayout() {
                       <MemoryPanel />
                     ) : panelMode === "knowledge" ? (
                       <KnowledgePanel />
+                    ) : panelMode === "voice" ? (
+                      <VoicePanel />
                     ) : (
                       <AgentPanel conversationId={currentConversationId} />
                     )}
                 </div>
             )}
-            <CustomerChat />
         </div>
     );
 }

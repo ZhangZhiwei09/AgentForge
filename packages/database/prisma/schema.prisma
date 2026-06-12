@@ -61,10 +61,17 @@ model Conversation {
   updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   type           String         @default("chat") @db.VarChar(32)
   sessionId      String?        @map("session_id") @db.VarChar(64)
+  intent         String?        @db.VarChar(100)
+  rating         String?        @db.VarChar(20)
+  status         String?        @default("active") @db.VarChar(20)
+  customerMeta   Json?          @map("customer_meta")
   user           User           @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   memories       Memory[]
   messages       Message[]
   agentSessions  AgentSession[]
+  ratings        SatisfactionRating[]
+  approvals      AgentApproval[]
+  voiceSessions  VoiceSession[]
 
   @@index([sessionId], map: "ix_conversations_session_id")
   @@index([userId], map: "ix_conversations_user_id")
@@ -106,11 +113,13 @@ model KnowledgeBase {
   id          String              @id @db.VarChar(36)
   name        String              @db.VarChar(255)
   description String?
+  category    String?             @db.VarChar(100)
   enabled     Boolean             @default(true)
   createdAt   DateTime?           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime?           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  chunks      KnowledgeChunk[]
-  documents   KnowledgeDocument[]
+  chunks               KnowledgeChunk[]
+  documents            KnowledgeDocument[]
+  invertedIndexEntries KnowledgeInvertedIndex[]
 
   @@map("knowledge_bases")
 }
@@ -142,12 +151,31 @@ model KnowledgeChunk {
   milvusId        BigInt?           @map("milvus_id")
   enabled         Boolean           @default(true)
   created_at      DateTime?         @default(now()) @db.Timestamptz(6)
-  document        KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  knowledgeBase   KnowledgeBase     @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  document             KnowledgeDocument         @relation(fields: [documentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  knowledgeBase        KnowledgeBase             @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  invertedIndexEntries KnowledgeInvertedIndex[]
 
   @@index([documentId], map: "ix_knowledge_chunks_doc_id")
   @@index([knowledgeBaseId], map: "ix_knowledge_chunks_kb_id")
   @@map("knowledge_chunks")
+}
+
+model KnowledgeInvertedIndex {
+  id       String   @id @db.VarChar(36)
+  term     String   @db.VarChar(255)
+  chunkId  String   @map("chunk_id") @db.VarChar(36)
+  kbId     String   @map("kb_id") @db.VarChar(36)
+  termFreq Int      @default(1) @map("term_freq")
+  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  chunk        KnowledgeChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+  knowledgeBase KnowledgeBase @relation(fields: [kbId], references: [id], onDelete: Cascade)
+
+  @@index([term], map: "ix_inverted_index_term")
+  @@index([chunkId], map: "ix_inverted_index_chunk")
+  @@index([kbId, term], map: "ix_inverted_index_kb_term")
+
+  @@map("knowledge_inverted_index")
 }
 
 model AgentSession {
@@ -160,9 +188,64 @@ model AgentSession {
   startedAt      DateTime     @default(now()) @map("started_at") @db.Timestamptz(6)
   completedAt    DateTime?    @map("completed_at") @db.Timestamptz(6)
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  approvals      AgentApproval[]
 
   @@index([conversationId], map: "ix_agent_sessions_conversation_id")
   @@map("agent_sessions")
+}
+
+model AgentApproval {
+  id              String        @id @db.VarChar(36)
+  sessionId       String        @map("session_id") @db.VarChar(36)
+  conversationId  String        @map("conversation_id") @db.VarChar(36)
+  stepNumber      Int           @map("step_number")
+  toolName        String        @map("tool_name") @db.VarChar(128)
+  toolArgs        Json          @map("tool_args")
+  riskLevel       String        @map("risk_level") @db.VarChar(20)
+  reason          String        @db.VarChar(500)
+  status          String        @default("pending") @db.VarChar(20)
+  approvedBy      String?       @map("approved_by") @db.VarChar(36)
+  modifiedArgs    Json?         @map("modified_args")
+  rejectionReason String?       @map("rejection_reason") @db.VarChar(500)
+  timeoutMs       Int           @default(300000) @map("timeout_ms")
+  requestedAt     DateTime      @default(now()) @map("requested_at") @db.Timestamptz(6)
+  decidedAt       DateTime?     @map("decided_at") @db.Timestamptz(6)
+  session         AgentSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  conversation    Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId], map: "ix_agent_approvals_session_id")
+  @@index([status], map: "ix_agent_approvals_status")
+  @@map("agent_approvals")
+}
+
+model SatisfactionRating {
+  id             String       @id @db.VarChar(36)
+  conversationId String       @map("conversation_id") @db.VarChar(36)
+  messageId      String?      @map("message_id") @db.VarChar(36)
+  rating         String       @db.VarChar(20)
+  comment        String?
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId], map: "ix_satisfaction_ratings_conversation_id")
+  @@map("satisfaction_ratings")
+}
+
+model VoiceSession {
+  id               String       @id @db.VarChar(36)
+  conversationId   String       @map("conversation_id") @db.VarChar(36)
+  status           String       @default("active") @db.VarChar(20)
+  audioDurationSec Int          @default(0) @map("audio_duration_sec")
+  asrTokenCount    Int          @default(0) @map("asr_token_count")
+  ttsCharCount     Int          @default(0) @map("tts_char_count")
+  transcript       Json         @default("[]")
+  voice            String?      @db.VarChar(32)
+  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId], map: "ix_voice_sessions_conversation_id")
+  @@map("voice_sessions")
 }
 
 model alembic_version {
