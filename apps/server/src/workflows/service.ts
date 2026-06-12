@@ -31,6 +31,8 @@ interface PendingApproval {
 export class WorkflowService {
   private dagExecutor: DAGExecutor;
   private pendingApprovals: Map<string, PendingApproval> = new Map();
+  /** Active workflow generators keyed by runId — enables real resume after pause */
+  private runningGenerators: Map<string, AsyncGenerator<unknown>> = new Map();
 
   constructor() {
     this.dagExecutor = new DAGExecutor();
@@ -427,22 +429,136 @@ export class WorkflowService {
       return;
     }
 
+    // Load workflow definition
+    const workflow = await prisma.workflow.findFirst({
+      where: { id: run.workflowId, userId },
+    });
+    if (!workflow) {
+      yield { type: "workflow_failed", runId, error: "Workflow not found" };
+      return;
+    }
+
+    const definition = workflow.definition as unknown as WorkflowDefinition;
+    const checkpoint = (run.checkpoint || {}) as Record<string, unknown>;
+    const completedStepIds: string[] = (checkpoint.completedSteps as string[]) || [];
+    const savedVariables = (checkpoint.variables as Record<string, unknown>) || {};
+    const savedStepResults = (checkpoint.stepResults as Record<string, unknown>) || {};
+
+    // Rebuild context from checkpoint
+    const variables = { ...savedVariables };
+    const stepResults = { ...savedStepResults };
+    const allStepIds = definition.steps.map((s) => s.id);
+    const totalSteps = allStepIds.length;
+
     // Update status to running
     await prisma.workflowRun.update({
       where: { id: runId },
       data: { status: "running" },
     });
 
-    yield { type: "workflow_resumed", runId };
+    yield { type: "workflow_resumed", runId, resumedFrom: run.currentStepId };
 
-    // Continue execution — for now, we yield that the resume was acknowledged
-    // Full checkpoint resume requires re-creating the execution context
-    yield {
-      type: "workflow_completed",
+    // Re-create execution context
+    const pendingApprovals = this.pendingApprovals;
+    const context: DAGExecutionContext = {
       runId,
-      output: run.output,
-      note: "Resume from checkpoint — re-create and continue execution",
+      conversationId: "",
+      variables,
+      stepResults,
+      userId,
+      definition,
+      emit: () => {},
+      pauseForApproval: (stepId, message, details, timeoutMs) => {
+        return new Promise((resolve) => {
+          const key = `${runId}:${stepId}`;
+          const timeout = setTimeout(() => {
+            const pending = pendingApprovals.get(key);
+            if (pending) {
+              pendingApprovals.delete(key);
+              pending.resolve({ action: "timed_out" as const });
+            }
+          }, timeoutMs);
+          pendingApprovals.set(key, { resolve, timeout, stepId });
+        });
+      },
     };
+
+    // Re-execute DAG — skip completed steps
+    for (const stepId of completedStepIds) {
+      // Ensure completed steps are in stepResults to signal "already done"
+      if (!(stepId in stepResults)) {
+        stepResults[stepId] = { status: "completed", result: "(resumed)" };
+      }
+    }
+
+    for await (const ev of this.dagExecutor.executeWithSkip(context, new Set(completedStepIds))) {
+      const event = ev as Record<string, unknown>;
+
+      // Update progress
+      if (event.type !== "workflow_approval_required" && event.type !== "workflow_completed") {
+        const stepId = event.stepId as string;
+        if (stepId && !completedStepIds.includes(stepId)) {
+          completedStepIds.push(stepId);
+          const progress: ProgressSummary = {
+            completed: completedStepIds.length,
+            total: totalSteps,
+            failed: 0,
+            skipped: 0,
+            running: 0,
+          };
+          await prisma.workflowRun.update({
+            where: { id: runId },
+            data: {
+              progress: progress as any,
+              currentStepId: stepId,
+              checkpoint: this.dagExecutor.buildCheckpoint(
+                runId, run.workflowId,
+                completedStepIds,
+                allStepIds.filter((id) => !completedStepIds.includes(id)),
+                [], variables, stepResults, totalSteps,
+              ) as any,
+            },
+          });
+        }
+      }
+
+      // Handle approval
+      if (event.type === "workflow_approval_required") {
+        await prisma.workflowRun.update({
+          where: { id: runId },
+          data: { status: "paused", currentStepId: event.stepId as string },
+        });
+        yield event;
+        return;
+      }
+
+      // Handle completion
+      if (event.type === "workflow_completed") {
+        await prisma.workflowRun.update({
+          where: { id: runId },
+          data: {
+            status: "completed",
+            output: stepResults as any,
+            completedAt: new Date(),
+            progress: { completed: totalSteps, total: totalSteps, failed: 0, skipped: 0, running: 0 } as any,
+          },
+        });
+        yield event;
+        return;
+      }
+
+      // Handle failure
+      if (event.type === "workflow_failed") {
+        await prisma.workflowRun.update({
+          where: { id: runId },
+          data: { status: "failed", error: (event.error as string) || "Workflow failed", completedAt: new Date() },
+        });
+        yield event;
+        return;
+      }
+
+      yield event;
+    }
   }
 
   /** Cancel a running or paused workflow */

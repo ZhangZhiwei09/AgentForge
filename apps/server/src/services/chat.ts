@@ -137,11 +137,13 @@ export class ChatService {
       },
     });
 
-    // 6. 加载历史消息（按时间升序，构成完整对话上下文）
+    // 6. 加载历史消息（取最近 100 条，DESC 后反转以支持 truncateHistory 从后向前选取）
     const history = await prisma.message.findMany({
       where: { conversationId },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: "desc" },
+      take: 100,
     });
+    history.reverse();
 
     // 7. 构建初始对话消息列表（用于 LLM 上下文），并截断以适应token预算
     const rawMessages: ChatMessage[] = history.map((msg) => ({
@@ -193,40 +195,57 @@ export class ChatService {
       }> = [];
 
       // 调用 LLM（流式） — 收集token和tool_call，延迟执行
-      for await (const chunk of provider.streamChat(
-        conversationMessages,
-        resolvedModel,
-        enhancedPrompt,
-        undefined,
-        undefined,
-        toolDefs.length > 0 ? toolDefs : undefined,
-      )) {
-        if (chunk.type === "token") {
-          if (firstTokenTs === null) firstTokenTs = Date.now();
-          roundContent += chunk.content!;
-          fullContent += chunk.content!;
-          yield {
-            type: "token",
-            content: chunk.content,
-            message_id: assistantMsgId,
-            model: resolvedModel,
-          };
-        } else if (chunk.type === "tool_call" && chunk.tool_call) {
-          const tc = chunk.tool_call;
-          logger.debug({ tool: tc.name, args: tc.arguments.slice(0, 100) }, "Tool call");
+      try {
+        for await (const chunk of provider.streamChat(
+          conversationMessages,
+          resolvedModel,
+          enhancedPrompt,
+          undefined,
+          undefined,
+          toolDefs.length > 0 ? toolDefs : undefined,
+        )) {
+          if (chunk.type === "token") {
+            if (firstTokenTs === null) firstTokenTs = Date.now();
+            roundContent += chunk.content!;
+            fullContent += chunk.content!;
+            yield {
+              type: "token",
+              content: chunk.content,
+              message_id: assistantMsgId,
+              model: resolvedModel,
+            };
+          } else if (chunk.type === "tool_call" && chunk.tool_call) {
+            const tc = chunk.tool_call;
+            logger.debug({ tool: tc.name, args: tc.arguments.slice(0, 100) }, "Tool call");
 
-          let args: Record<string, unknown> = {};
-          try {
-            args = JSON.parse(tc.arguments);
-          } catch {
-            logger.warn({ arguments: tc.arguments }, "Failed to parse tool arguments");
+            let args: Record<string, unknown> = {};
+            try {
+              args = JSON.parse(tc.arguments);
+            } catch {
+              logger.warn({ arguments: tc.arguments }, "Failed to parse tool arguments");
+            }
+            pendingToolCalls.push({ id: tc.id, name: tc.name, args });
+          } else if (chunk.type === "done") {
+            // 累积 token 用量
+            totalPromptTokens += chunk.usage?.prompt_tokens || 0;
+            totalCompletionTokens += chunk.usage?.completion_tokens || 0;
           }
-          pendingToolCalls.push({ id: tc.id, name: tc.name, args });
-        } else if (chunk.type === "done") {
-          // 累积 token 用量
-          totalPromptTokens += chunk.usage?.prompt_tokens || 0;
-          totalCompletionTokens += chunk.usage?.completion_tokens || 0;
         }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : "Unknown error";
+        logger.error({ err: errMsg, round }, "LLM streaming failed in tool loop");
+        // If we have partial content, save it so the user sees something
+        if (fullContent.length > 0) {
+          break; // exit loop and finalize with what we have
+        }
+        // No content at all — yield error and abort
+        yield {
+          type: "error",
+          content: `AI 服务暂时不可用：${errMsg}`,
+          message_id: assistantMsgId,
+          model: resolvedModel,
+        };
+        return;
       }
 
       // Execute pending tool calls — parallel for parallelizable tools

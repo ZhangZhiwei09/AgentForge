@@ -155,11 +155,13 @@ export class AgentService {
     // 5. Build system prompt — use tool-calling variant
     const systemPrompt = REACT_PROMPT_WITH_TOOLS;
 
-    // 6. Load conversation history
+    // 6. Load conversation history (most recent 100, reversed for truncateHistory)
     const history = await prisma.message.findMany({
       where: { conversationId },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: "desc" },
+      take: 100,
     });
+    history.reverse();
 
     // 6000 token预算：需为system prompt + scratchpad + tool results留空间
     const rawMessages: ChatMessage[] = history.map((msg) => ({
@@ -504,13 +506,13 @@ export class AgentService {
 
   /**
    * Resume a paused agent session with the user's response.
-   * Continues the ReAct loop from where it left off instead of starting fresh.
+   * Delegates to continueReActLoop() — no duplicate loop code.
    */
   async *resume(
     sessionId: string,
     userResponse: string,
   ): AsyncGenerator<AgentStreamEvent> {
-    // 1. Load the paused session
+    // 1. Load and validate paused session
     const session = await this.getSession(sessionId);
     if (!session) {
       yield { type: "agent_error", error: "Agent session not found", step: 0 };
@@ -528,219 +530,26 @@ export class AgentService {
     const conversationId = session.conversationId;
     const task = session.task;
     const scratchpad: AgentStep[] = session.scratchpad || [];
-    const startIteration = scratchpad.length;
 
-    // 2. Resolve model/provider
-    const [providerName, resolvedModel] = resolveModel();
-    const provider = getProvider(providerName);
-
-    // 3. Get tool definitions (same as run)
-    const toolDefs = [
-      AGENT_DECIDE_TOOL,
-      ...toolRegistry.getDefinitions(),
-    ];
-
-    // 4. Load conversation history
-    const history = await prisma.message.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: "asc" },
-    });
-    const rawMessages: ChatMessage[] = history.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
-    const conversationMessages = truncateHistory(rawMessages, 6000);
-
-    // 5. Save user's response as a new message
-    const responseMsgId = randomUUID();
+    // 2. Save user's response to DB (continueReActLoop will reload from DB)
     await prisma.message.create({
       data: {
-        id: responseMsgId,
+        id: randomUUID(),
         conversationId,
         role: "user",
         content: userResponse,
-        model: resolvedModel,
+        model: resolveModel()[1],
       },
     });
-    conversationMessages.push({ role: "user", content: userResponse });
 
-    // 6. Send meta event
-    const systemPrompt = REACT_PROMPT_WITH_TOOLS;
-    yield {
-      type: "agent_meta",
-      session_id: sessionId,
-      model: resolvedModel,
-      provider: providerName,
-      max_iterations: 10,
-      tools_enabled: toolRegistry.listNames(),
-    };
-
-    // 7. Resume ReAct loop from the next iteration
-    let finalContent = "";
-    const maxIterations = 10;
-
-    for (let iteration = startIteration; iteration < maxIterations; iteration++) {
-      const totalSteps = iteration + 1;
-      logger.debug({ sessionId, iteration: totalSteps }, "Agent resume iteration");
-
-      // Update session status to running
-      await this.saveSession(
-        this.sessionRecord(sessionId, conversationId, task),
-        scratchpad,
-        "running",
-        null,
-      );
-
-      const iterationMessages: ChatMessage[] = [
-        {
-          role: "system",
-          content: this.buildIterationContext(systemPrompt, task, scratchpad, totalSteps),
-        },
-        ...conversationMessages,
-      ];
-
-      // LLM call with tool calling (same pattern as run)
-      const streamMsgId = randomUUID();
-      let llmResponse = "";
-      let agentDecision: AgentStep | null = null;
-
-      try {
-        for await (const chunk of provider.streamChat(
-          iterationMessages, resolvedModel, undefined, undefined, undefined, toolDefs,
-        )) {
-          if (chunk.type === "token" && chunk.content) {
-            llmResponse += chunk.content;
-            yield { type: "agent_token", content: chunk.content, message_id: streamMsgId };
-          } else if (chunk.type === "tool_call" && chunk.tool_call) {
-            const tc = chunk.tool_call;
-            if (tc.name === "agent_decide") {
-              agentDecision = this.parseAgentDecideFromArgs(tc.arguments, totalSteps);
-              if (agentDecision && llmResponse.trim().length > 0) {
-                yield { type: "agent_clear_stream", message_id: streamMsgId, step: totalSteps };
-              }
-            }
-          }
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        yield { type: "agent_error", error: `LLM error: ${msg}`, step: totalSteps };
-        await this.saveSession(
-          this.sessionRecord(sessionId, conversationId, task),
-          scratchpad, "failed", null,
-        );
-        return;
-      }
-
-      // Parse decision
-      const step = agentDecision || this.parseStep(llmResponse, totalSteps);
-      if (!step) {
-        // Fallback: treat raw text as response
-        await prisma.message.create({
-          data: { id: streamMsgId, conversationId, role: "assistant", content: llmResponse, model: resolvedModel },
-        });
-        yield { type: "agent_respond", content: llmResponse, summary: "Agent completed (unstructured)", message_id: streamMsgId };
-        await this.saveSession(
-          this.sessionRecord(sessionId, conversationId, task),
-          scratchpad, "completed", "Task completed",
-        );
-        yield { type: "agent_done", total_steps: totalSteps, final_summary: "Task completed", session_id: sessionId };
-        return;
-      }
-
-      // Process decision (same logic as run)
-      yield { type: "agent_think", step: totalSteps, observation: step.observation, analysis: step.analysis, plan: step.plan };
-      const decision = step.decision;
-
-      if (decision.action === "respond") {
-        yield { type: "agent_act", step: totalSteps, decision };
-        finalContent = decision.content;
-        await prisma.message.create({
-          data: { id: streamMsgId, conversationId, role: "assistant", content: decision.content, model: resolvedModel },
-        });
-        step.result = decision.summary;
-        scratchpad.push(step);
-        yield { type: "agent_respond", content: decision.content, summary: decision.summary, message_id: streamMsgId };
-        await this.saveSession(
-          this.sessionRecord(sessionId, conversationId, task),
-          scratchpad, "completed", decision.summary,
-        );
-        yield { type: "agent_done", total_steps: totalSteps, final_summary: decision.summary, session_id: sessionId };
-        return;
-      } else if (decision.action === "tool_call") {
-        yield { type: "agent_clear_stream", message_id: streamMsgId, step: totalSteps };
-        yield { type: "agent_act", step: totalSteps, decision };
-
-        // ---- P1-5 Approval Gate ----
-        const registeredTool = toolRegistry.getAll().find(
-          (t) => t.definition.function.name === decision.tool,
-        );
-
-        if (registeredTool?.requireApproval) {
-          const approvalId = randomUUID();
-          const riskLevel = registeredTool.riskLevel;
-          const timeoutMs = 300_000;
-
-          step.result = undefined;
-          scratchpad.push(step);
-
-          try {
-            await prisma.agentApproval.create({
-              data: {
-                id: approvalId,
-                sessionId,
-                conversationId,
-                stepNumber: totalSteps,
-                toolName: decision.tool,
-                toolArgs: decision.args as object,
-                riskLevel,
-                reason: decision.reason,
-                status: "pending",
-                timeoutMs,
-                requestedAt: new Date(),
-              },
-            });
-          } catch (err) {
-            logger.warn({ error: (err as Error).message }, "Failed to create approval record");
-          }
-
-          await this.saveSession(
-            this.sessionRecord(sessionId, conversationId, task),
-            scratchpad, "paused", null,
-          );
-
-          yield {
-            type: "agent_approval_required",
-            approval_id: approvalId,
-            session_id: sessionId,
-            step: totalSteps,
-            tool_name: decision.tool,
-            tool_args: decision.args,
-            risk_level: riskLevel,
-            reason: decision.reason,
-            timeout_ms: timeoutMs,
-          } satisfies AgentApprovalRequiredEvent;
-          return;
-        }
-
-        const toolResult = await this.executeToolAndRecord(
-          decision.tool, decision.args, conversationMessages,
-        );
-        yield { type: "agent_observe", step: totalSteps, result: toolResult };
-        step.result = toolResult;
-        scratchpad.push(step);
-      } else if (decision.action === "ask_user") {
-        scratchpad.push(step);
-        await this.saveSession(
-          this.sessionRecord(sessionId, conversationId, task),
-          scratchpad, "paused", null,
-        );
-        yield { type: "agent_ask_user", question: decision.question, context: decision.context, session_id: sessionId };
-        return;
-      }
-    }
-
-    // Max iterations reached
-    yield { type: "agent_error", error: `Maximum iterations (${maxIterations}) reached`, step: startIteration + maxIterations };
+    // 3. Delegate to shared ReAct loop
+    yield* this.continueReActLoop(
+      sessionId,
+      conversationId,
+      task,
+      scratchpad,
+      scratchpad.length,
+    );
   }
 
   /**
@@ -846,8 +655,10 @@ export class AgentService {
       // Load conversation messages for tool result recording
       const history = await prisma.message.findMany({
         where: { conversationId },
-        orderBy: { createdAt: "asc" },
+        orderBy: { createdAt: "desc" },
+        take: 100,
       });
+      history.reverse();
       const rawMessages: ChatMessage[] = history.map((msg) => ({
         role: msg.role,
         content: msg.content,
@@ -957,11 +768,13 @@ export class AgentService {
     const systemPrompt = REACT_PROMPT_WITH_TOOLS;
     const maxIterations = DEFAULT_MAX_ITERATIONS;
 
-    // Load conversation history
+    // Load conversation history (most recent 100, reversed for truncateHistory)
     const history = await prisma.message.findMany({
       where: { conversationId },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: "desc" },
+      take: 100,
     });
+    history.reverse();
     const rawMessages: ChatMessage[] = history.map((msg) => ({
       role: msg.role,
       content: msg.content,

@@ -48,25 +48,20 @@ knowledgeRoutes.post("/api/knowledge/bases", zValidator("json", kbCreateSchema),
 knowledgeRoutes.get("/api/knowledge/bases", async (c) => {
   const bases = await prisma.knowledgeBase.findMany({
     orderBy: { createdAt: "desc" },
+    include: {
+      _count: { select: { documents: true } },
+    },
   });
 
-  // 为每个知识库统计文档数
-  const responses = await Promise.all(
-    bases.map(async (kb) => {
-      const docCount = await prisma.knowledgeDocument.count({
-        where: { knowledgeBaseId: kb.id },
-      });
-      return {
-        id: kb.id,
-        name: kb.name,
-        description: kb.description,
-        enabled: kb.enabled,
-        document_count: docCount,
-        created_at: kb.createdAt,
-        updated_at: kb.updatedAt,
-      };
-    }),
-  );
+  const responses = bases.map((kb) => ({
+    id: kb.id,
+    name: kb.name,
+    description: kb.description,
+    enabled: kb.enabled,
+    document_count: kb._count.documents,
+    created_at: kb.createdAt,
+    updated_at: kb.updatedAt,
+  }));
 
   return c.json(responses);
 });

@@ -7,7 +7,7 @@ import type {
 } from "@agentforge/shared-types";
 import { AgentService } from "../../services/agent.js";
 import type { CollaborationModeExecutor, ExecutionContext } from "./types.js";
-import { buildAgentTask, getRoleByName } from "./types.js";
+import { buildAgentTask, getRoleByName, toTeamEvent } from "./types.js";
 
 export class OrchestratorMode implements CollaborationModeExecutor {
   async *execute(
@@ -59,20 +59,10 @@ export class OrchestratorMode implements CollaborationModeExecutor {
           maxIterations: orchRole.maxIterations,
           tools: orchRole.tools.length > 0 ? orchRole.tools : null,
         })) {
-          // Forward agent events
-          const agentEvent = event as unknown as Record<string, unknown>;
-
-          if (agentEvent.type === "agent_think" || agentEvent.type === "agent_plan" ||
-              agentEvent.type === "agent_act" || agentEvent.type === "agent_observe") {
-            yield {
-              type: agentEvent.type,
-              agentName: orchName,
-              ...agentEvent,
-            } as TeamStreamEvent;
-          }
-
-          if (agentEvent.type === "agent_respond") {
-            orchOutput = (agentEvent.content || agentEvent.result || agentEvent.summary) as string;
+          const teamEvent = toTeamEvent(event, orchName);
+          if (teamEvent) yield teamEvent;
+          if (event.type === "agent_respond") {
+            orchOutput = event.content || event.summary || null;
           }
         }
 
@@ -179,16 +169,8 @@ export class OrchestratorMode implements CollaborationModeExecutor {
         maxIterations: role.maxIterations,
         tools: role.tools.length > 0 ? role.tools : null,
       })) {
-        const agentEvent = event as unknown as Record<string, unknown>;
-
-        if (agentEvent.type === "agent_think" || agentEvent.type === "agent_plan" ||
-            agentEvent.type === "agent_act" || agentEvent.type === "agent_observe") {
-          yield {
-            type: agentEvent.type,
-            agentName,
-            ...agentEvent,
-          } as TeamStreamEvent;
-        }
+        const teamEvent = toTeamEvent(event, agentName);
+        if (teamEvent) yield teamEvent;
       }
 
       // Write agent output to blackboard

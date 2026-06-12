@@ -103,17 +103,17 @@ customerChatRoutes.post("/api/customer-chat/rate", zValidator("json", rateSchema
     return c.json({ detail: "会话不存在" }, 404);
   }
 
-  // 保存评价（如果 satisfaction_ratings 表存在；否则静默成功）
+  // 保存评价
   try {
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO satisfaction_ratings (id, conversation_id, message_id, rating, comment, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())`,
-      randomUUID(),
-      conversation.id,
-      message_id || null,
-      rating,
-      comment || null,
-    );
+    await prisma.satisfactionRating.create({
+      data: {
+        id: randomUUID(),
+        conversationId: conversation.id,
+        messageId: message_id || null,
+        rating,
+        comment: comment || null,
+      },
+    });
   } catch {
     // 表可能还未创建，静默处理
     logger.warn("satisfaction_ratings table may not exist yet");

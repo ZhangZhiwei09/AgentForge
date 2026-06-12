@@ -6,6 +6,7 @@ import { AgentService } from "../services/agent.js";
 import { prisma } from "../db.js";
 import { logger } from "@agentforge/logger";
 import { createHono } from "../lib/hono.js";
+import { verifyConversationOwnership } from "../lib/conversation-guard.js";
 
 export const agentRoutes = createHono();
 const agentService = new AgentService();
@@ -40,11 +41,7 @@ agentRoutes.post("/api/agent/run", zValidator("json", agentRunSchema), async (c)
   const { conversation_id, task, model, max_iterations, tools } = c.req.valid("json");
   const user = c.get("user");
 
-  // Verify conversation belongs to authenticated user
-  const conversation = await prisma.conversation.findFirst({
-    where: { id: conversation_id, userId: user.id },
-  });
-  if (!conversation) {
+  if (!(await verifyConversationOwnership(conversation_id, user.id))) {
     return c.json({ detail: "Conversation not found or access denied" }, 404);
   }
 
@@ -88,10 +85,7 @@ agentRoutes.post(
       return c.json({ detail: "Agent session not found" }, 404);
     }
 
-    const conversation = await prisma.conversation.findFirst({
-      where: { id: session.conversationId, userId: user.id },
-    });
-    if (!conversation) {
+    if (!(await verifyConversationOwnership(session.conversationId, user.id))) {
       return c.json({ detail: "Conversation not found or access denied" }, 404);
     }
 
@@ -135,10 +129,7 @@ agentRoutes.post(
       return c.json({ detail: "Agent session not found" }, 404);
     }
 
-    const conversation = await prisma.conversation.findFirst({
-      where: { id: session.conversationId, userId: user.id },
-    });
-    if (!conversation) {
+    if (!(await verifyConversationOwnership(session.conversationId, user.id))) {
       return c.json({ detail: "Conversation not found or access denied" }, 404);
     }
 
@@ -241,10 +232,7 @@ agentRoutes.get("/api/agent-sessions", async (c) => {
   }
 
   const user = c.get("user");
-  const conversation = await prisma.conversation.findFirst({
-    where: { id: conversationId, userId: user.id },
-  });
-  if (!conversation) {
+  if (!(await verifyConversationOwnership(conversationId, user.id))) {
     return c.json({ detail: "Conversation not found or access denied" }, 404);
   }
 

@@ -1,6 +1,6 @@
 // DAG Executor — topology sort + level-based parallel execution + checkpoint + retry
 // Core engine for running workflow definitions step by step
-import type { WorkflowStep, StepResult, WorkflowDefinition } from "@agentforge/shared-types";
+import type { WorkflowStep, StepResult, WorkflowDefinition, ProgressSummary } from "@agentforge/shared-types";
 import { logger } from "@agentforge/logger";
 import {
   AgentStepHandler,
@@ -105,7 +105,7 @@ export class DAGExecutor {
           const startTime = Date.now();
 
           try {
-            const result = await this.executeWithRetry(step, context);
+            const result = await this.executeWithRetry(step, context, definition);
             const durationMs = Date.now() - startTime;
 
             return {
@@ -231,6 +231,131 @@ export class DAGExecutor {
   }
 
   /**
+   * Like execute(), but skips steps whose IDs are in the skipIds set.
+   * Used by resumeRun to continue from a checkpoint without re-running completed steps.
+   */
+  async *executeWithSkip(
+    context: DAGExecutionContext,
+    skipIds: Set<string>,
+  ): AsyncGenerator<unknown> {
+    const definition = context.definition;
+    const steps = definition.steps;
+    const levels = this.topologicalSort(steps);
+    const totalSteps = steps.length;
+    let completedCount = skipIds.size;
+    let failedCount = 0;
+    let skippedCount = 0;
+
+    yield {
+      type: "workflow_started",
+      runId: context.runId,
+      workflowName: definition.name,
+      totalSteps,
+      resumedFromCheckpoint: skipIds.size > 0,
+    };
+
+    // Execute level by level, skipping completed steps
+    for (const level of levels) {
+      // Filter out skipped steps; yield skip-completed events for them
+      const pendingSteps = level.steps.filter((s) => {
+        if (skipIds.has(s.id)) {
+          // Don't re-emit events for skipped steps on resume — they were already emitted
+          return false;
+        }
+        return true;
+      });
+
+      // Emit started events for all steps in this level
+      for (const step of level.steps) {
+        yield {
+          type: "workflow_step_started",
+          stepId: step.id,
+          stepType: step.type,
+        };
+        if (skipIds.has(step.id)) {
+          yield {
+            type: "workflow_step_completed",
+            stepId: step.id,
+            stepType: step.type,
+            status: "completed",
+            output: context.stepResults[step.id] || "(resumed from checkpoint)",
+            durationMs: 0,
+          };
+        }
+      }
+
+      if (pendingSteps.length === 0) continue;
+
+      // Execute pending steps in parallel (same as execute)
+      const levelResults = await Promise.allSettled(
+        pendingSteps.map(async (step) => {
+          const startTime = Date.now();
+          try {
+            const result = await this.executeWithRetry(step, context, definition);
+            const durationMs = Date.now() - startTime;
+            return { stepId: step.id, stepType: step.type, result: { ...result, durationMs: result.durationMs || durationMs } };
+          } catch (err) {
+            return {
+              stepId: step.id, stepType: step.type,
+              result: {
+                status: "failed" as const, output: null,
+                error: err instanceof Error ? err.message : "Step execution failed",
+                durationMs: Date.now() - startTime,
+              },
+            };
+          }
+        }),
+      );
+
+      for (const [i, settled] of levelResults.entries()) {
+        const step = pendingSteps[i];
+        if (settled.status === "fulfilled") {
+          const { result } = settled.value;
+          if (result.status === "completed") {
+            context.stepResults[step.id] = result.output;
+            completedCount++;
+          } else if (result.status === "skipped") {
+            skippedCount++;
+          } else if ((result as any).status === "paused") {
+            // Approval required — pause and return
+            yield {
+              type: "workflow_approval_required",
+              stepId: step.id,
+              stepType: step.type,
+              title: (step as any).title || step.id,
+              message: (result as any).message || "Approval required",
+              details: (result as any).details,
+            };
+            return;
+          } else {
+            failedCount++;
+          }
+
+          if (result.status === "completed") {
+            yield { type: "workflow_step_completed", stepId: step.id, status: "completed", output: result.output, durationMs: result.durationMs };
+          } else if (result.status === "skipped") {
+            yield { type: "workflow_step_completed", stepId: step.id, status: "skipped", output: result.output, durationMs: result.durationMs };
+          } else {
+            yield { type: "workflow_step_failed", stepId: step.id, error: result.error || "Unknown error", retryCount: result.retryCount || 0 };
+          }
+        } else {
+          failedCount++;
+          yield { type: "workflow_step_failed", stepId: step.id, error: settled.reason?.message || "Execution rejected" };
+        }
+      }
+    }
+
+    const progress: ProgressSummary = { completed: completedCount, total: totalSteps, failed: failedCount, skipped: skippedCount, running: 0 };
+    yield {
+      type: "workflow_completed",
+      runId: context.runId,
+      output: context.stepResults,
+      totalDurationMs: 0,
+      stepSummary: progress,
+    };
+  }
+
+  /**
    * Topological sort — groups steps into levels that can execute concurrently.
    * Detects circular dependencies.
    */
@@ -280,6 +405,7 @@ export class DAGExecutor {
   private async executeWithRetry(
     step: WorkflowStep,
     context: StepContext,
+    definition?: WorkflowDefinition,
   ): Promise<StepResult> {
     const retry = step.retry || { maxAttempts: 1, backoff: "fixed" as const, initialDelay: 0, maxDelay: 0, retryOn: [] };
     const maxAttempts = retry.maxAttempts || 1;
@@ -315,15 +441,24 @@ export class DAGExecutor {
           retryCount: maxAttempts,
         };
       }
-      if (onTimeout === "fallback" && step.fallback_step) {
-        // We'd need to resolve and execute the fallback step here
-        // For now, just skip
-        return {
-          status: "skipped",
-          output: null,
-          reason: `timeout — fallback not implemented`,
-          retryCount: maxAttempts,
-        };
+      if (onTimeout === "fallback" && step.fallback_step && definition) {
+        const fallbackStep = definition.steps.find(
+          (s: WorkflowStep) => s.id === step.fallback_step,
+        );
+        if (fallbackStep) {
+          logger.info({ stepId: step.id, fallbackStepId: fallbackStep.id }, "Executing fallback step");
+          try {
+            const fbResult = await this.executeWithRetry(fallbackStep, context, definition);
+            return { ...fbResult, retryCount: maxAttempts };
+          } catch {
+            return {
+              status: "failed",
+              output: null,
+              error: `Fallback step "${fallbackStep.id}" also failed`,
+              retryCount: maxAttempts,
+            };
+          }
+        }
       }
     }
 

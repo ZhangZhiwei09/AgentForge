@@ -6,7 +6,7 @@ import type {
 } from "@agentforge/shared-types";
 import { AgentService } from "../../services/agent.js";
 import type { CollaborationModeExecutor, ExecutionContext } from "./types.js";
-import { buildAgentTask } from "./types.js";
+import { buildAgentTask, toTeamEvent } from "./types.js";
 
 export class PeerMode implements CollaborationModeExecutor {
   async *execute(
@@ -62,20 +62,12 @@ export class PeerMode implements CollaborationModeExecutor {
             maxIterations: agent.maxIterations,
             tools: agent.tools.length > 0 ? agent.tools : null,
           })) {
-            const agentEvent = event as unknown as Record<string, unknown>;
-
-            if (agentEvent.type === "agent_think" || agentEvent.type === "agent_plan" ||
-                agentEvent.type === "agent_act" || agentEvent.type === "agent_observe") {
-              yield {
-                type: agentEvent.type,
-                agentName: agent.name,
-                ...agentEvent,
-              } as TeamStreamEvent;
-            }
+            const teamEvent = toTeamEvent(event, agent.name);
+            if (teamEvent) yield teamEvent;
 
             // If agent responds with content, broadcast to peers
-            if (agentEvent.type === "agent_respond" && agent.canBroadcast) {
-              const content = (agentEvent.content || agentEvent.summary) as string;
+            if (event.type === "agent_respond" && agent.canBroadcast) {
+              const content = event.content || event.summary || "";
               bus.send(agent.name, "broadcast", "broadcast", {
                 context: { message: content },
               });

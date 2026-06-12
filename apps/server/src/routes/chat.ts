@@ -6,6 +6,7 @@ import { ChatService } from "../services/chat.js";
 import { prisma } from "../db.js";
 import { logger } from "@agentforge/logger";
 import { createHono } from "../lib/hono.js";
+import { verifyConversationOwnership } from "../lib/conversation-guard.js";
 
 export const chatRoutes = createHono();
 
@@ -24,11 +25,7 @@ chatRoutes.post("/api/chat", zValidator("json", chatRequestSchema), async (c) =>
   const { conversation_id, message, model, kb_ids, tools } = c.req.valid("json");
   const user = c.get("user");
 
-  // Verify conversation belongs to authenticated user
-  const conversation = await prisma.conversation.findFirst({
-    where: { id: conversation_id, userId: user.id },
-  });
-  if (!conversation) {
+  if (!(await verifyConversationOwnership(conversation_id, user.id))) {
     return c.json({ detail: "Conversation not found or access denied" }, 404);
   }
 
@@ -57,11 +54,7 @@ chatRoutes.get("/api/conversations/:id/messages", async (c) => {
   const conversationId = c.req.param("id");
   const user = c.get("user");
 
-  // Verify conversation belongs to authenticated user
-  const conversation = await prisma.conversation.findFirst({
-    where: { id: conversationId, userId: user.id },
-  });
-  if (!conversation) {
+  if (!(await verifyConversationOwnership(conversationId, user.id))) {
     return c.json({ detail: "Conversation not found or access denied" }, 404);
   }
 

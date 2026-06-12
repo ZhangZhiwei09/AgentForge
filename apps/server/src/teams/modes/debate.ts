@@ -7,7 +7,7 @@ import type {
 } from "@agentforge/shared-types";
 import { AgentService } from "../../services/agent.js";
 import type { CollaborationModeExecutor, ExecutionContext } from "./types.js";
-import { buildAgentTask, getRoleByName } from "./types.js";
+import { buildAgentTask, getRoleByName, toTeamEvent } from "./types.js";
 
 export class DebateMode implements CollaborationModeExecutor {
   async *execute(
@@ -113,19 +113,10 @@ ${bb.read("con_argument_1") || ""}
         maxIterations: judgeRole.maxIterations,
         tools: judgeRole.tools.length > 0 ? judgeRole.tools : null,
       })) {
-        const agentEvent = event as unknown as Record<string, unknown>;
-
-        if (agentEvent.type === "agent_think" || agentEvent.type === "agent_plan" ||
-            agentEvent.type === "agent_act" || agentEvent.type === "agent_observe") {
-          yield {
-            type: agentEvent.type,
-            agentName: judgeRole.name,
-            ...agentEvent,
-          } as TeamStreamEvent;
-        }
-
-        if (agentEvent.type === "agent_respond") {
-          judgeOutput = (agentEvent.content || agentEvent.summary) as string;
+        const teamEvent = toTeamEvent(event, judgeRole.name);
+        if (teamEvent) yield teamEvent;
+        if (event.type === "agent_respond") {
+          judgeOutput = event.content || event.summary || null;
         }
       }
 
@@ -202,19 +193,10 @@ ${bb.toContextString()}
         maxIterations: role.maxIterations,
         tools: role.tools.length > 0 ? role.tools : null,
       })) {
-        const agentEvent = event as unknown as Record<string, unknown>;
-
-        if (agentEvent.type === "agent_think" || agentEvent.type === "agent_plan" ||
-            agentEvent.type === "agent_act" || agentEvent.type === "agent_observe") {
-          events.push({
-            type: agentEvent.type,
-            agentName: role.name,
-            ...agentEvent,
-          } as TeamStreamEvent);
-        }
-
-        if (agentEvent.type === "agent_respond") {
-          output = (agentEvent.content || agentEvent.summary) as string;
+        const teamEvent = toTeamEvent(event, role.name);
+        if (teamEvent) events.push(teamEvent);
+        if (event.type === "agent_respond") {
+          output = event.content || event.summary || "";
         }
       }
 

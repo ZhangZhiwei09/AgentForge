@@ -1,5 +1,5 @@
 // Mode Types — shared types for collaboration mode executors
-import type { TeamDefinition, AgentRole, TeamStreamEvent } from "@agentforge/shared-types";
+import type { TeamDefinition, AgentRole, TeamStreamEvent, AgentStreamEvent } from "@agentforge/shared-types";
 import type { MessageBus } from "../message-bus.js";
 import type { Blackboard } from "../blackboard.js";
 
@@ -50,4 +50,34 @@ ${task}
 /** Map agent names to roles from the definition */
 export function getRoleByName(definition: TeamDefinition, name: string): AgentRole | undefined {
   return definition.agents.find((a) => a.name === name);
+}
+
+/** Event types forwarded from agent stream to team stream */
+const FORWARDED_EVENT_TYPES = new Set([
+  "agent_think",
+  "agent_plan",
+  "agent_act",
+  "agent_observe",
+]);
+
+/**
+ * Convert an agent stream event to a team stream event if it's a forwardable type.
+ * Returns null for events that shouldn't be forwarded (e.g., agent_respond, agent_token).
+ *
+ * Usage in mode executors:
+ *   for await (const event of agentService.run(...)) {
+ *     const teamEvent = toTeamEvent(event, agentName);
+ *     if (teamEvent) yield teamEvent;
+ *     if (event.type === "agent_respond") { output = event.content; }
+ *   }
+ */
+export function toTeamEvent(
+  event: AgentStreamEvent,
+  agentName: string,
+): TeamStreamEvent | null {
+  const { type } = event;
+  if (!FORWARDED_EVENT_TYPES.has(type)) return null;
+  // Destructure to exclude the discriminant from spread
+  const { type: _, ...rest } = event as unknown as Record<string, unknown>;
+  return { type, agentName, ...rest } as TeamStreamEvent;
 }
