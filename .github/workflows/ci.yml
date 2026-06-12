@@ -59,7 +59,7 @@ jobs:
         run: pnpm lint
 
       - name: Format Check
-        run: pnpm format --check
+        run: pnpm exec prettier --check "**/*.{ts,tsx,js,jsx,json,css,md}"
 
       - name: Typecheck
         run: pnpm typecheck
