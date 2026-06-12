@@ -3,7 +3,11 @@
 // 同时包含种子数据（客服 FAQ）和种子函数
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
-import { getMilvusClient, MILVUS_KNOWLEDGE_COLLECTION, ensureKnowledgeCollection } from "./milvus.js";
+import {
+  getMilvusClient,
+  MILVUS_KNOWLEDGE_COLLECTION,
+  ensureKnowledgeCollection,
+} from "./milvus.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
 import { RecursiveCharacterTextSplitter } from "./text-splitter.js";
 import { tokenize, getTokenCount } from "./tokenizer.js";
@@ -26,11 +30,7 @@ export class KnowledgeIngestionService {
   }
 
   // 摄取单篇文档：创建记录 → 切分 → 向量化 → 双写
-  async ingestDocument(
-    kbId: string,
-    title: string,
-    content: string,
-  ) {
+  async ingestDocument(kbId: string, title: string, content: string) {
     // 1. 创建 Document 记录，状态标记为 processing
     const doc = await prisma.knowledgeDocument.create({
       data: {
@@ -52,7 +52,9 @@ export class KnowledgeIngestionService {
           where: { id: doc.id },
           data: { status: "completed", chunkCount: 0 },
         });
-        return await prisma.knowledgeDocument.findUnique({ where: { id: doc.id } })!;
+        return await prisma.knowledgeDocument.findUnique({
+          where: { id: doc.id },
+        })!;
       }
 
       // 3. 逐 chunk 向量化并写入 Milvus + PG
@@ -65,7 +67,9 @@ export class KnowledgeIngestionService {
       });
 
       logger.info({ title, chunks: chunks.length }, "Document ingested");
-      return (await prisma.knowledgeDocument.findUnique({ where: { id: doc.id } }))!;
+      return (await prisma.knowledgeDocument.findUnique({
+        where: { id: doc.id },
+      }))!;
     } catch (e) {
       // 摄取失败：标记为 failed，抛出异常让调用方感知
       logger.error(e, `Document ingestion failed: ${title}`);
@@ -84,7 +88,11 @@ export class KnowledgeIngestionService {
   ) {
     const results = [];
     for (const docData of documents) {
-      const doc = await this.ingestDocument(kbId, docData.title, docData.content);
+      const doc = await this.ingestDocument(
+        kbId,
+        docData.title,
+        docData.content,
+      );
       results.push(doc);
     }
     return results;
@@ -93,7 +101,9 @@ export class KnowledgeIngestionService {
   // P1-1: Worker 专用方法 — 处理已创建的文档（文档由路由预创建为 status: "pending"）
   // 与 ingestDocument() 的区别：不创建新文档记录，只做切片→向量化→双写→更新状态
   async processExistingDocument(docId: string, kbId: string): Promise<void> {
-    const doc = await prisma.knowledgeDocument.findUnique({ where: { id: docId } });
+    const doc = await prisma.knowledgeDocument.findUnique({
+      where: { id: docId },
+    });
     if (!doc) throw new Error(`Document ${docId} not found`);
 
     try {
@@ -122,9 +132,15 @@ export class KnowledgeIngestionService {
         data: { chunkCount: chunks.length, status: "completed" },
       });
 
-      logger.info({ docId, chunks: chunks.length }, "Document processed by worker");
+      logger.info(
+        { docId, chunks: chunks.length },
+        "Document processed by worker",
+      );
     } catch (e) {
-      logger.error({ docId, error: (e as Error).message }, "Worker document processing failed");
+      logger.error(
+        { docId, error: (e as Error).message },
+        "Worker document processing failed",
+      );
       await prisma.knowledgeDocument.update({
         where: { id: docId },
         data: { status: "failed" },
@@ -208,7 +224,9 @@ export class KnowledgeIngestionService {
 
   // 删除文档：同时清理 PG 和 Milvus 中的数据
   async deleteDocument(docId: string): Promise<boolean> {
-    const doc = await prisma.knowledgeDocument.findUnique({ where: { id: docId } });
+    const doc = await prisma.knowledgeDocument.findUnique({
+      where: { id: docId },
+    });
     if (!doc) return false;
 
     // 查出所有 chunk 的 milvus ID
@@ -216,7 +234,9 @@ export class KnowledgeIngestionService {
       where: { documentId: docId },
       select: { id: true, milvusId: true },
     });
-    const milvusIds = chunks.filter((c) => c.milvusId !== null).map((c) => Number(c.milvusId));
+    const milvusIds = chunks
+      .filter((c) => c.milvusId !== null)
+      .map((c) => Number(c.milvusId));
 
     // 从 Milvus 删除向量
     if (milvusIds.length > 0) {
@@ -235,7 +255,9 @@ export class KnowledgeIngestionService {
 
     // 清理倒排索引（用 chunk ID 精确删除）
     const chunkIds = chunks.map((c) => c.id);
-    await prisma.knowledgeInvertedIndex.deleteMany({ where: { chunkId: { in: chunkIds } } });
+    await prisma.knowledgeInvertedIndex.deleteMany({
+      where: { chunkId: { in: chunkIds } },
+    });
 
     // 从 PG 删除（CASCADE 会自动删关联的 chunks 和 inverted_index）
     await prisma.knowledgeChunk.deleteMany({ where: { documentId: docId } });
@@ -348,25 +370,37 @@ export async function seedKnowledgeBase(): Promise<string> {
     data: {
       id: DEFAULT_KB_ID,
       name: "客服FAQ知识库",
-      description: "默认客服常见问题知识库，包含退换货、物流、售后、会员、支付等FAQ",
+      description:
+        "默认客服常见问题知识库，包含退换货、物流、售后、会员、支付等FAQ",
     },
   });
 
   // 检查 embedding provider 是否可用
   const provider = getDefaultEmbeddingProvider();
   if (!provider) {
-    logger.info("No embedding provider configured, skipping document vectorization");
+    logger.info(
+      "No embedding provider configured, skipping document vectorization",
+    );
     return DEFAULT_KB_ID;
   }
 
   // 批量摄取 FAQ 文档
-  logger.info({ count: SAMPLE_FAQS.length }, "Ingesting sample FAQ documents...");
+  logger.info(
+    { count: SAMPLE_FAQS.length },
+    "Ingesting sample FAQ documents...",
+  );
   try {
     const ingestion = new KnowledgeIngestionService();
     await ingestion.batchIngest(DEFAULT_KB_ID, SAMPLE_FAQS);
-    logger.info({ kbId: DEFAULT_KB_ID, docs: SAMPLE_FAQS.length }, "Seed data created");
+    logger.info(
+      { kbId: DEFAULT_KB_ID, docs: SAMPLE_FAQS.length },
+      "Seed data created",
+    );
   } catch (e) {
-    logger.warn(e, "Seed data vectorization failed (Milvus may not be running)");
+    logger.warn(
+      e,
+      "Seed data vectorization failed (Milvus may not be running)",
+    );
   }
 
   return DEFAULT_KB_ID;

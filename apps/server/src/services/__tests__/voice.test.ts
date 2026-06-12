@@ -28,7 +28,10 @@ vi.mock("../chat.js", () => ({
     streamChat: vi.fn().mockImplementation(async function* () {
       yield { type: "token", content: "Hello" };
       yield { type: "token", content: " there!" };
-      yield { type: "done", usage: { prompt_tokens: 10, completion_tokens: 5 } };
+      yield {
+        type: "done",
+        usage: { prompt_tokens: 10, completion_tokens: 5 },
+      };
     }),
   })),
 }));
@@ -51,7 +54,10 @@ function makeSendFn() {
 
 describe("VoiceService", () => {
   let voice: VoiceService;
-  let send: { fn: (msg: Record<string, unknown>) => void; messages: Record<string, unknown>[] };
+  let send: {
+    fn: (msg: Record<string, unknown>) => void;
+    messages: Record<string, unknown>[];
+  };
 
   beforeEach(() => {
     send = makeSendFn();
@@ -118,9 +124,7 @@ describe("VoiceService", () => {
     await voice.handleMessage({ type: "audio", data: pcmData2 });
 
     // Should have sent interrupted
-    const interruptMsgs = send.messages.filter(
-      (m) => m.type === "interrupted",
-    );
+    const interruptMsgs = send.messages.filter((m) => m.type === "interrupted");
     expect(interruptMsgs.length).toBeGreaterThanOrEqual(0); // May or may not interrupt depending on state
   });
 

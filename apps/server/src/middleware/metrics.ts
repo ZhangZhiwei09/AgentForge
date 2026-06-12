@@ -2,10 +2,14 @@
 // Registered FIRST in the middleware chain to capture all requests
 // Path normalization prevents label cardinality explosion from UUIDs / IDs
 import type { MiddlewareHandler } from "hono";
-import { httpRequestsTotal, httpRequestDurationMs } from "../observability/metrics.js";
+import {
+  httpRequestsTotal,
+  httpRequestDurationMs,
+} from "../observability/metrics.js";
 
 // Match UUIDs (36-char hex with dashes) and numeric/string IDs in path segments
-const ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const NUMERIC_ID = /^\d+$/;
 
 /** Normalize a URL path by replacing ID segments with :id placeholders */

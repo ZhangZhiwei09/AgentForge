@@ -42,23 +42,36 @@ async function main() {
   await seedDefaultUsers();
 
   try {
-    const { seedKnowledgeBase } = await import("./services/knowledge-ingestion.js");
+    const { seedKnowledgeBase } =
+      await import("./services/knowledge-ingestion.js");
     await seedKnowledgeBase();
   } catch (err) {
-    logger.warn({ error: (err as Error).message }, "Knowledge base seeding skipped");
+    logger.warn(
+      { error: (err as Error).message },
+      "Knowledge base seeding skipped",
+    );
   }
 
   // 检查并构建倒排索引（已有 chunk 但无索引时自动重建）
   try {
-    const chunkCount = await prisma.knowledgeChunk.count({ where: { enabled: true } });
+    const chunkCount = await prisma.knowledgeChunk.count({
+      where: { enabled: true },
+    });
     const indexCount = await prisma.knowledgeInvertedIndex.count();
     if (chunkCount > 0 && indexCount === 0) {
-      logger.info({ chunks: chunkCount }, "Building initial inverted index for existing chunks");
-      const { KnowledgeIngestionService } = await import("./services/knowledge-ingestion.js");
+      logger.info(
+        { chunks: chunkCount },
+        "Building initial inverted index for existing chunks",
+      );
+      const { KnowledgeIngestionService } =
+        await import("./services/knowledge-ingestion.js");
       await KnowledgeIngestionService.rebuildInvertedIndex();
     }
   } catch (err) {
-    logger.warn({ error: (err as Error).message }, "Inverted index build skipped");
+    logger.warn(
+      { error: (err as Error).message },
+      "Inverted index build skipped",
+    );
   }
 
   // 第三步：创建 Hono 应用并启动 HTTP 服务
@@ -66,7 +79,7 @@ async function main() {
 
   logger.info({ port: settings.port }, "AgentForge TS backend starting");
   serve({
-    fetch: app.fetch,       // Hono 的 fetch 方法直接适配 node-server
+    fetch: app.fetch, // Hono 的 fetch 方法直接适配 node-server
     port: settings.port,
   });
 

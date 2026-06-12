@@ -81,7 +81,9 @@ export function checkContentSafety(content: string): ContentSafetyResult {
 }
 
 // Middleware that validates request body for chat/agent endpoints
-export const contentSafetyMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
+export const contentSafetyMiddleware: MiddlewareHandler<{
+  Variables: AppVariables;
+}> = async (c, next) => {
   // Only apply to POST endpoints that accept user messages
   const isChatOrAgent =
     c.req.path === "/api/chat" ||

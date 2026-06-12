@@ -3,6 +3,7 @@
 ## Quick Start
 
 ### Prerequisites
+
 - Node.js >= 20
 - pnpm >= 9
 - Docker Desktop

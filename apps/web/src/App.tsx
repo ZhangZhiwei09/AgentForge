@@ -24,24 +24,21 @@ function AppShell({ children }: { children: React.ReactNode }) {
 }
 
 export default function App() {
-    return (
-        <AppShell>
-            <Routes>
-                <Route path="/login" element={<LoginPage />} />
-                <Route
-                  path="/assistant/*"
-                  element={
-                    <AuthGuard>
-                      <ChatLayout />
-                    </AuthGuard>
-                  }
-                />
-                <Route path="/admin/cs" element={<CSAdminPage />} />
-                <Route
-                  path="/*"
-                  element={<CustomerChatPage />}
-                />
-            </Routes>
-        </AppShell>
-    );
+  return (
+    <AppShell>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/assistant/*"
+          element={
+            <AuthGuard>
+              <ChatLayout />
+            </AuthGuard>
+          }
+        />
+        <Route path="/admin/cs" element={<CSAdminPage />} />
+        <Route path="/*" element={<CustomerChatPage />} />
+      </Routes>
+    </AppShell>
+  );
 }

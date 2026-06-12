@@ -2,7 +2,10 @@
 // 通过 getRateLimitStore() 自动选择存储后端：REDIS_URL 存在 → Redis，否则 → 内存
 import type { MiddlewareHandler } from "hono";
 import type { AppVariables } from "../app.js";
-import { getRateLimitStore, type RateLimitStore } from "../lib/rate-limit-store.js";
+import {
+  getRateLimitStore,
+  type RateLimitStore,
+} from "../lib/rate-limit-store.js";
 
 // 惰性初始化，首次请求时加载
 let storePromise: Promise<RateLimitStore> | null = null;
@@ -15,9 +18,9 @@ function getStore(): Promise<RateLimitStore> {
 }
 
 export interface RateLimitConfig {
-  windowMs: number;  // 时间窗口（毫秒）
-  max: number;        // 窗口内最大请求数
-  keyPrefix: string;  // 存储隔离前缀
+  windowMs: number; // 时间窗口（毫秒）
+  max: number; // 窗口内最大请求数
+  keyPrefix: string; // 存储隔离前缀
 }
 
 export function createRateLimiter(
@@ -55,12 +58,12 @@ export function createRateLimiter(
 // 预配置的限流器
 export const globalRateLimiter = createRateLimiter({
   windowMs: 60_000, // 1 分钟
-  max: 60,          // 每分钟 60 次
+  max: 60, // 每分钟 60 次
   keyPrefix: "global",
 });
 
 export const chatRateLimiter = createRateLimiter({
   windowMs: 60_000, // 1 分钟
-  max: 20,          // 每分钟 20 次
+  max: 20, // 每分钟 20 次
   keyPrefix: "chat",
 });

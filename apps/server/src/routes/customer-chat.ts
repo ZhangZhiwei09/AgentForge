@@ -18,22 +18,31 @@ const customerChatRequestSchema = z.object({
 });
 
 // POST /api/customer-chat —— 匿名客服 SSE 流式端点
-customerChatRoutes.post("/api/customer-chat", zValidator("json", customerChatRequestSchema), async (c) => {
-  const { session_id, message } = c.req.valid("json");
-  const service = new CustomerChatService();
+customerChatRoutes.post(
+  "/api/customer-chat",
+  zValidator("json", customerChatRequestSchema),
+  async (c) => {
+    const { session_id, message } = c.req.valid("json");
+    const service = new CustomerChatService();
 
-  return streamSSE(c, async (stream) => {
-    try {
-      for await (const chunk of service.streamChat(session_id ?? null, message)) {
-        await stream.writeSSE({ data: JSON.stringify(chunk) });
+    return streamSSE(c, async (stream) => {
+      try {
+        for await (const chunk of service.streamChat(
+          session_id ?? null,
+          message,
+        )) {
+          await stream.writeSSE({ data: JSON.stringify(chunk) });
+        }
+        await stream.writeSSE({ data: "[DONE]" });
+      } catch (e) {
+        const errMsg = e instanceof Error ? e.message : "Unknown error";
+        await stream.writeSSE({
+          data: JSON.stringify({ type: "error", content: errMsg }),
+        });
       }
-      await stream.writeSSE({ data: "[DONE]" });
-    } catch (e) {
-      const errMsg = e instanceof Error ? e.message : "Unknown error";
-      await stream.writeSSE({ data: JSON.stringify({ type: "error", content: errMsg }) });
-    }
-  });
-});
+    });
+  },
+);
 
 // ════════════════════════════════════════════════════════════════
 // 会话历史
@@ -91,36 +100,40 @@ const rateSchema = z.object({
 });
 
 // POST /api/customer-chat/rate —— 提交满意度评价
-customerChatRoutes.post("/api/customer-chat/rate", zValidator("json", rateSchema), async (c) => {
-  const { session_id, message_id, rating, comment } = c.req.valid("json");
+customerChatRoutes.post(
+  "/api/customer-chat/rate",
+  zValidator("json", rateSchema),
+  async (c) => {
+    const { session_id, message_id, rating, comment } = c.req.valid("json");
 
-  // 根据 session_id 查找会话
-  const conversation = await prisma.conversation.findFirst({
-    where: { sessionId: session_id, type: "customer_service" },
-  });
+    // 根据 session_id 查找会话
+    const conversation = await prisma.conversation.findFirst({
+      where: { sessionId: session_id, type: "customer_service" },
+    });
 
-  if (!conversation) {
-    return c.json({ detail: "会话不存在" }, 404);
-  }
+    if (!conversation) {
+      return c.json({ detail: "会话不存在" }, 404);
+    }
 
-  // 保存评价（如果 satisfaction_ratings 表存在；否则静默成功）
-  try {
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO satisfaction_ratings (id, conversation_id, message_id, rating, comment, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW())`,
-      randomUUID(),
-      conversation.id,
-      message_id || null,
-      rating,
-      comment || null,
-    );
-  } catch {
-    // 表可能还未创建，静默处理
-    logger.warn("satisfaction_ratings table may not exist yet");
-  }
+    // 保存评价
+    try {
+      await prisma.satisfactionRating.create({
+        data: {
+          id: randomUUID(),
+          conversationId: conversation.id,
+          messageId: message_id || null,
+          rating,
+          comment: comment || null,
+        },
+      });
+    } catch {
+      // 表可能还未创建，静默处理
+      logger.warn("satisfaction_ratings table may not exist yet");
+    }
 
-  return c.json({ status: "ok", rating });
-});
+    return c.json({ status: "ok", rating });
+  },
+);
 
 // ════════════════════════════════════════════════════════════════
 // 反馈管理 —— 评价数据闭环：反哺知识库质量 + 客服运营
@@ -146,18 +159,20 @@ customerChatRoutes.get("/api/customer-chat/feedback", async (c) => {
     }
 
     // 获取评价列表
-    const feedback = await prisma.$queryRawUnsafe<Array<{
-      id: string;
-      rating: string;
-      comment: string | null;
-      created_at: string;
-      conversation_id: string;
-      session_id: string;
-      intent: string | null;
-      user_message: string;
-      assistant_message: string;
-      message_id: string;
-    }>>(
+    const feedback = await prisma.$queryRawUnsafe<
+      Array<{
+        id: string;
+        rating: string;
+        comment: string | null;
+        created_at: string;
+        conversation_id: string;
+        session_id: string;
+        intent: string | null;
+        user_message: string;
+        assistant_message: string;
+        message_id: string;
+      }>
+    >(
       `SELECT
         sr.id,
         sr.rating,
@@ -207,12 +222,14 @@ customerChatRoutes.get("/api/customer-chat/feedback", async (c) => {
       health: number;
     }> = [];
     try {
-      const rows = await prisma.$queryRawUnsafe<Array<{
-        intent: string | null;
-        total: bigint;
-        positive: bigint;
-        negative: bigint;
-      }>>(
+      const rows = await prisma.$queryRawUnsafe<
+        Array<{
+          intent: string | null;
+          total: bigint;
+          positive: bigint;
+          negative: bigint;
+        }>
+      >(
         `SELECT
           c.intent,
           COUNT(*) as total,
@@ -229,23 +246,31 @@ customerChatRoutes.get("/api/customer-chat/feedback", async (c) => {
         total: Number(r.total),
         positive: Number(r.positive),
         negative: Number(r.negative),
-        health: Number(r.total) > 0
-          ? Math.round((Number(r.positive) / Number(r.total)) * 100)
-          : 100,
+        health:
+          Number(r.total) > 0
+            ? Math.round((Number(r.positive) / Number(r.total)) * 100)
+            : 100,
       }));
     } catch {
       // 查询失败则返回空，不影响其他数据
     }
 
     // 趋势：最近7天每天的正/负评价数（独立 try-catch）
-    let trends: Array<{ date: string; total: number; positive: number; negative: number }> = [];
+    let trends: Array<{
+      date: string;
+      total: number;
+      positive: number;
+      negative: number;
+    }> = [];
     try {
-      const trendRows = await prisma.$queryRawUnsafe<Array<{
-        date: string;
-        total: bigint;
-        positive: bigint;
-        negative: bigint;
-      }>>(
+      const trendRows = await prisma.$queryRawUnsafe<
+        Array<{
+          date: string;
+          total: bigint;
+          positive: bigint;
+          negative: bigint;
+        }>
+      >(
         `SELECT
           sr.created_at::date::text AS date,
           COUNT(*) AS total,
@@ -373,7 +398,11 @@ customerChatRoutes.get("/api/customer-chat/faq/categories", async (c) => {
 customerChatRoutes.get("/api/customer-chat/analytics", async (c) => {
   try {
     const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const todayStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      now.getDate(),
+    );
 
     // 总客服会话数
     const totalConversations = await prisma.conversation.count({
@@ -399,15 +428,23 @@ customerChatRoutes.get("/api/customer-chat/analytics", async (c) => {
     let satisfactionRate = 0;
     let totalRatings = 0;
     try {
-      const ratings = await prisma.$queryRawUnsafe<Array<{ count: bigint; rating: string }>>(
+      const ratings = await prisma.$queryRawUnsafe<
+        Array<{ count: bigint; rating: string }>
+      >(
         `SELECT COUNT(*)::int as count, rating FROM satisfaction_ratings GROUP BY rating`,
       );
       if (Array.isArray(ratings)) {
         totalRatings = ratings.reduce((sum, r) => sum + Number(r.count), 0);
         const positive = ratings
-          .filter((r) => r.rating === "positive" || r.rating?.startsWith("star_4") || r.rating?.startsWith("star_5"))
+          .filter(
+            (r) =>
+              r.rating === "positive" ||
+              r.rating?.startsWith("star_4") ||
+              r.rating?.startsWith("star_5"),
+          )
           .reduce((sum, r) => sum + Number(r.count), 0);
-        satisfactionRate = totalRatings > 0 ? Math.round((positive / totalRatings) * 100) : 0;
+        satisfactionRate =
+          totalRatings > 0 ? Math.round((positive / totalRatings) * 100) : 0;
       }
     } catch {
       // 表可能不存在

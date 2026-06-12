@@ -6,10 +6,18 @@
 // 设计原则：Milvus 不可用时优雅降级为 PG only
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
-import { getMilvusClient, MILVUS_MEMORY_COLLECTION, EMBEDDING_DIM, ensureMemoryCollection } from "./milvus.js";
+import {
+  getMilvusClient,
+  MILVUS_MEMORY_COLLECTION,
+  EMBEDDING_DIM,
+  ensureMemoryCollection,
+} from "./milvus.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
 import { logger } from "@agentforge/logger";
-import { milvusSearchDurationMs, memoryExtractionsTotal } from "../observability/metrics.js";
+import {
+  milvusSearchDurationMs,
+  memoryExtractionsTotal,
+} from "../observability/metrics.js";
 import { getProvider, listProviders } from "../providers/registry.js";
 import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
 
@@ -17,7 +25,7 @@ import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
 export interface MemoryCreate {
   type: string;
   content: string;
-  importance?: number;          // 0.0~1.0 重要度
+  importance?: number; // 0.0~1.0 重要度
   metadata?: Record<string, unknown>;
   conversationId?: string | null;
 }
@@ -165,7 +173,10 @@ export class MemoryEngine {
           output_fields: ["memory_id"],
           params: { nprobe: 16 },
         });
-        milvusSearchDurationMs.observe({ operation: "memory" }, Date.now() - milvusSearchStart);
+        milvusSearchDurationMs.observe(
+          { operation: "memory" },
+          Date.now() - milvusSearchStart,
+        );
 
         if (results.results && results.results.length > 0) {
           // 提取Milvus结果中的memory_id和分数
@@ -187,9 +198,8 @@ export class MemoryEngine {
           // 混合打分：Milvus语义相似度(0.7) + importance(0.3)
           const scored: MemorySearchResult[] = pgMemories.map((m) => {
             const milvusScore = milvusScores.get(m.id) || 0;
-            const normalizedMilvus = maxMilvusScore > 0
-              ? milvusScore / maxMilvusScore
-              : 0;
+            const normalizedMilvus =
+              maxMilvusScore > 0 ? milvusScore / maxMilvusScore : 0;
             const blendedScore =
               MILVUS_WEIGHT * normalizedMilvus +
               IMPORTANCE_WEIGHT * m.importance;
@@ -239,10 +249,9 @@ export class MemoryEngine {
   }
 
   // 按 sessionId 过滤记忆（用于客服匿名会话场景）
-  private filterBySession<T extends { metadata: Record<string, unknown> | null }>(
-    results: T[],
-    sessionId?: string,
-  ): T[] {
+  private filterBySession<
+    T extends { metadata: Record<string, unknown> | null },
+  >(results: T[], sessionId?: string): T[] {
     if (!sessionId) return results;
     return results.filter((r) => {
       const meta = r.metadata as Record<string, unknown> | null;
@@ -289,9 +298,7 @@ export class MemoryEngine {
 
     try {
       const result = await provider.chatSync(
-        [
-          { role: "user", content: `Extract memories from:\n\n${convText}` },
-        ],
+        [{ role: "user", content: `Extract memories from:\n\n${convText}` }],
         model,
         SYSTEM_PROMPT_EXTRACT,
         0.1,
@@ -320,7 +327,10 @@ export class MemoryEngine {
       }
 
       if (results.length > 0) {
-        logger.info({ count: results.length }, "Memories extracted from conversation");
+        logger.info(
+          { count: results.length },
+          "Memories extracted from conversation",
+        );
         memoryExtractionsTotal.inc(results.length);
       }
       return results;
@@ -355,7 +365,9 @@ export class MemoryEngine {
 
   // 删除单条记忆（PG + Milvus 双删）
   async delete(memoryId: string): Promise<boolean> {
-    const dbMemory = await prisma.memory.findUnique({ where: { id: memoryId } });
+    const dbMemory = await prisma.memory.findUnique({
+      where: { id: memoryId },
+    });
     if (!dbMemory) return false;
 
     // 从 Milvus 删除（用内部 ID 定位）

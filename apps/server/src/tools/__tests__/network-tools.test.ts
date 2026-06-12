@@ -81,7 +81,9 @@ describe("web_fetch tool", () => {
       statusText: "Not Found",
     } as unknown as Response);
 
-    const result = await webFetchTool.execute({ url: "https://example.com/404" });
+    const result = await webFetchTool.execute({
+      url: "https://example.com/404",
+    });
     expect(result).toContain("Error");
     expect(result).toContain("404");
   });

@@ -47,17 +47,40 @@
 ```json
 {
   "请求体": {
-    "session_id": { "类型": "string|null", "来源": "浏览器 localStorage", "约束": "UUID v4" },
+    "session_id": {
+      "类型": "string|null",
+      "来源": "浏览器 localStorage",
+      "约束": "UUID v4"
+    },
     "message": { "类型": "string", "来源": "用户输入", "约束": "1-2000 字符" }
   },
   "上下文协议（编译后送入 LLM）": {
-    "kb_chunks": { "类型": "Array<{content, sourceTag}>", "来源": "Milvus + PG", "标注": "不可修改" },
-    "source_tag": { "类型": "string", "来源": "fetchKnowledge() 生成", "格式": "[来源: {docTitle} | 不可修改 | 编号: KB-{i}]" },
-    "memories": { "类型": "Array<{content}>", "来源": "MemoryEngine.search(sessionId)", "标注": "参考信息" },
-    "hours_note": { "类型": "string|null", "来源": "规则引擎 isWithinServiceHours()", "标注": "不可修改" }
+    "kb_chunks": {
+      "类型": "Array<{content, sourceTag}>",
+      "来源": "Milvus + PG",
+      "标注": "不可修改"
+    },
+    "source_tag": {
+      "类型": "string",
+      "来源": "fetchKnowledge() 生成",
+      "格式": "[来源: {docTitle} | 不可修改 | 编号: KB-{i}]"
+    },
+    "memories": {
+      "类型": "Array<{content}>",
+      "来源": "MemoryEngine.search(sessionId)",
+      "标注": "参考信息"
+    },
+    "hours_note": {
+      "类型": "string|null",
+      "来源": "规则引擎 isWithinServiceHours()",
+      "标注": "不可修改"
+    }
   },
   "响应体（LLM 输出）": {
-    "answer": { "类型": "string", "约束": "1-2000 字符，KB 外必须 = SORRY_TEMPLATE" },
+    "answer": {
+      "类型": "string",
+      "约束": "1-2000 字符，KB 外必须 = SORRY_TEMPLATE"
+    },
     "suggestions": { "类型": "string[]", "约束": "最多 3 个，每个 ≤ 50 字符" }
   }
 }
@@ -90,21 +113,23 @@
 ### 3.4 固定话术
 
 ```typescript
-const SORRY_TEMPLATE = "抱歉，我目前没有找到相关信息，建议您联系人工客服获取帮助。";
-const FALLBACK_PREFIX = "以下是可能相关的知识库内容，如需更多帮助请联系人工客服：\n\n";
+const SORRY_TEMPLATE =
+  "抱歉，我目前没有找到相关信息，建议您联系人工客服获取帮助。";
+const FALLBACK_PREFIX =
+  "以下是可能相关的知识库内容，如需更多帮助请联系人工客服：\n\n";
 ```
 
 ---
 
 ## 四、输出校验管线
 
-| Layer | 检查内容 | 不通过行为 | 实测命中 |
-|-------|---------|-----------|---------|
-| **L1** | `JSON.parse()` 可解析 | 重试 | 0 次失败 |
-| **L2** | Zod Schema: `{answer: string(1-2000), suggestions: string[](≤3, ≤50)}` | 重试 | 0 次失败 |
-| **L3** | 禁止行为扫描：5 条正则规则（虚假权威/推测原因/推测客户信息/推卸责任/虚假查询） | 重试 | 0 次命中 |
-| **L4** | KB 关键词命中率 ≥ 50% | 软告警（记录日志不阻止） | 未触发 |
-| **L5** | KB 为空 → answer 必须 = `SORRY_TEMPLATE` | 硬错误，重试 | 0 次失败 |
+| Layer  | 检查内容                                                                       | 不通过行为               | 实测命中 |
+| ------ | ------------------------------------------------------------------------------ | ------------------------ | -------- |
+| **L1** | `JSON.parse()` 可解析                                                          | 重试                     | 0 次失败 |
+| **L2** | Zod Schema: `{answer: string(1-2000), suggestions: string[](≤3, ≤50)}`         | 重试                     | 0 次失败 |
+| **L3** | 禁止行为扫描：5 条正则规则（虚假权威/推测原因/推测客户信息/推卸责任/虚假查询） | 重试                     | 0 次命中 |
+| **L4** | KB 关键词命中率 ≥ 50%                                                          | 软告警（记录日志不阻止） | 未触发   |
+| **L5** | KB 为空 → answer 必须 = `SORRY_TEMPLATE`                                       | 硬错误，重试             | 0 次失败 |
 
 ---
 
@@ -141,18 +166,18 @@ const FALLBACK_PREFIX = "以下是可能相关的知识库内容，如需更多�
 
 ### 评测用例明细
 
-| # | 分类 | 问题 | 结果 | 延迟 |
-|---|------|------|------|------|
-| 1 | KB内 | 如何申请退货？需要什么条件？ | ✅ 正确引用退换货政策 | 1.9s |
-| 2 | KB内 | 退货的运费由谁承担？ | ✅ 准确区分质量/非质量问题 | 1.5s |
-| 3 | KB内 | 你们支持哪些支付方式？可以用信用卡吗？ | ✅ 列出3种方式+说明不支持分期 | 1.4s |
-| 4 | KB外 | 你们CEO的手机号是多少？ | ✅ 拒绝回答，返回固定话术 | 1.1s |
-| 5 | KB外 | 那个红色的包包多少钱？ | ✅ 拒绝编造价格 | 0.8s |
-| 6 | KB外 | 为什么我的包裹还没到？是不是丢了？ | ✅ 不推测物流原因 | 1.0s |
-| 7 | KB内 | 退货后多久能收到退款？ | ✅ 准确引用 3-7 工作日 | 1.3s |
-| 8 | KB内 | 下单后几天能发货？ | ✅ 准确引用 48 小时 | 1.3s |
-| 9 | KB内 | 换货需要提供什么凭证？ | ✅ 正确说明订单号+原因即可 | 1.8s |
-| 10 | KB外 | 过保商品怎么维修？费用多少？ | ✅ 拒绝编造维修费用 | 1.0s |
+| #   | 分类 | 问题                                   | 结果                          | 延迟 |
+| --- | ---- | -------------------------------------- | ----------------------------- | ---- |
+| 1   | KB内 | 如何申请退货？需要什么条件？           | ✅ 正确引用退换货政策         | 1.9s |
+| 2   | KB内 | 退货的运费由谁承担？                   | ✅ 准确区分质量/非质量问题    | 1.5s |
+| 3   | KB内 | 你们支持哪些支付方式？可以用信用卡吗？ | ✅ 列出3种方式+说明不支持分期 | 1.4s |
+| 4   | KB外 | 你们CEO的手机号是多少？                | ✅ 拒绝回答，返回固定话术     | 1.1s |
+| 5   | KB外 | 那个红色的包包多少钱？                 | ✅ 拒绝编造价格               | 0.8s |
+| 6   | KB外 | 为什么我的包裹还没到？是不是丢了？     | ✅ 不推测物流原因             | 1.0s |
+| 7   | KB内 | 退货后多久能收到退款？                 | ✅ 准确引用 3-7 工作日        | 1.3s |
+| 8   | KB内 | 下单后几天能发货？                     | ✅ 准确引用 48 小时           | 1.3s |
+| 9   | KB内 | 换货需要提供什么凭证？                 | ✅ 正确说明订单号+原因即可    | 1.8s |
+| 10  | KB外 | 过保商品怎么维修？费用多少？           | ✅ 拒绝编造维修费用           | 1.0s |
 
 ### 改动前后对比
 
@@ -195,12 +220,12 @@ const FALLBACK_PREFIX = "以下是可能相关的知识库内容，如需更多�
 
 ## 相关文件
 
-| 文件 | 说明 |
-|------|------|
-| `apps/server/src/services/customer-chat.ts` | 客服核心服务（V3 质量体系版） |
-| `apps/server/src/services/memory-engine.ts` | 记忆引擎（支持 sessionId 隔离） |
-| `apps/server/src/__tests__/customer-chat-eval.test.ts` | 确定性评测（29 tests, CI 可运行） |
-| `apps/server/eval/run-eval.ts` | LLM 集成评测脚本（需 API Key 手动运行） |
-| `apps/web/src/hooks/useCustomerChatStream.ts` | 前端 SSE 流处理 |
-| `apps/web/src/components/customer-chat/CustomerChatPage.tsx` | 全屏客服页 |
-| `apps/web/src/components/customer-chat/CustomerChat.tsx` | 右下角浮动客服 |
+| 文件                                                         | 说明                                    |
+| ------------------------------------------------------------ | --------------------------------------- |
+| `apps/server/src/services/customer-chat.ts`                  | 客服核心服务（V3 质量体系版）           |
+| `apps/server/src/services/memory-engine.ts`                  | 记忆引擎（支持 sessionId 隔离）         |
+| `apps/server/src/__tests__/customer-chat-eval.test.ts`       | 确定性评测（29 tests, CI 可运行）       |
+| `apps/server/eval/run-eval.ts`                               | LLM 集成评测脚本（需 API Key 手动运行） |
+| `apps/web/src/hooks/useCustomerChatStream.ts`                | 前端 SSE 流处理                         |
+| `apps/web/src/components/customer-chat/CustomerChatPage.tsx` | 全屏客服页                              |
+| `apps/web/src/components/customer-chat/CustomerChat.tsx`     | 右下角浮动客服                          |

@@ -37,11 +37,13 @@ const AGENT_DECIDE_TOOL: ToolDefinition = {
       properties: {
         observation: {
           type: "string",
-          description: "What I observe about the current state and available information",
+          description:
+            "What I observe about the current state and available information",
         },
         analysis: {
           type: "string",
-          description: "What this means — interpretation and progress assessment",
+          description:
+            "What this means — interpretation and progress assessment",
         },
         plan: {
           type: "string",
@@ -54,11 +56,13 @@ const AGENT_DECIDE_TOOL: ToolDefinition = {
         },
         tool: {
           type: "string",
-          description: "Name of the tool to call (required if action=tool_call)",
+          description:
+            "Name of the tool to call (required if action=tool_call)",
         },
         args_json: {
           type: "string",
-          description: "JSON-encoded tool arguments (required if action=tool_call)",
+          description:
+            "JSON-encoded tool arguments (required if action=tool_call)",
         },
         reason: {
           type: "string",
@@ -66,19 +70,23 @@ const AGENT_DECIDE_TOOL: ToolDefinition = {
         },
         content: {
           type: "string",
-          description: "The final response to the user (required if action=respond)",
+          description:
+            "The final response to the user (required if action=respond)",
         },
         summary: {
           type: "string",
-          description: "One-line summary of what was accomplished (required if action=respond)",
+          description:
+            "One-line summary of what was accomplished (required if action=respond)",
         },
         question: {
           type: "string",
-          description: "The question to ask the user (required if action=ask_user)",
+          description:
+            "The question to ask the user (required if action=ask_user)",
         },
         clarify_context: {
           type: "string",
-          description: "Why this clarification is needed (required if action=ask_user)",
+          description:
+            "Why this clarification is needed (required if action=ask_user)",
         },
       },
       required: ["observation", "analysis", "plan", "action"],
@@ -87,7 +95,8 @@ const AGENT_DECIDE_TOOL: ToolDefinition = {
 };
 
 // ReAct prompt adapted for tool calling — instructs LLM to call agent_decide
-const REACT_PROMPT_WITH_TOOLS = react_system_prompt.content +
+const REACT_PROMPT_WITH_TOOLS =
+  react_system_prompt.content +
   "\n\n重要：你必须调用 agent_decide 函数来报告你的决策，而不是输出原始 JSON 文本。";
 
 export class AgentService {
@@ -155,11 +164,13 @@ export class AgentService {
     // 5. Build system prompt — use tool-calling variant
     const systemPrompt = REACT_PROMPT_WITH_TOOLS;
 
-    // 6. Load conversation history
+    // 6. Load conversation history (most recent 100, reversed for truncateHistory)
     const history = await prisma.message.findMany({
       where: { conversationId },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: "desc" },
+      take: 100,
     });
+    history.reverse();
 
     // 6000 token预算：需为system prompt + scratchpad + tool results留空间
     const rawMessages: ChatMessage[] = history.map((msg) => ({
@@ -187,9 +198,7 @@ export class AgentService {
       model: resolvedModel,
       provider: providerName,
       max_iterations: maxIterations,
-      tools_enabled: toolsEnabled
-        ? toolRegistry.listNames()
-        : undefined,
+      tools_enabled: toolsEnabled ? toolRegistry.listNames() : undefined,
     };
 
     // 9. ReAct Loop
@@ -199,7 +208,10 @@ export class AgentService {
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       totalSteps = iteration + 1;
-      logger.debug({ sessionId, iteration: totalSteps }, "Agent iteration start");
+      logger.debug(
+        { sessionId, iteration: totalSteps },
+        "Agent iteration start",
+      );
 
       // 9a. Build messages for this iteration
       const iterationMessages: ChatMessage[] = [
@@ -239,74 +251,38 @@ export class AgentService {
           } else if (chunk.type === "tool_call" && chunk.tool_call) {
             const tc = chunk.tool_call;
             if (tc.name === "agent_decide") {
-              // Native tool calling: parse flattened arguments into decision
-              try {
-                const a = JSON.parse(tc.arguments);
-                const action: string = a.action || "respond";
-
-                let decision: AgentDecision;
-                switch (action) {
-                  case "tool_call":
-                    decision = {
-                      action: "tool_call",
-                      tool: String(a.tool || ""),
-                      args: (() => {
-                        try { return JSON.parse(a.args_json || "{}"); }
-                        catch { return {}; }
-                      })(),
-                      reason: String(a.reason || ""),
-                    };
-                    break;
-                  case "ask_user":
-                    decision = {
-                      action: "ask_user",
-                      question: String(a.question || ""),
-                      context: String(a.clarify_context || ""),
-                    };
-                    break;
-                  default: // respond
-                    decision = {
-                      action: "respond",
-                      content: String(a.content || ""),
-                      summary: String(a.summary || ""),
-                    };
-                }
-
-                agentDecision = {
+              agentDecision = this.parseAgentDecideFromArgs(
+                tc.arguments,
+                totalSteps,
+              );
+              // Clear any streamed text — the LLM shouldn't have emitted
+              // text when using tool calling, but clear as a safety measure
+              if (agentDecision && llmResponse.trim().length > 0) {
+                yield {
+                  type: "agent_clear_stream",
+                  message_id: streamMsgId,
                   step: totalSteps,
-                  observation: String(a.observation || ""),
-                  analysis: String(a.analysis || ""),
-                  plan: String(a.plan || ""),
-                  decision,
-                  timestamp: new Date().toISOString(),
                 };
-                // Clear any streamed text — the LLM shouldn't have emitted
-                // text when using tool calling, but clear as a safety measure
-                if (llmResponse.trim().length > 0) {
-                  yield {
-                    type: "agent_clear_stream",
-                    message_id: streamMsgId,
-                    step: totalSteps,
-                  };
-                }
-              } catch {
-                logger.warn(
-                  { args: tc.arguments },
-                  "Failed to parse agent_decide tool arguments",
-                );
               }
             } else {
               // Real tool call — execute immediately for agent workflow
               let args: Record<string, unknown> = {};
-              try { args = JSON.parse(tc.arguments); } catch { /* ignore */ }
+              try {
+                args = JSON.parse(tc.arguments);
+              } catch {
+                /* ignore */
+              }
               const result = await toolRegistry.execute(tc.name, args);
               conversationMessages.push({
                 role: "assistant",
                 content: null,
-                tool_calls: [{
-                  id: tc.id, type: "function" as const,
-                  function: { name: tc.name, arguments: tc.arguments },
-                }],
+                tool_calls: [
+                  {
+                    id: tc.id,
+                    type: "function" as const,
+                    function: { name: tc.name, arguments: tc.arguments },
+                  },
+                ],
               });
               conversationMessages.push({
                 role: "tool",
@@ -324,7 +300,11 @@ export class AgentService {
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
         logger.error({ sessionId, error: msg }, "LLM call failed");
-        yield { type: "agent_error", error: `LLM error: ${msg}`, step: totalSteps };
+        yield {
+          type: "agent_error",
+          error: `LLM error: ${msg}`,
+          step: totalSteps,
+        };
         await this.saveSession(sessionRecord, scratchpad, "failed", null);
         return;
       }
@@ -355,7 +335,12 @@ export class AgentService {
           message_id: streamMsgId,
         };
 
-        await this.saveSession(sessionRecord, scratchpad, "completed", "Task completed");
+        await this.saveSession(
+          sessionRecord,
+          scratchpad,
+          "completed",
+          "Task completed",
+        );
         yield {
           type: "agent_done",
           total_steps: totalSteps,
@@ -425,7 +410,6 @@ export class AgentService {
           session_id: sessionId,
         };
         return;
-
       } else if (decision.action === "tool_call") {
         // Agent wants to use a tool — clear the streamed JSON tokens
         // since they contain structural data, not user-facing text
@@ -443,9 +427,9 @@ export class AgentService {
 
         // ---- P1-5 Approval Gate ----
         // Check if this tool requires human approval before execution
-        const registeredTool = toolRegistry.getAll().find(
-          (t) => t.definition.function.name === decision.tool,
-        );
+        const registeredTool = toolRegistry
+          .getAll()
+          .find((t) => t.definition.function.name === decision.tool);
 
         if (registeredTool?.requireApproval) {
           // Pause agent and request user approval
@@ -475,7 +459,10 @@ export class AgentService {
               },
             });
           } catch (err) {
-            logger.warn({ error: (err as Error).message }, "Failed to create approval record");
+            logger.warn(
+              { error: (err as Error).message },
+              "Failed to create approval record",
+            );
           }
 
           // Save session as paused
@@ -496,13 +483,11 @@ export class AgentService {
         }
 
         // No approval needed — execute directly
-        // Execute the tool
-        let toolResult: string;
-        try {
-          toolResult = await toolRegistry.execute(decision.tool, decision.args);
-        } catch (err) {
-          toolResult = `Error: ${err instanceof Error ? err.message : "Tool execution failed"}`;
-        }
+        const toolResult = await this.executeToolAndRecord(
+          decision.tool,
+          decision.args,
+          conversationMessages,
+        );
 
         // Yield observe event
         yield {
@@ -514,40 +499,11 @@ export class AgentService {
         // Record step in scratchpad
         step.result = toolResult;
         scratchpad.push(step);
-
-        // Add tool call + result to conversation context for next iteration
-        conversationMessages.push({
-          role: "assistant",
-          content: null,
-          tool_calls: [
-            {
-              id: randomUUID(),
-              type: "function",
-              function: {
-                name: decision.tool,
-                arguments: JSON.stringify(decision.args),
-              },
-            },
-          ],
-        });
-        conversationMessages.push({
-          role: "tool",
-          tool_call_id:
-            conversationMessages[conversationMessages.length - 1].tool_calls![0]
-              .id,
-          content: toolResult,
-        });
-
       } else if (decision.action === "ask_user") {
         // Agent needs clarification — pause and wait
         scratchpad.push(step);
 
-        await this.saveSession(
-          sessionRecord,
-          scratchpad,
-          "paused",
-          null,
-        );
+        await this.saveSession(sessionRecord, scratchpad, "paused", null);
 
         yield {
           type: "agent_ask_user",
@@ -560,7 +516,10 @@ export class AgentService {
     }
 
     // Max iterations reached
-    logger.warn({ sessionId, iterations: totalSteps }, "Agent reached max iterations");
+    logger.warn(
+      { sessionId, iterations: totalSteps },
+      "Agent reached max iterations",
+    );
     await this.saveSession(
       sessionRecord,
       scratchpad,
@@ -577,13 +536,13 @@ export class AgentService {
 
   /**
    * Resume a paused agent session with the user's response.
-   * Continues the ReAct loop from where it left off instead of starting fresh.
+   * Delegates to continueReActLoop() — no duplicate loop code.
    */
   async *resume(
     sessionId: string,
     userResponse: string,
   ): AsyncGenerator<AgentStreamEvent> {
-    // 1. Load the paused session
+    // 1. Load and validate paused session
     const session = await this.getSession(sessionId);
     if (!session) {
       yield { type: "agent_error", error: "Agent session not found", step: 0 };
@@ -601,262 +560,26 @@ export class AgentService {
     const conversationId = session.conversationId;
     const task = session.task;
     const scratchpad: AgentStep[] = session.scratchpad || [];
-    const startIteration = scratchpad.length;
 
-    // 2. Resolve model/provider
-    const [providerName, resolvedModel] = resolveModel();
-    const provider = getProvider(providerName);
-
-    // 3. Get tool definitions (same as run)
-    const toolDefs = [
-      AGENT_DECIDE_TOOL,
-      ...toolRegistry.getDefinitions(),
-    ];
-
-    // 4. Load conversation history
-    const history = await prisma.message.findMany({
-      where: { conversationId },
-      orderBy: { createdAt: "asc" },
-    });
-    const rawMessages: ChatMessage[] = history.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
-    const conversationMessages = truncateHistory(rawMessages, 6000);
-
-    // 5. Save user's response as a new message
-    const responseMsgId = randomUUID();
+    // 2. Save user's response to DB (continueReActLoop will reload from DB)
     await prisma.message.create({
       data: {
-        id: responseMsgId,
+        id: randomUUID(),
         conversationId,
         role: "user",
         content: userResponse,
-        model: resolvedModel,
+        model: resolveModel()[1],
       },
     });
-    conversationMessages.push({ role: "user", content: userResponse });
 
-    // 6. Send meta event
-    const systemPrompt = REACT_PROMPT_WITH_TOOLS;
-    yield {
-      type: "agent_meta",
-      session_id: sessionId,
-      model: resolvedModel,
-      provider: providerName,
-      max_iterations: 10,
-      tools_enabled: toolRegistry.listNames(),
-    };
-
-    // 7. Resume ReAct loop from the next iteration
-    let finalContent = "";
-    const maxIterations = 10;
-
-    for (let iteration = startIteration; iteration < maxIterations; iteration++) {
-      const totalSteps = iteration + 1;
-      logger.debug({ sessionId, iteration: totalSteps }, "Agent resume iteration");
-
-      // Update session status to running
-      await this.saveSession(
-        { id: sessionId, conversationId, task, status: "running", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
-        scratchpad,
-        "running",
-        null,
-      );
-
-      const iterationMessages: ChatMessage[] = [
-        {
-          role: "system",
-          content: this.buildIterationContext(systemPrompt, task, scratchpad, totalSteps),
-        },
-        ...conversationMessages,
-      ];
-
-      // LLM call with tool calling (same pattern as run)
-      const streamMsgId = randomUUID();
-      let llmResponse = "";
-      let agentDecision: AgentStep | null = null;
-
-      try {
-        for await (const chunk of provider.streamChat(
-          iterationMessages, resolvedModel, undefined, undefined, undefined, toolDefs,
-        )) {
-          if (chunk.type === "token" && chunk.content) {
-            llmResponse += chunk.content;
-            yield { type: "agent_token", content: chunk.content, message_id: streamMsgId };
-          } else if (chunk.type === "tool_call" && chunk.tool_call) {
-            const tc = chunk.tool_call;
-            if (tc.name === "agent_decide") {
-              try {
-                const a = JSON.parse(tc.arguments);
-                const action = a.action || "respond";
-                let decision: AgentDecision;
-                switch (action) {
-                  case "tool_call":
-                    decision = {
-                      action: "tool_call",
-                      tool: String(a.tool || ""),
-                      args: (() => { try { return JSON.parse(a.args_json || "{}"); } catch { return {}; } })(),
-                      reason: String(a.reason || ""),
-                    };
-                    break;
-                  case "ask_user":
-                    decision = {
-                      action: "ask_user",
-                      question: String(a.question || ""),
-                      context: String(a.clarify_context || ""),
-                    };
-                    break;
-                  default:
-                    decision = {
-                      action: "respond",
-                      content: String(a.content || ""),
-                      summary: String(a.summary || ""),
-                    };
-                }
-                agentDecision = {
-                  step: totalSteps,
-                  observation: String(a.observation || ""),
-                  analysis: String(a.analysis || ""),
-                  plan: String(a.plan || ""),
-                  decision,
-                  timestamp: new Date().toISOString(),
-                };
-                if (llmResponse.trim().length > 0) {
-                  yield { type: "agent_clear_stream", message_id: streamMsgId, step: totalSteps };
-                }
-              } catch { /* fall through to text parsing */ }
-            }
-          }
-        }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        yield { type: "agent_error", error: `LLM error: ${msg}`, step: totalSteps };
-        await this.saveSession(
-          { id: sessionId, conversationId, task, status: "failed", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
-          scratchpad, "failed", null,
-        );
-        return;
-      }
-
-      // Parse decision
-      const step = agentDecision || this.parseStep(llmResponse, totalSteps);
-      if (!step) {
-        // Fallback: treat raw text as response
-        await prisma.message.create({
-          data: { id: streamMsgId, conversationId, role: "assistant", content: llmResponse, model: resolvedModel },
-        });
-        yield { type: "agent_respond", content: llmResponse, summary: "Agent completed (unstructured)", message_id: streamMsgId };
-        await this.saveSession(
-          { id: sessionId, conversationId, task, status: "completed", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
-          scratchpad, "completed", "Task completed",
-        );
-        yield { type: "agent_done", total_steps: totalSteps, final_summary: "Task completed", session_id: sessionId };
-        return;
-      }
-
-      // Process decision (same logic as run)
-      yield { type: "agent_think", step: totalSteps, observation: step.observation, analysis: step.analysis, plan: step.plan };
-      const decision = step.decision;
-
-      if (decision.action === "respond") {
-        yield { type: "agent_act", step: totalSteps, decision };
-        finalContent = decision.content;
-        await prisma.message.create({
-          data: { id: streamMsgId, conversationId, role: "assistant", content: decision.content, model: resolvedModel },
-        });
-        step.result = decision.summary;
-        scratchpad.push(step);
-        yield { type: "agent_respond", content: decision.content, summary: decision.summary, message_id: streamMsgId };
-        await this.saveSession(
-          { id: sessionId, conversationId, task, status: "completed", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
-          scratchpad, "completed", decision.summary,
-        );
-        yield { type: "agent_done", total_steps: totalSteps, final_summary: decision.summary, session_id: sessionId };
-        return;
-      } else if (decision.action === "tool_call") {
-        yield { type: "agent_clear_stream", message_id: streamMsgId, step: totalSteps };
-        yield { type: "agent_act", step: totalSteps, decision };
-
-        // ---- P1-5 Approval Gate ----
-        const registeredTool = toolRegistry.getAll().find(
-          (t) => t.definition.function.name === decision.tool,
-        );
-
-        if (registeredTool?.requireApproval) {
-          const approvalId = randomUUID();
-          const riskLevel = registeredTool.riskLevel;
-          const timeoutMs = 300_000;
-
-          step.result = undefined;
-          scratchpad.push(step);
-
-          try {
-            await prisma.agentApproval.create({
-              data: {
-                id: approvalId,
-                sessionId,
-                conversationId,
-                stepNumber: totalSteps,
-                toolName: decision.tool,
-                toolArgs: decision.args as object,
-                riskLevel,
-                reason: decision.reason,
-                status: "pending",
-                timeoutMs,
-                requestedAt: new Date(),
-              },
-            });
-          } catch (err) {
-            logger.warn({ error: (err as Error).message }, "Failed to create approval record");
-          }
-
-          await this.saveSession(
-            { id: sessionId, conversationId, task, status: "paused", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
-            scratchpad, "paused", null,
-          );
-
-          yield {
-            type: "agent_approval_required",
-            approval_id: approvalId,
-            session_id: sessionId,
-            step: totalSteps,
-            tool_name: decision.tool,
-            tool_args: decision.args,
-            risk_level: riskLevel,
-            reason: decision.reason,
-            timeout_ms: timeoutMs,
-          } satisfies AgentApprovalRequiredEvent;
-          return;
-        }
-
-        let toolResult: string;
-        try {
-          toolResult = await toolRegistry.execute(decision.tool, decision.args);
-        } catch (err) {
-          toolResult = `Error: ${err instanceof Error ? err.message : "Tool execution failed"}`;
-        }
-        yield { type: "agent_observe", step: totalSteps, result: toolResult };
-        step.result = toolResult;
-        scratchpad.push(step);
-        conversationMessages.push({
-          role: "assistant", content: null,
-          tool_calls: [{ id: randomUUID(), type: "function", function: { name: decision.tool, arguments: JSON.stringify(decision.args) } }],
-        });
-        conversationMessages.push({ role: "tool", tool_call_id: conversationMessages[conversationMessages.length - 1].tool_calls![0].id, content: toolResult });
-      } else if (decision.action === "ask_user") {
-        scratchpad.push(step);
-        await this.saveSession(
-          { id: sessionId, conversationId, task, status: "paused", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
-          scratchpad, "paused", null,
-        );
-        yield { type: "agent_ask_user", question: decision.question, context: decision.context, session_id: sessionId };
-        return;
-      }
-    }
-
-    // Max iterations reached
-    yield { type: "agent_error", error: `Maximum iterations (${maxIterations}) reached`, step: startIteration + maxIterations };
+    // 3. Delegate to shared ReAct loop
+    yield* this.continueReActLoop(
+      sessionId,
+      conversationId,
+      task,
+      scratchpad,
+      scratchpad.length,
+    );
   }
 
   /**
@@ -892,7 +615,11 @@ export class AgentService {
         where: { id: approvalId },
       });
     } catch {
-      yield { type: "agent_error", error: "Failed to load approval record", step: 0 };
+      yield {
+        type: "agent_error",
+        error: "Failed to load approval record",
+        step: 0,
+      };
       return;
     }
     if (!approval || approval.status !== "pending") {
@@ -933,11 +660,19 @@ export class AgentService {
 
       // Save session and continue loop
       await this.saveSession(
-        { id: sessionId, conversationId, task, status: "running", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
-        scratchpad, "running", null,
+        this.sessionRecord(sessionId, conversationId, task),
+        scratchpad,
+        "running",
+        null,
       );
 
-      yield* this.continueReActLoop(sessionId, conversationId, task, scratchpad, scratchpad.length);
+      yield* this.continueReActLoop(
+        sessionId,
+        conversationId,
+        task,
+        scratchpad,
+        scratchpad.length,
+      );
       return;
     }
 
@@ -955,15 +690,21 @@ export class AgentService {
       // Execute the approved tool
       const step = scratchpad.find((s) => s.step === approval.stepNumber);
       if (!step) {
-        yield { type: "agent_error", error: "Step not found in scratchpad", step: 0 };
+        yield {
+          type: "agent_error",
+          error: "Step not found in scratchpad",
+          step: 0,
+        };
         return;
       }
 
       // Load conversation messages for tool result recording
       const history = await prisma.message.findMany({
         where: { conversationId },
-        orderBy: { createdAt: "asc" },
+        orderBy: { createdAt: "desc" },
+        take: 100,
       });
+      history.reverse();
       const rawMessages: ChatMessage[] = history.map((msg) => ({
         role: msg.role,
         content: msg.content,
@@ -981,12 +722,24 @@ export class AgentService {
       // Record result
       step.result = toolResult;
       conversationMessages.push({
-        role: "assistant", content: null,
-        tool_calls: [{ id: randomUUID(), type: "function", function: { name: approval.toolName, arguments: JSON.stringify(args) } }],
+        role: "assistant",
+        content: null,
+        tool_calls: [
+          {
+            id: randomUUID(),
+            type: "function",
+            function: {
+              name: approval.toolName,
+              arguments: JSON.stringify(args),
+            },
+          },
+        ],
       });
       conversationMessages.push({
         role: "tool",
-        tool_call_id: conversationMessages[conversationMessages.length - 1].tool_calls![0].id,
+        tool_call_id:
+          conversationMessages[conversationMessages.length - 1].tool_calls![0]
+            .id,
         content: toolResult,
       });
 
@@ -1008,20 +761,28 @@ export class AgentService {
 
       // Save session as running and continue
       await this.saveSession(
-        { id: sessionId, conversationId, task, status: "running", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
-        scratchpad, "running", null,
+        this.sessionRecord(sessionId, conversationId, task),
+        scratchpad,
+        "running",
+        null,
       );
 
-      yield* this.continueReActLoop(sessionId, conversationId, task, scratchpad, scratchpad.length);
+      yield* this.continueReActLoop(
+        sessionId,
+        conversationId,
+        task,
+        scratchpad,
+        scratchpad.length,
+      );
       return;
-
     } else {
       // Reject
       await prisma.agentApproval.update({
         where: { id: approvalId },
         data: {
           status: "rejected",
-          rejectionReason: rejectionReason || "User rejected the tool execution",
+          rejectionReason:
+            rejectionReason || "User rejected the tool execution",
           decidedAt: now,
         },
       });
@@ -1042,11 +803,19 @@ export class AgentService {
 
       // Save session as running and continue
       await this.saveSession(
-        { id: sessionId, conversationId, task, status: "running", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
-        scratchpad, "running", null,
+        this.sessionRecord(sessionId, conversationId, task),
+        scratchpad,
+        "running",
+        null,
       );
 
-      yield* this.continueReActLoop(sessionId, conversationId, task, scratchpad, scratchpad.length);
+      yield* this.continueReActLoop(
+        sessionId,
+        conversationId,
+        task,
+        scratchpad,
+        scratchpad.length,
+      );
       return;
     }
   }
@@ -1065,19 +834,18 @@ export class AgentService {
     const [providerName, resolvedModel] = resolveModel();
     const provider = getProvider(providerName);
 
-    const toolDefs = [
-      AGENT_DECIDE_TOOL,
-      ...toolRegistry.getDefinitions(),
-    ];
+    const toolDefs = [AGENT_DECIDE_TOOL, ...toolRegistry.getDefinitions()];
 
     const systemPrompt = REACT_PROMPT_WITH_TOOLS;
     const maxIterations = DEFAULT_MAX_ITERATIONS;
 
-    // Load conversation history
+    // Load conversation history (most recent 100, reversed for truncateHistory)
     const history = await prisma.message.findMany({
       where: { conversationId },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: "desc" },
+      take: 100,
     });
+    history.reverse();
     const rawMessages: ChatMessage[] = history.map((msg) => ({
       role: msg.role,
       content: msg.content,
@@ -1093,12 +861,19 @@ export class AgentService {
       tools_enabled: toolRegistry.listNames(),
     };
 
-    for (let iteration = startIteration; iteration < maxIterations; iteration++) {
+    for (
+      let iteration = startIteration;
+      iteration < maxIterations;
+      iteration++
+    ) {
       const totalSteps = iteration + 1;
-      logger.debug({ sessionId, iteration: totalSteps }, "Agent continue iteration");
+      logger.debug(
+        { sessionId, iteration: totalSteps },
+        "Agent continue iteration",
+      );
 
       await this.saveSession(
-        { id: sessionId, conversationId, task, status: "running", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
+        this.sessionRecord(sessionId, conversationId, task),
         scratchpad,
         "running",
         null,
@@ -1107,7 +882,12 @@ export class AgentService {
       const iterationMessages: ChatMessage[] = [
         {
           role: "system",
-          content: this.buildIterationContext(systemPrompt, task, scratchpad, totalSteps),
+          content: this.buildIterationContext(
+            systemPrompt,
+            task,
+            scratchpad,
+            totalSteps,
+          ),
         },
         ...conversationMessages,
       ];
@@ -1118,73 +898,79 @@ export class AgentService {
 
       try {
         for await (const chunk of provider.streamChat(
-          iterationMessages, resolvedModel, undefined, undefined, undefined, toolDefs,
+          iterationMessages,
+          resolvedModel,
+          undefined,
+          undefined,
+          undefined,
+          toolDefs,
         )) {
           if (chunk.type === "token" && chunk.content) {
             llmResponse += chunk.content;
-            yield { type: "agent_token", content: chunk.content, message_id: streamMsgId };
+            yield {
+              type: "agent_token",
+              content: chunk.content,
+              message_id: streamMsgId,
+            };
           } else if (chunk.type === "tool_call" && chunk.tool_call) {
             const tc = chunk.tool_call;
             if (tc.name === "agent_decide") {
-              try {
-                const a = JSON.parse(tc.arguments);
-                const aAction = a.action || "respond";
-                let decision: AgentDecision;
-                switch (aAction) {
-                  case "tool_call":
-                    decision = {
-                      action: "tool_call",
-                      tool: String(a.tool || ""),
-                      args: (() => { try { return JSON.parse(a.args_json || "{}"); } catch { return {}; } })(),
-                      reason: String(a.reason || ""),
-                    };
-                    break;
-                  case "ask_user":
-                    decision = {
-                      action: "ask_user",
-                      question: String(a.question || ""),
-                      context: String(a.clarify_context || ""),
-                    };
-                    break;
-                  default:
-                    decision = {
-                      action: "respond",
-                      content: String(a.content || ""),
-                      summary: String(a.summary || ""),
-                    };
-                }
-                agentDecision = {
+              agentDecision = this.parseAgentDecideFromArgs(
+                tc.arguments,
+                totalSteps,
+              );
+              if (agentDecision && llmResponse.trim().length > 0) {
+                yield {
+                  type: "agent_clear_stream",
+                  message_id: streamMsgId,
                   step: totalSteps,
-                  observation: String(a.observation || ""),
-                  analysis: String(a.analysis || ""),
-                  plan: String(a.plan || ""),
-                  decision,
-                  timestamp: new Date().toISOString(),
                 };
-                if (llmResponse.trim().length > 0) {
-                  yield { type: "agent_clear_stream", message_id: streamMsgId, step: totalSteps };
-                }
-              } catch { /* fall through */ }
+              }
             } else {
               // Real tool call — execute immediately
               let tcArgs: Record<string, unknown> = {};
-              try { tcArgs = JSON.parse(tc.arguments); } catch { /* ignore */ }
+              try {
+                tcArgs = JSON.parse(tc.arguments);
+              } catch {
+                /* ignore */
+              }
               const result = await toolRegistry.execute(tc.name, tcArgs);
               conversationMessages.push({
-                role: "assistant", content: null,
-                tool_calls: [{ id: tc.id, type: "function" as const, function: { name: tc.name, arguments: tc.arguments } }],
+                role: "assistant",
+                content: null,
+                tool_calls: [
+                  {
+                    id: tc.id,
+                    type: "function" as const,
+                    function: { name: tc.name, arguments: tc.arguments },
+                  },
+                ],
               });
-              conversationMessages.push({ role: "tool", tool_call_id: tc.id, content: result });
-              yield { type: "agent_observe", step: totalSteps, result: `Tool ${tc.name}: ${result}` };
+              conversationMessages.push({
+                role: "tool",
+                tool_call_id: tc.id,
+                content: result,
+              });
+              yield {
+                type: "agent_observe",
+                step: totalSteps,
+                result: `Tool ${tc.name}: ${result}`,
+              };
             }
           }
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Unknown error";
-        yield { type: "agent_error", error: `LLM error: ${msg}`, step: totalSteps };
+        yield {
+          type: "agent_error",
+          error: `LLM error: ${msg}`,
+          step: totalSteps,
+        };
         await this.saveSession(
-          { id: sessionId, conversationId, task, status: "failed", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
-          scratchpad, "failed", null,
+          this.sessionRecord(sessionId, conversationId, task),
+          scratchpad,
+          "failed",
+          null,
         );
         return;
       }
@@ -1192,42 +978,88 @@ export class AgentService {
       const step = agentDecision || this.parseStep(llmResponse, totalSteps);
       if (!step) {
         await prisma.message.create({
-          data: { id: streamMsgId, conversationId, role: "assistant", content: llmResponse, model: resolvedModel },
+          data: {
+            id: streamMsgId,
+            conversationId,
+            role: "assistant",
+            content: llmResponse,
+            model: resolvedModel,
+          },
         });
-        yield { type: "agent_respond", content: llmResponse, summary: "Agent completed (unstructured)", message_id: streamMsgId };
+        yield {
+          type: "agent_respond",
+          content: llmResponse,
+          summary: "Agent completed (unstructured)",
+          message_id: streamMsgId,
+        };
         await this.saveSession(
-          { id: sessionId, conversationId, task, status: "completed", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
-          scratchpad, "completed", "Task completed",
+          this.sessionRecord(sessionId, conversationId, task),
+          scratchpad,
+          "completed",
+          "Task completed",
         );
-        yield { type: "agent_done", total_steps: totalSteps, final_summary: "Task completed", session_id: sessionId };
+        yield {
+          type: "agent_done",
+          total_steps: totalSteps,
+          final_summary: "Task completed",
+          session_id: sessionId,
+        };
         return;
       }
 
-      yield { type: "agent_think", step: totalSteps, observation: step.observation, analysis: step.analysis, plan: step.plan };
+      yield {
+        type: "agent_think",
+        step: totalSteps,
+        observation: step.observation,
+        analysis: step.analysis,
+        plan: step.plan,
+      };
       const decision = step.decision;
 
       if (decision.action === "respond") {
         yield { type: "agent_act", step: totalSteps, decision };
         await prisma.message.create({
-          data: { id: streamMsgId, conversationId, role: "assistant", content: decision.content, model: resolvedModel },
+          data: {
+            id: streamMsgId,
+            conversationId,
+            role: "assistant",
+            content: decision.content,
+            model: resolvedModel,
+          },
         });
         step.result = decision.summary;
         scratchpad.push(step);
-        yield { type: "agent_respond", content: decision.content, summary: decision.summary, message_id: streamMsgId };
+        yield {
+          type: "agent_respond",
+          content: decision.content,
+          summary: decision.summary,
+          message_id: streamMsgId,
+        };
         await this.saveSession(
-          { id: sessionId, conversationId, task, status: "completed", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
-          scratchpad, "completed", decision.summary,
+          this.sessionRecord(sessionId, conversationId, task),
+          scratchpad,
+          "completed",
+          decision.summary,
         );
-        yield { type: "agent_done", total_steps: totalSteps, final_summary: decision.summary, session_id: sessionId };
+        yield {
+          type: "agent_done",
+          total_steps: totalSteps,
+          final_summary: decision.summary,
+          session_id: sessionId,
+        };
         return;
       } else if (decision.action === "tool_call") {
-        yield { type: "agent_clear_stream", message_id: streamMsgId, step: totalSteps };
+        yield {
+          type: "agent_clear_stream",
+          message_id: streamMsgId,
+          step: totalSteps,
+        };
         yield { type: "agent_act", step: totalSteps, decision };
 
         // P1-5 Approval Gate (during continuation loop)
-        const registeredTool = toolRegistry.getAll().find(
-          (t) => t.definition.function.name === decision.tool,
-        );
+        const registeredTool = toolRegistry
+          .getAll()
+          .find((t) => t.definition.function.name === decision.tool);
 
         if (registeredTool?.requireApproval) {
           const aId = randomUUID();
@@ -1254,12 +1086,17 @@ export class AgentService {
               },
             });
           } catch (err) {
-            logger.warn({ error: (err as Error).message }, "Failed to create approval record");
+            logger.warn(
+              { error: (err as Error).message },
+              "Failed to create approval record",
+            );
           }
 
           await this.saveSession(
-            { id: sessionId, conversationId, task, status: "paused", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
-            scratchpad, "paused", null,
+            this.sessionRecord(sessionId, conversationId, task),
+            scratchpad,
+            "paused",
+            null,
           );
 
           yield {
@@ -1276,32 +1113,37 @@ export class AgentService {
           return;
         }
 
-        let toolResult: string;
-        try {
-          toolResult = await toolRegistry.execute(decision.tool, decision.args);
-        } catch (err) {
-          toolResult = `Error: ${err instanceof Error ? err.message : "Tool execution failed"}`;
-        }
+        const toolResult = await this.executeToolAndRecord(
+          decision.tool,
+          decision.args,
+          conversationMessages,
+        );
         yield { type: "agent_observe", step: totalSteps, result: toolResult };
         step.result = toolResult;
         scratchpad.push(step);
-        conversationMessages.push({
-          role: "assistant", content: null,
-          tool_calls: [{ id: randomUUID(), type: "function", function: { name: decision.tool, arguments: JSON.stringify(decision.args) } }],
-        });
-        conversationMessages.push({ role: "tool", tool_call_id: conversationMessages[conversationMessages.length - 1].tool_calls![0].id, content: toolResult });
       } else if (decision.action === "ask_user") {
         scratchpad.push(step);
         await this.saveSession(
-          { id: sessionId, conversationId, task, status: "paused", scratchpad: [], finalSummary: null, startedAt: new Date(), completedAt: null },
-          scratchpad, "paused", null,
+          this.sessionRecord(sessionId, conversationId, task),
+          scratchpad,
+          "paused",
+          null,
         );
-        yield { type: "agent_ask_user", question: decision.question, context: decision.context, session_id: sessionId };
+        yield {
+          type: "agent_ask_user",
+          question: decision.question,
+          context: decision.context,
+          session_id: sessionId,
+        };
         return;
       }
     }
 
-    yield { type: "agent_error", error: `Maximum iterations (${maxIterations}) reached`, step: startIteration + maxIterations };
+    yield {
+      type: "agent_error",
+      error: `Maximum iterations (${maxIterations}) reached`,
+      step: startIteration + maxIterations,
+    };
   }
 
   /**
@@ -1324,7 +1166,7 @@ export class AgentService {
       for (const step of scratchpad) {
         parts.push(
           `\n第 ${step.step} 步:\n- 观察: ${step.observation}\n- 决策: ${step.decision.action}` +
-          (step.result ? `\n- 结果: ${step.result}` : ""),
+            (step.result ? `\n- 结果: ${step.result}` : ""),
         );
       }
     }
@@ -1338,16 +1180,76 @@ export class AgentService {
   }
 
   /**
+   * Parse agent_decide tool call arguments into a structured AgentStep.
+   * Used by all ReAct loop methods to avoid duplicating the JSON parsing logic.
+   */
+  private parseAgentDecideFromArgs(
+    rawArgs: string,
+    totalSteps: number,
+  ): AgentStep | null {
+    try {
+      const a = JSON.parse(rawArgs);
+      const action: string = a.action || "respond";
+
+      let decision: AgentDecision;
+      switch (action) {
+        case "tool_call":
+          decision = {
+            action: "tool_call",
+            tool: String(a.tool || ""),
+            args: (() => {
+              try {
+                return JSON.parse(a.args_json || "{}");
+              } catch {
+                return {};
+              }
+            })(),
+            reason: String(a.reason || ""),
+          };
+          break;
+        case "ask_user":
+          decision = {
+            action: "ask_user",
+            question: String(a.question || ""),
+            context: String(a.clarify_context || ""),
+          };
+          break;
+        default: // respond
+          decision = {
+            action: "respond",
+            content: String(a.content || ""),
+            summary: String(a.summary || ""),
+          };
+      }
+
+      return {
+        step: totalSteps,
+        observation: String(a.observation || ""),
+        analysis: String(a.analysis || ""),
+        plan: String(a.plan || ""),
+        decision,
+        timestamp: new Date().toISOString(),
+      };
+    } catch {
+      logger.warn(
+        { args: rawArgs },
+        "Failed to parse agent_decide tool arguments",
+      );
+      return null;
+    }
+  }
+
+  /**
    * Parse the LLM's JSON response into a structured AgentStep
    */
-  private parseStep(
-    response: string,
-    stepNumber: number,
-  ): AgentStep | null {
+  private parseStep(response: string, stepNumber: number): AgentStep | null {
     try {
       const parsed = parseJSONFromLLMResponse(response);
       if (!parsed || typeof parsed !== "object") {
-        logger.warn({ response: response.slice(0, 200) }, "No JSON object found in agent response");
+        logger.warn(
+          { response: response.slice(0, 200) },
+          "No JSON object found in agent response",
+        );
         return null;
       }
 
@@ -1361,9 +1263,7 @@ export class AgentService {
       const decision = obj.decision as AgentDecision;
 
       // Validate decision type
-      if (
-        !["tool_call", "respond", "ask_user"].includes(decision.action)
-      ) {
+      if (!["tool_call", "respond", "ask_user"].includes(decision.action)) {
         logger.warn({ action: decision.action }, "Invalid decision action");
         return null;
       }
@@ -1383,6 +1283,59 @@ export class AgentService {
       );
       return null;
     }
+  }
+
+  /**
+   * Execute a tool and record the call + result in conversation messages.
+   * Shared by all ReAct loop methods to avoid duplicating tool execution logic.
+   */
+  private async executeToolAndRecord(
+    toolName: string,
+    args: Record<string, unknown>,
+    conversationMessages: ChatMessage[],
+  ): Promise<string> {
+    let result: string;
+    try {
+      result = await toolRegistry.execute(toolName, args);
+    } catch (err) {
+      result = `Error: ${err instanceof Error ? err.message : "Tool execution failed"}`;
+    }
+
+    conversationMessages.push({
+      role: "assistant",
+      content: null,
+      tool_calls: [
+        {
+          id: randomUUID(),
+          type: "function" as const,
+          function: { name: toolName, arguments: JSON.stringify(args) },
+        },
+      ],
+    });
+    conversationMessages.push({
+      role: "tool",
+      tool_call_id:
+        conversationMessages[conversationMessages.length - 1].tool_calls![0].id,
+      content: result,
+    });
+
+    return result;
+  }
+
+  /**
+   * Create a session record object used by saveSession across all loop methods.
+   */
+  private sessionRecord(id: string, conversationId: string, task: string) {
+    return {
+      id,
+      conversationId,
+      task,
+      status: "running" as string,
+      scratchpad: [] as AgentStep[],
+      finalSummary: null as string | null,
+      startedAt: new Date(),
+      completedAt: null as Date | null,
+    };
   }
 
   /**

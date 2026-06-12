@@ -45,7 +45,10 @@ export class SandboxManager {
       logger.info({ socketPath }, "SandboxManager initialized");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Unknown";
-      logger.warn({ error: msg }, "Docker not available — sandbox tools disabled");
+      logger.warn(
+        { error: msg },
+        "Docker not available — sandbox tools disabled",
+      );
       this.docker = null as unknown as Docker; // Will throw if used
     }
   }
@@ -62,7 +65,7 @@ export class SandboxManager {
     if (!this.available) {
       throw new Error(
         "Docker is not available. Sandbox code execution requires Docker. " +
-        "Ensure Docker Desktop is running and the Docker socket is accessible.",
+          "Ensure Docker Desktop is running and the Docker socket is accessible.",
       );
     }
 
@@ -71,7 +74,9 @@ export class SandboxManager {
     }
 
     if (code.length > 50_000) {
-      throw new Error(`Code too long (${code.length} chars). Maximum is 50,000 characters.`);
+      throw new Error(
+        `Code too long (${code.length} chars). Maximum is 50,000 characters.`,
+      );
     }
 
     const effectiveTimeout = (timeoutSec || settings.sandboxTimeoutSec) * 1000;
@@ -99,10 +104,7 @@ export class SandboxManager {
       const container = await this.docker.createContainer({
         Image: settings.sandboxImage,
         Cmd: cmd,
-        Env: [
-          "PYTHONUNBUFFERED=1",
-          "NODE_OPTIONS=--max-old-space-size=128",
-        ],
+        Env: ["PYTHONUNBUFFERED=1", "NODE_OPTIONS=--max-old-space-size=128"],
         HostConfig: {
           ReadonlyRootfs: true,
           NetworkMode: "none",
@@ -165,19 +167,27 @@ export class SandboxManager {
 
       // Truncate outputs
       const maxOutput = 10_000;
-      const truncStdout = stdout.length > maxOutput
-        ? stdout.slice(0, maxOutput) + `\n... (truncated from ${stdout.length} chars)`
-        : stdout;
-      const truncStderr = stderr.length > maxOutput
-        ? stderr.slice(0, maxOutput) + `\n... (truncated from ${stderr.length} chars)`
-        : stderr;
+      const truncStdout =
+        stdout.length > maxOutput
+          ? stdout.slice(0, maxOutput) +
+            `\n... (truncated from ${stdout.length} chars)`
+          : stdout;
+      const truncStderr =
+        stderr.length > maxOutput
+          ? stderr.slice(0, maxOutput) +
+            `\n... (truncated from ${stderr.length} chars)`
+          : stderr;
 
       // Clean up container
       try {
         await container.remove({ force: true });
       } catch (removeErr: unknown) {
-        const rmMsg = removeErr instanceof Error ? removeErr.message : "Unknown";
-        logger.warn({ containerId: container.id, error: rmMsg }, "Failed to remove sandbox container");
+        const rmMsg =
+          removeErr instanceof Error ? removeErr.message : "Unknown";
+        logger.warn(
+          { containerId: container.id, error: rmMsg },
+          "Failed to remove sandbox container",
+        );
       }
 
       logger.info(
@@ -221,7 +231,9 @@ export class SandboxManager {
 
       if (offset + frameSize > buffer.length) break;
 
-      const chunk = buffer.subarray(offset, offset + frameSize).toString("utf-8");
+      const chunk = buffer
+        .subarray(offset, offset + frameSize)
+        .toString("utf-8");
 
       if (streamType === 1) {
         stdoutChunks.push(chunk);

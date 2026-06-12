@@ -25,7 +25,9 @@ describe("tokenizer", () => {
     });
 
     it("should segment FAQ content into meaningful words", () => {
-      const tokens = tokenize("退换货政策：自收到商品之日起7天内可以申请无理由退货");
+      const tokens = tokenize(
+        "退换货政策：自收到商品之日起7天内可以申请无理由退货",
+      );
       expect(tokens.length).toBeGreaterThan(5);
       // jieba segments differently from naive expectation; verify key content is present
       expect(tokens).toContain("退货");

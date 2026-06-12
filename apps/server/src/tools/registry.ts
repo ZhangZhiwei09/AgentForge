@@ -2,14 +2,22 @@
 // Singleton pattern: initialized once, used by ChatService and API routes
 // V2: Added risk levels, per-tool timeouts, and circuit breaker pattern
 import type { ToolDefinition } from "@agentforge/shared-types";
-import type { RegisteredTool, ToolExecutor, CircuitBreakerState } from "./types.js";
+import type {
+  RegisteredTool,
+  ToolExecutor,
+  CircuitBreakerState,
+} from "./types.js";
 import { builtinTools } from "./builtins.js";
 import { fileTools } from "./file-tools.js";
 import { databaseTools } from "./database-tools.js";
 import { networkTools } from "./network-tools.js";
 import { sandboxTools } from "./sandbox-tools.js";
 import { logger } from "@agentforge/logger";
-import { toolCallsTotal, toolExecutionDurationMs, circuitBreakerState } from "../observability/metrics.js";
+import {
+  toolCallsTotal,
+  toolExecutionDurationMs,
+  circuitBreakerState,
+} from "../observability/metrics.js";
 
 // Circuit breaker config
 const CIRCUIT_BREAKER_THRESHOLD = 5; // consecutive failures
@@ -24,7 +32,13 @@ class ToolRegistry {
   init(): void {
     if (this.initialized) return;
 
-    const allTools = [...builtinTools, ...fileTools, ...databaseTools, ...networkTools, ...sandboxTools];
+    const allTools = [
+      ...builtinTools,
+      ...fileTools,
+      ...databaseTools,
+      ...networkTools,
+      ...sandboxTools,
+    ];
     for (const tool of allTools) {
       this.register(tool);
     }
@@ -148,7 +162,10 @@ class ToolRegistry {
 
       // Record timeout vs error
       const isTimeout = msg.includes("timed out");
-      toolCallsTotal.inc({ tool_name: name, status: isTimeout ? "timeout" : "error" });
+      toolCallsTotal.inc({
+        tool_name: name,
+        status: isTimeout ? "timeout" : "error",
+      });
 
       return `Error executing tool "${name}": ${msg}`;
     }

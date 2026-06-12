@@ -16,7 +16,10 @@ const {
   mockToolGetDefinitions: vi.fn(() => []),
   mockToolGetAll: vi.fn(() => [
     {
-      definition: { type: "function", function: { name: "file_write", description: "", parameters: {} } },
+      definition: {
+        type: "function",
+        function: { name: "file_write", description: "", parameters: {} },
+      },
       execute: mockToolExecute,
       riskLevel: "destructive",
       timeout: 10000,
@@ -25,7 +28,10 @@ const {
       parallelizable: false,
     },
     {
-      definition: { type: "function", function: { name: "calculator", description: "", parameters: {} } },
+      definition: {
+        type: "function",
+        function: { name: "calculator", description: "", parameters: {} },
+      },
       execute: mockToolExecute,
       riskLevel: "safe",
       timeout: 5000,
@@ -43,7 +49,9 @@ vi.mock("../../providers/registry.js", () => ({
   getProvider: vi.fn(() => ({
     streamChat: mockAgentStreamChat,
     chatSync: vi.fn(),
-    listModels: vi.fn(() => [{ id: "gpt-4o", name: "GPT-4o", provider: "openai", max_tokens: 128000 }]),
+    listModels: vi.fn(() => [
+      { id: "gpt-4o", name: "GPT-4o", provider: "openai", max_tokens: 128000 },
+    ]),
   })),
   resolveModel: vi.fn(() => ["openai", "gpt-4o"]),
   listProviders: vi.fn(() => []),
@@ -65,12 +73,16 @@ vi.mock("../../lib/context-window.js", () => ({
 }));
 
 vi.mock("../../lib/json-utils.js", async () => {
-  const actual = await vi.importActual<typeof import("../../lib/json-utils.js")>("../../lib/json-utils.js");
+  const actual = await vi.importActual<
+    typeof import("../../lib/json-utils.js")
+  >("../../lib/json-utils.js");
   return actual;
 });
 
 vi.mock("@agentforge/shared-prompts", () => ({
-  react_system_prompt: { content: "You are a helpful agent. Use agent_decide for decisions." },
+  react_system_prompt: {
+    content: "You are a helpful agent. Use agent_decide for decisions.",
+  },
 }));
 
 // Mock prisma with agentApproval support
@@ -114,20 +126,27 @@ vi.mock("../../db.js", () => ({
       findUnique: vi.fn(async (args: { where: { id: string } }) => {
         return approvalStore.get(args.where.id) || null;
       }),
-      findFirst: vi.fn(async (args: { where: { id?: string; sessionId?: string } }) => {
-        if (args.where.id) return approvalStore.get(args.where.id) || null;
-        return null;
-      }),
+      findFirst: vi.fn(
+        async (args: { where: { id?: string; sessionId?: string } }) => {
+          if (args.where.id) return approvalStore.get(args.where.id) || null;
+          return null;
+        },
+      ),
       findMany: vi.fn(async () => []),
-      update: vi.fn(async (args: { where: { id: string }; data: Record<string, unknown> }) => {
-        const existing = approvalStore.get(args.where.id);
-        if (existing) {
-          const updated = { ...existing, ...args.data };
-          approvalStore.set(args.where.id, updated);
-          return updated;
-        }
-        return null;
-      }),
+      update: vi.fn(
+        async (args: {
+          where: { id: string };
+          data: Record<string, unknown>;
+        }) => {
+          const existing = approvalStore.get(args.where.id);
+          if (existing) {
+            const updated = { ...existing, ...args.data };
+            approvalStore.set(args.where.id, updated);
+            return updated;
+          }
+          return null;
+        },
+      ),
     },
     $connect: vi.fn(),
     $disconnect: vi.fn(),
@@ -168,7 +187,11 @@ describe("AgentService — Approval Gate (P1-5)", () => {
   }
 
   // Helper: create an LLM response that decides on a tool_call
-  function createToolCallStream(toolName: string, args: Record<string, unknown>, reason: string) {
+  function createToolCallStream(
+    toolName: string,
+    args: Record<string, unknown>,
+    reason: string,
+  ) {
     const agentDecideArgs = JSON.stringify({
       observation: "Need to write a file",
       analysis: "User requested file output",
@@ -182,7 +205,11 @@ describe("AgentService — Approval Gate (P1-5)", () => {
     return (async function* () {
       yield {
         type: "tool_call" as const,
-        tool_call: { id: "tc1", name: "agent_decide", arguments: agentDecideArgs },
+        tool_call: {
+          id: "tc1",
+          name: "agent_decide",
+          arguments: agentDecideArgs,
+        },
       };
     })();
   }
@@ -201,21 +228,31 @@ describe("AgentService — Approval Gate (P1-5)", () => {
     return (async function* () {
       yield {
         type: "tool_call" as const,
-        tool_call: { id: "tc1", name: "agent_decide", arguments: agentDecideArgs },
+        tool_call: {
+          id: "tc1",
+          name: "agent_decide",
+          arguments: agentDecideArgs,
+        },
       };
     })();
   }
 
   it("should yield agent_approval_required for tools with requireApproval=true", async () => {
     mockAgentStreamChat.mockReturnValueOnce(
-      createToolCallStream("file_write", { path: "/tmp/test.txt", content: "hello" }, "User wants to save output"),
+      createToolCallStream(
+        "file_write",
+        { path: "/tmp/test.txt", content: "hello" },
+        "User wants to save output",
+      ),
     );
 
     const gen = service.run("conv-agent", "Write hello to /tmp/test.txt");
     const events = await collectAgentEvents(gen);
 
     // Should contain agent_approval_required
-    const approvalEvent = events.find((e) => e.type === "agent_approval_required");
+    const approvalEvent = events.find(
+      (e) => e.type === "agent_approval_required",
+    );
     expect(approvalEvent).toBeDefined();
     expect(approvalEvent).toMatchObject({
       type: "agent_approval_required",
@@ -238,7 +275,10 @@ describe("AgentService — Approval Gate (P1-5)", () => {
 
     // Should have a saved approval record
     expect(approvalStore.size).toBe(1);
-    const approval = approvalStore.values().next().value as Record<string, unknown>;
+    const approval = approvalStore.values().next().value as Record<
+      string,
+      unknown
+    >;
     expect(approval.toolName).toBe("file_write");
     expect(approval.status).toBe("pending");
     expect(approval.riskLevel).toBe("destructive");
@@ -246,7 +286,11 @@ describe("AgentService — Approval Gate (P1-5)", () => {
 
   it("should execute tool directly when requireApproval=false", async () => {
     mockAgentStreamChat.mockReturnValueOnce(
-      createToolCallStream("calculator", { expression: "2+2" }, "Calculate the result"),
+      createToolCallStream(
+        "calculator",
+        { expression: "2+2" },
+        "Calculate the result",
+      ),
     );
 
     mockToolExecute.mockResolvedValueOnce("4");
@@ -255,7 +299,9 @@ describe("AgentService — Approval Gate (P1-5)", () => {
     const events = await collectAgentEvents(gen);
 
     // Should NOT contain agent_approval_required
-    expect(events.find((e) => e.type === "agent_approval_required")).toBeUndefined();
+    expect(
+      events.find((e) => e.type === "agent_approval_required"),
+    ).toBeUndefined();
 
     // Should contain agent_observe with the result
     const observeEvent = events.find((e) => e.type === "agent_observe");
@@ -384,7 +430,9 @@ describe("AgentService — Approval Gate (P1-5)", () => {
     const events = await collectAgentEvents(gen);
 
     // Should contain approval result
-    const approvalResult = events.find((e) => e.type === "agent_approval_result");
+    const approvalResult = events.find(
+      (e) => e.type === "agent_approval_result",
+    );
     expect(approvalResult).toBeDefined();
     if (approvalResult && approvalResult.type === "agent_approval_result") {
       expect(approvalResult.status).toBe("approved");
@@ -445,14 +493,24 @@ describe("AgentService — Approval Gate (P1-5)", () => {
 
     // Next LLM decides to respond (after rejection)
     mockAgentStreamChat.mockReturnValueOnce(
-      createRespondStream("I couldn't write the file because you rejected the operation."),
+      createRespondStream(
+        "I couldn't write the file because you rejected the operation.",
+      ),
     );
 
-    const gen = service.handleApproval(sessionId, approvalId, "reject", undefined, "Don't write to /tmp");
+    const gen = service.handleApproval(
+      sessionId,
+      approvalId,
+      "reject",
+      undefined,
+      "Don't write to /tmp",
+    );
     const events = await collectAgentEvents(gen);
 
     // Should contain approval result with rejection
-    const approvalResult = events.find((e) => e.type === "agent_approval_result");
+    const approvalResult = events.find(
+      (e) => e.type === "agent_approval_result",
+    );
     expect(approvalResult).toBeDefined();
     if (approvalResult && approvalResult.type === "agent_approval_result") {
       expect(approvalResult.status).toBe("rejected");

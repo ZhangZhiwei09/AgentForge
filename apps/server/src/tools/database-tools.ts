@@ -69,9 +69,7 @@ function validateReadOnlySql(query: string): string | null {
   return null; // valid
 }
 
-async function dbQueryExecute(
-  args: Record<string, unknown>,
-): Promise<string> {
+async function dbQueryExecute(args: Record<string, unknown>): Promise<string> {
   const query = (args.query as string) || "";
 
   // Validate read-only SQL
@@ -111,13 +109,17 @@ async function dbQueryExecute(
     const jsonResult = JSON.stringify(result, null, 2);
     // Truncate to 80000 chars to avoid overwhelming the LLM context
     if (jsonResult.length > 80_000) {
-      return JSON.stringify({
-        row_count: rowCount,
-        rows: resultRows.slice(0, 20),
-        truncated: true,
-        truncation_note: `Result truncated from ${jsonResult.length} to 80000 chars. Showing first 20 rows.`,
-        duration_ms: duration,
-      }, null, 2);
+      return JSON.stringify(
+        {
+          row_count: rowCount,
+          rows: resultRows.slice(0, 20),
+          truncated: true,
+          truncation_note: `Result truncated from ${jsonResult.length} to 80000 chars. Showing first 20 rows.`,
+          duration_ms: duration,
+        },
+        null,
+        2,
+      );
     }
 
     return jsonResult;

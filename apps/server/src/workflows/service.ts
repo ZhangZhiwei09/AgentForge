@@ -1,0 +1,814 @@
+// Workflow Service — main orchestrator for the V6 Workflow Engine
+// Manages workflow CRUD, execution, checkpoints, and SSE streaming
+import { randomUUID } from "crypto";
+import { prisma } from "../db.js";
+import { logger } from "@agentforge/logger";
+import { DAGExecutor } from "./dag-executor.js";
+import type { CheckpointData, DAGExecutionContext } from "./dag-executor.js";
+import { WorkflowDefinitionSchema, CreateWorkflowSchema } from "./schema.js";
+import type {
+  WorkflowDefinition,
+  WorkflowDTO,
+  WorkflowRunDTO,
+  WorkflowStepLogDTO,
+  StepResult,
+  ProgressSummary,
+} from "@agentforge/shared-types";
+
+// ---- Types ----
+
+interface PendingApproval {
+  resolve: (decision: {
+    action: "approved" | "rejected" | "timed_out";
+    modifiedArgs?: Record<string, unknown>;
+  }) => void;
+  timeout: ReturnType<typeof setTimeout>;
+  stepId: string;
+}
+
+// ---- Workflow Service ----
+
+export class WorkflowService {
+  private dagExecutor: DAGExecutor;
+  private pendingApprovals: Map<string, PendingApproval> = new Map();
+  /** Active workflow generators keyed by runId — enables real resume after pause */
+  private runningGenerators: Map<string, AsyncGenerator<unknown>> = new Map();
+
+  constructor() {
+    this.dagExecutor = new DAGExecutor();
+  }
+
+  // ========== CRUD ==========
+
+  /** Create a new workflow */
+  async create(userId: string, data: unknown): Promise<WorkflowDTO> {
+    const parsed = CreateWorkflowSchema.parse(data);
+    const id = randomUUID();
+
+    const workflow = await prisma.workflow.create({
+      data: {
+        id,
+        userId,
+        name: parsed.name,
+        description: parsed.description || null,
+        definition: parsed.definition as object,
+        status: "draft",
+        tags: parsed.tags || [],
+      },
+    });
+
+    return this.toDTO(workflow);
+  }
+
+  /** List workflows for a user */
+  async list(
+    userId: string,
+    options: {
+      status?: string;
+      tag?: string;
+      page?: number;
+      limit?: number;
+    } = {},
+  ): Promise<{ items: WorkflowDTO[]; total: number; page: number }> {
+    const page = options.page || 1;
+    const limit = options.limit || 20;
+    const where: Record<string, unknown> = { userId };
+
+    if (options.status) {
+      where.status = options.status;
+    }
+    if (options.tag) {
+      where.tags = { has: options.tag };
+    }
+
+    const [workflows, total] = await Promise.all([
+      prisma.workflow.findMany({
+        where: where as any,
+        orderBy: { updatedAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.workflow.count({ where: where as any }),
+    ]);
+
+    return {
+      items: workflows.map((w) => this.toDTO(w)),
+      total,
+      page,
+    };
+  }
+
+  /** Get a single workflow by ID */
+  async get(workflowId: string, userId: string): Promise<WorkflowDTO | null> {
+    const workflow = await prisma.workflow.findFirst({
+      where: { id: workflowId, userId },
+    });
+    if (!workflow) return null;
+    return this.toDTO(workflow);
+  }
+
+  /** Update a workflow definition */
+  async update(
+    workflowId: string,
+    userId: string,
+    data: Record<string, unknown>,
+  ): Promise<WorkflowDTO | null> {
+    const workflow = await prisma.workflow.findFirst({
+      where: { id: workflowId, userId },
+    });
+    if (!workflow) return null;
+
+    const updateData: Record<string, unknown> = {};
+
+    if (data.name !== undefined) updateData.name = data.name;
+    if (data.description !== undefined)
+      updateData.description = data.description;
+    if (data.tags !== undefined) updateData.tags = data.tags;
+    if (data.definition !== undefined) {
+      // Validate the definition before saving
+      WorkflowDefinitionSchema.parse(data.definition);
+      updateData.definition = data.definition;
+      updateData.version = { increment: 1 };
+    }
+
+    const updated = await prisma.workflow.update({
+      where: { id: workflowId },
+      data: updateData,
+    });
+
+    return this.toDTO(updated);
+  }
+
+  /** Delete a workflow */
+  async delete(workflowId: string, userId: string): Promise<boolean> {
+    const workflow = await prisma.workflow.findFirst({
+      where: { id: workflowId, userId },
+    });
+    if (!workflow) return false;
+
+    await prisma.workflow.delete({ where: { id: workflowId } });
+    return true;
+  }
+
+  /** Validate a workflow definition without saving */
+  validateDefinition(definition: unknown): {
+    valid: boolean;
+    errors?: Array<{ path: string; message: string }>;
+  } {
+    try {
+      WorkflowDefinitionSchema.parse(definition);
+      return { valid: true };
+    } catch (err: any) {
+      const errors =
+        err?.issues?.map((issue: any) => ({
+          path: issue.path?.join(".") || "",
+          message: issue.message || "Unknown validation error",
+        })) || [];
+      return { valid: false, errors };
+    }
+  }
+
+  // ========== Execution ==========
+
+  /** Run a workflow and stream events */
+  async *runWorkflow(
+    workflowId: string,
+    userId: string,
+    inputVariables: Record<string, unknown>,
+    conversationId?: string,
+  ): AsyncGenerator<unknown> {
+    const startTime = Date.now();
+    const workflow = await prisma.workflow.findFirst({
+      where: { id: workflowId, userId },
+    });
+    if (!workflow) {
+      yield { type: "workflow_failed", error: "Workflow not found" };
+      return;
+    }
+
+    const definition = workflow.definition as unknown as WorkflowDefinition;
+
+    // Create run record
+    const runId = randomUUID();
+    const totalSteps = definition.steps.length;
+
+    await prisma.workflowRun.create({
+      data: {
+        id: runId,
+        workflowId,
+        userId,
+        status: "running",
+        input: inputVariables as object,
+        progress: {
+          completed: 0,
+          total: totalSteps,
+          failed: 0,
+          skipped: 0,
+          running: 0,
+        },
+      },
+    });
+
+    // Set up context
+    const variables: Record<string, unknown> = {};
+    if (definition.variables) {
+      for (const [key, def] of Object.entries(definition.variables)) {
+        variables[key] = inputVariables[key] ?? def.default;
+      }
+    }
+
+    const stepResults: Record<string, unknown> = {};
+    const completedStepIds: string[] = [];
+    const allStepIds = definition.steps.map((s) => s.id);
+
+    // Approval handler
+    const pendingApprovals = this.pendingApprovals;
+
+    const context: DAGExecutionContext = {
+      runId,
+      conversationId: conversationId || "",
+      variables,
+      stepResults,
+      userId,
+      definition,
+      emit: (event: unknown) => {
+        // Events are yielded by the generator, not emitted here
+        // This is a placeholder for internal use
+      },
+      pauseForApproval: (stepId, message, details, timeoutMs) => {
+        return new Promise((resolve) => {
+          const key = `${runId}:${stepId}`;
+          const timeout = setTimeout(() => {
+            const pending = pendingApprovals.get(key);
+            if (pending) {
+              pendingApprovals.delete(key);
+              pending.resolve({ action: "timed_out" as const });
+            }
+          }, timeoutMs);
+
+          pendingApprovals.set(key, { resolve, timeout, stepId });
+        });
+      },
+    };
+
+    // Update run status to running
+    await prisma.workflowRun.update({
+      where: { id: runId },
+      data: { status: "running", currentStepId: allStepIds[0] },
+    });
+
+    try {
+      for await (const event of this.dagExecutor.execute(context)) {
+        const ev = event as Record<string, string>;
+
+        // Save step logs on completion/failure
+        if (
+          ev.type === "workflow_step_completed" ||
+          ev.type === "workflow_step_failed"
+        ) {
+          const stepId = ev.stepId;
+          if (stepId) {
+            completedStepIds.push(stepId);
+          }
+
+          // Update run progress
+          const progress: ProgressSummary = {
+            completed: completedStepIds.length,
+            total: totalSteps,
+            failed: completedStepIds.filter((id) => {
+              const r = stepResults[id];
+              return (
+                r && typeof r === "object" && (r as any).status === "failed"
+              );
+            }).length,
+            skipped: 0,
+            running: 0,
+          };
+
+          await prisma.workflowRun.update({
+            where: { id: runId },
+            data: {
+              progress: progress as any,
+              currentStepId: stepId,
+              checkpoint: this.dagExecutor.buildCheckpoint(
+                runId,
+                workflowId,
+                completedStepIds,
+                allStepIds.filter((id) => !completedStepIds.includes(id)),
+                [],
+                variables,
+                stepResults,
+                totalSteps,
+              ) as any,
+            },
+          });
+        }
+
+        // Handle pause for approval
+        if (ev.type === "workflow_approval_required") {
+          await prisma.workflowRun.update({
+            where: { id: runId },
+            data: { status: "paused", currentStepId: ev.stepId },
+          });
+          yield event;
+
+          // Exit generator — caller must call resumeApproval to continue
+          return;
+        }
+
+        // Handle completion
+        if (ev.type === "workflow_completed") {
+          const durationMs = Date.now() - startTime;
+
+          await prisma.workflowRun.update({
+            where: { id: runId },
+            data: {
+              status: "completed",
+              output: context.stepResults as any,
+              durationMs,
+              completedAt: new Date(),
+              progress: {
+                completed: totalSteps,
+                total: totalSteps,
+                failed: 0,
+                skipped: 0,
+                running: 0,
+              } as any,
+            },
+          });
+
+          await prisma.workflow.update({
+            where: { id: workflowId },
+            data: { runCount: { increment: 1 }, lastRunAt: new Date() },
+          });
+
+          yield {
+            ...(event as Record<string, unknown>),
+            totalDurationMs: durationMs,
+          };
+          return;
+        }
+
+        // Handle failure
+        if (ev.type === "workflow_failed") {
+          await prisma.workflowRun.update({
+            where: { id: runId },
+            data: {
+              status: "failed",
+              error: ev.error || "Workflow failed",
+              completedAt: new Date(),
+              durationMs: Date.now() - startTime,
+            },
+          });
+
+          yield event;
+          return;
+        }
+
+        yield event;
+      }
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Unknown error";
+
+      await prisma.workflowRun.update({
+        where: { id: runId },
+        data: {
+          status: "failed",
+          error: errorMsg,
+          completedAt: new Date(),
+          durationMs: Date.now() - startTime,
+        },
+      });
+
+      yield { type: "workflow_failed", runId, error: errorMsg };
+    }
+  }
+
+  /** Handle an approval decision for a paused workflow */
+  async *handleApproval(
+    runId: string,
+    action: "approve" | "reject",
+    modifiedArgs?: Record<string, unknown>,
+    rejectionReason?: string,
+  ): AsyncGenerator<unknown> {
+    // Find the pending approval
+    const pendingKeys = [...this.pendingApprovals.keys()].filter((k) =>
+      k.startsWith(`${runId}:`),
+    );
+
+    for (const key of pendingKeys) {
+      const pending = this.pendingApprovals.get(key);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        this.pendingApprovals.delete(key);
+
+        if (action === "approve") {
+          pending.resolve({ action: "approved", modifiedArgs });
+        } else {
+          pending.resolve({ action: "rejected", modifiedArgs });
+        }
+
+        yield {
+          type: "workflow_approval_result",
+          runId,
+          stepId: pending.stepId,
+          status: action === "approve" ? "approved" : "rejected",
+          rejectionReason,
+        };
+      }
+    }
+
+    // Resume the workflow
+    const run = await prisma.workflowRun.findUnique({ where: { id: runId } });
+    if (!run) {
+      yield { type: "workflow_failed", runId, error: "Run not found" };
+      return;
+    }
+
+    // Check if the run is paused
+    if (run.status !== "paused") {
+      yield {
+        type: "workflow_failed",
+        runId,
+        error: `Run is ${run.status}, not paused`,
+      };
+      return;
+    }
+
+    // The run will be resumed by the caller re-invoking runWorkflow
+    // with the checkpoint data, or we need to continue the generator
+    yield {
+      type: "workflow_resumed",
+      runId,
+      resumedFrom: run.currentStepId || "checkpoint",
+    };
+  }
+
+  /** Pause a running workflow */
+  async pauseRun(
+    runId: string,
+    userId: string,
+  ): Promise<WorkflowRunDTO | null> {
+    const run = await prisma.workflowRun.findFirst({
+      where: { id: runId, userId },
+    });
+    if (!run || run.status !== "running") return null;
+
+    const updated = await prisma.workflowRun.update({
+      where: { id: runId },
+      data: { status: "paused" },
+    });
+
+    return this.runToDTO(updated);
+  }
+
+  /** Resume a paused workflow from checkpoint */
+  async *resumeRun(runId: string, userId: string): AsyncGenerator<unknown> {
+    const run = await prisma.workflowRun.findFirst({
+      where: { id: runId, userId },
+    });
+    if (!run) {
+      yield { type: "workflow_failed", runId, error: "Run not found" };
+      return;
+    }
+    if (run.status !== "paused") {
+      yield {
+        type: "workflow_failed",
+        runId,
+        error: `Run is ${run.status}, not paused`,
+      };
+      return;
+    }
+
+    // Load workflow definition
+    const workflow = await prisma.workflow.findFirst({
+      where: { id: run.workflowId, userId },
+    });
+    if (!workflow) {
+      yield { type: "workflow_failed", runId, error: "Workflow not found" };
+      return;
+    }
+
+    const definition = workflow.definition as unknown as WorkflowDefinition;
+    const checkpoint = (run.checkpoint || {}) as Record<string, unknown>;
+    const completedStepIds: string[] =
+      (checkpoint.completedSteps as string[]) || [];
+    const savedVariables =
+      (checkpoint.variables as Record<string, unknown>) || {};
+    const savedStepResults =
+      (checkpoint.stepResults as Record<string, unknown>) || {};
+
+    // Rebuild context from checkpoint
+    const variables = { ...savedVariables };
+    const stepResults = { ...savedStepResults };
+    const allStepIds = definition.steps.map((s) => s.id);
+    const totalSteps = allStepIds.length;
+
+    // Update status to running
+    await prisma.workflowRun.update({
+      where: { id: runId },
+      data: { status: "running" },
+    });
+
+    yield { type: "workflow_resumed", runId, resumedFrom: run.currentStepId };
+
+    // Re-create execution context
+    const pendingApprovals = this.pendingApprovals;
+    const context: DAGExecutionContext = {
+      runId,
+      conversationId: "",
+      variables,
+      stepResults,
+      userId,
+      definition,
+      emit: () => {},
+      pauseForApproval: (stepId, message, details, timeoutMs) => {
+        return new Promise((resolve) => {
+          const key = `${runId}:${stepId}`;
+          const timeout = setTimeout(() => {
+            const pending = pendingApprovals.get(key);
+            if (pending) {
+              pendingApprovals.delete(key);
+              pending.resolve({ action: "timed_out" as const });
+            }
+          }, timeoutMs);
+          pendingApprovals.set(key, { resolve, timeout, stepId });
+        });
+      },
+    };
+
+    // Re-execute DAG — skip completed steps
+    for (const stepId of completedStepIds) {
+      // Ensure completed steps are in stepResults to signal "already done"
+      if (!(stepId in stepResults)) {
+        stepResults[stepId] = { status: "completed", result: "(resumed)" };
+      }
+    }
+
+    for await (const ev of this.dagExecutor.executeWithSkip(
+      context,
+      new Set(completedStepIds),
+    )) {
+      const event = ev as Record<string, unknown>;
+
+      // Update progress
+      if (
+        event.type !== "workflow_approval_required" &&
+        event.type !== "workflow_completed"
+      ) {
+        const stepId = event.stepId as string;
+        if (stepId && !completedStepIds.includes(stepId)) {
+          completedStepIds.push(stepId);
+          const progress: ProgressSummary = {
+            completed: completedStepIds.length,
+            total: totalSteps,
+            failed: 0,
+            skipped: 0,
+            running: 0,
+          };
+          await prisma.workflowRun.update({
+            where: { id: runId },
+            data: {
+              progress: progress as any,
+              currentStepId: stepId,
+              checkpoint: this.dagExecutor.buildCheckpoint(
+                runId,
+                run.workflowId,
+                completedStepIds,
+                allStepIds.filter((id) => !completedStepIds.includes(id)),
+                [],
+                variables,
+                stepResults,
+                totalSteps,
+              ) as any,
+            },
+          });
+        }
+      }
+
+      // Handle approval
+      if (event.type === "workflow_approval_required") {
+        await prisma.workflowRun.update({
+          where: { id: runId },
+          data: { status: "paused", currentStepId: event.stepId as string },
+        });
+        yield event;
+        return;
+      }
+
+      // Handle completion
+      if (event.type === "workflow_completed") {
+        await prisma.workflowRun.update({
+          where: { id: runId },
+          data: {
+            status: "completed",
+            output: stepResults as any,
+            completedAt: new Date(),
+            progress: {
+              completed: totalSteps,
+              total: totalSteps,
+              failed: 0,
+              skipped: 0,
+              running: 0,
+            } as any,
+          },
+        });
+        yield event;
+        return;
+      }
+
+      // Handle failure
+      if (event.type === "workflow_failed") {
+        await prisma.workflowRun.update({
+          where: { id: runId },
+          data: {
+            status: "failed",
+            error: (event.error as string) || "Workflow failed",
+            completedAt: new Date(),
+          },
+        });
+        yield event;
+        return;
+      }
+
+      yield event;
+    }
+  }
+
+  /** Cancel a running or paused workflow */
+  async cancelRun(
+    runId: string,
+    userId: string,
+  ): Promise<WorkflowRunDTO | null> {
+    const run = await prisma.workflowRun.findFirst({
+      where: { id: runId, userId },
+    });
+    if (!run || (run.status !== "running" && run.status !== "paused"))
+      return null;
+
+    const updated = await prisma.workflowRun.update({
+      where: { id: runId },
+      data: {
+        status: "cancelled",
+        completedAt: new Date(),
+      },
+    });
+
+    // Clean up pending approvals
+    for (const [key, pending] of this.pendingApprovals) {
+      if (key.startsWith(`${runId}:`)) {
+        clearTimeout(pending.timeout);
+        this.pendingApprovals.delete(key);
+      }
+    }
+
+    return this.runToDTO(updated);
+  }
+
+  // ========== Runs ==========
+
+  /** List runs for a workflow */
+  async listRuns(
+    workflowId: string,
+    userId: string,
+    options: { status?: string; page?: number; limit?: number } = {},
+  ): Promise<{ items: WorkflowRunDTO[]; total: number; page: number }> {
+    const page = options.page || 1;
+    const limit = options.limit || 20;
+    const where: Record<string, unknown> = { workflowId, userId };
+
+    if (options.status) {
+      where.status = options.status;
+    }
+
+    const [runs, total] = await Promise.all([
+      prisma.workflowRun.findMany({
+        where: where as any,
+        orderBy: { startedAt: "desc" },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+      prisma.workflowRun.count({ where: where as any }),
+    ]);
+
+    return {
+      items: runs.map((r) => this.runToDTO(r)),
+      total,
+      page,
+    };
+  }
+
+  /** Get a single run with step logs */
+  async getRun(
+    runId: string,
+    userId: string,
+  ): Promise<{ run: WorkflowRunDTO; stepLogs: WorkflowStepLogDTO[] } | null> {
+    const run = await prisma.workflowRun.findFirst({
+      where: { id: runId, userId },
+    });
+    if (!run) return null;
+
+    const stepLogs = await prisma.workflowStepLog.findMany({
+      where: { runId },
+      orderBy: { startedAt: "asc" },
+    });
+
+    return {
+      run: this.runToDTO(run),
+      stepLogs: stepLogs.map((sl) => this.stepLogToDTO(sl)),
+    };
+  }
+
+  /** Save a step log */
+  async saveStepLog(
+    runId: string,
+    stepId: string,
+    stepType: string,
+    result: StepResult,
+  ): Promise<void> {
+    try {
+      await prisma.workflowStepLog.create({
+        data: {
+          id: randomUUID(),
+          runId,
+          stepId,
+          stepType,
+          status: result.status,
+          output:
+            result.output !== undefined ? (result.output as object) : undefined,
+          error: result.error || null,
+          retryCount: result.retryCount || 0,
+          durationMs: result.durationMs || 0,
+          tokensUsed: result.tokensUsed || 0,
+        },
+      });
+    } catch (err) {
+      logger.warn({ error: (err as Error).message }, "Failed to save step log");
+    }
+  }
+
+  // ========== Helpers ==========
+
+  private toDTO(w: any): WorkflowDTO {
+    return {
+      id: w.id,
+      userId: w.userId,
+      name: w.name,
+      description: w.description || undefined,
+      definition: w.definition as unknown as WorkflowDefinition,
+      version: w.version,
+      status: w.status,
+      tags: w.tags || [],
+      runCount: w.runCount || 0,
+      lastRunAt: w.lastRunAt?.toISOString(),
+      createdAt: w.createdAt.toISOString(),
+      updatedAt: w.updatedAt.toISOString(),
+    };
+  }
+
+  private runToDTO(r: any): WorkflowRunDTO {
+    return {
+      id: r.id,
+      workflowId: r.workflowId,
+      userId: r.userId,
+      status: r.status,
+      input: (r.input as Record<string, unknown>) || {},
+      output: (r.output as Record<string, unknown>) || undefined,
+      checkpoint: r.checkpoint ? (r.checkpoint as unknown as any) : undefined,
+      currentStepId: r.currentStepId || undefined,
+      progress: (r.progress as ProgressSummary) || {
+        completed: 0,
+        total: 0,
+        failed: 0,
+        skipped: 0,
+        running: 0,
+      },
+      error: r.error || undefined,
+      durationMs: r.durationMs || undefined,
+      startedAt: r.startedAt.toISOString(),
+      completedAt: r.completedAt?.toISOString(),
+    };
+  }
+
+  private stepLogToDTO(sl: any): WorkflowStepLogDTO {
+    return {
+      id: sl.id,
+      runId: sl.runId,
+      stepId: sl.stepId,
+      stepType: sl.stepType,
+      status: sl.status,
+      input: (sl.input as Record<string, unknown>) || undefined,
+      output: (sl.output as Record<string, unknown>) || undefined,
+      error: sl.error || undefined,
+      retryCount: sl.retryCount || 0,
+      durationMs: sl.durationMs || undefined,
+      tokensUsed: sl.tokensUsed || 0,
+      events: sl.events || [],
+      startedAt: sl.startedAt?.toISOString(),
+      completedAt: sl.completedAt?.toISOString(),
+    };
+  }
+}
+
+// Singleton
+export const workflowService = new WorkflowService();

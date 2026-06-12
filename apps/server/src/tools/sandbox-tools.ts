@@ -59,13 +59,18 @@ async function codeExecuteExecute(
     const { sandboxManager } = await import("../services/sandbox.js");
 
     if (!sandboxManager.isAvailable()) {
-      return JSON.stringify({
-        error: "Docker is not available on this server.",
-        hint: "The code_execute tool requires Docker to be installed and running. " +
-              "Build the sandbox image with: docker build -t agentforge-sandbox:latest -f infra/docker/Dockerfile.sandbox .",
-        language,
-        code_preview: code.slice(0, 200),
-      }, null, 2);
+      return JSON.stringify(
+        {
+          error: "Docker is not available on this server.",
+          hint:
+            "The code_execute tool requires Docker to be installed and running. " +
+            "Build the sandbox image with: docker build -t agentforge-sandbox:latest -f infra/docker/Dockerfile.sandbox .",
+          language,
+          code_preview: code.slice(0, 200),
+        },
+        null,
+        2,
+      );
     }
 
     logger.info(
@@ -78,14 +83,18 @@ async function codeExecuteExecute(
       code,
     );
 
-    return JSON.stringify({
-      language,
-      exit_code: result.exitCode,
-      stdout: result.stdout,
-      stderr: result.stderr || null,
-      timed_out: result.timedOut,
-      duration_ms: result.durationMs,
-    }, null, 2);
+    return JSON.stringify(
+      {
+        language,
+        exit_code: result.exitCode,
+        stdout: result.stdout,
+        stderr: result.stderr || null,
+        timed_out: result.timedOut,
+        duration_ms: result.durationMs,
+      },
+      null,
+      2,
+    );
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     logger.error({ language, error: msg }, "code_execute failed");

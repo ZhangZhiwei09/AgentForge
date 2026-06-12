@@ -18,13 +18,15 @@ dotenv.config({ path: envPath });
 const OPENAI_KEY = process.env.OPENAI_API_KEY || "";
 const OPENAI_URL = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
 const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || "";
-const DEEPSEEK_URL = process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1";
+const DEEPSEEK_URL =
+  process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1";
 const DEFAULT_MODEL = process.env.DEFAULT_MODEL || "deepseek-chat";
 
 // ═══════════════════════════════════════════
 // 固定话术
 // ═══════════════════════════════════════════
-const SORRY_TEMPLATE = "抱歉，我目前没有找到相关信息，建议您联系人工客服获取帮助。";
+const SORRY_TEMPLATE =
+  "抱歉，我目前没有找到相关信息，建议您联系人工客服获取帮助。";
 
 // ═══════════════════════════════════════════
 // Zod Schema
@@ -41,7 +43,10 @@ const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /根据(我司|公司|平台)规定/g, label: "虚假权威引用" },
   { pattern: /经查询[^，。]*[，。]/g, label: "虚假查询陈述" },
   { pattern: /可能是(因为|由于)/g, label: "无依据推测原因" },
-  { pattern: /您的(订单|物流|快递)[^，。]{0,10}(可能|应该)/g, label: "推测客户信息" },
+  {
+    pattern: /您的(订单|物流|快递)[^，。]{0,10}(可能|应该)/g,
+    label: "推测客户信息",
+  },
   { pattern: /建议您(自行|自己)[^，。]*[，。]/g, label: "推卸责任式建议" },
 ];
 
@@ -111,7 +116,10 @@ interface ValidationResult {
   layer: number;
 }
 
-function validateResponse(rawText: string, kbAvailable: boolean): ValidationResult {
+function validateResponse(
+  rawText: string,
+  kbAvailable: boolean,
+): ValidationResult {
   // Layer 1: JSON 可解析
   let clean = rawText.trim();
   if (clean.startsWith("```")) {
@@ -130,8 +138,14 @@ function validateResponse(rawText: string, kbAvailable: boolean): ValidationResu
   // Layer 2: Schema 校验
   const schemaResult = ChatResponseSchema.safeParse(parsed);
   if (!schemaResult.success) {
-    const issues = schemaResult.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`);
-    return { valid: false, errors: [`Layer2: Schema校验失败 - ${issues.join("; ")}`], layer: 2 };
+    const issues = schemaResult.error.issues.map(
+      (i) => `${i.path.join(".")}: ${i.message}`,
+    );
+    return {
+      valid: false,
+      errors: [`Layer2: Schema校验失败 - ${issues.join("; ")}`],
+      layer: 2,
+    };
   }
 
   const data = schemaResult.data;
@@ -330,7 +344,10 @@ async function runEval(): Promise<void> {
     fallbackModel = "qwen-plus";
     console.log(`[配置] 备选模型: qwen-plus`);
   } else if (!useDeepSeek && DEEPSEEK_KEY) {
-    fallbackClient = new OpenAI({ apiKey: DEEPSEEK_KEY, baseURL: DEEPSEEK_URL });
+    fallbackClient = new OpenAI({
+      apiKey: DEEPSEEK_KEY,
+      baseURL: DEEPSEEK_URL,
+    });
     fallbackModel = "deepseek-chat";
     console.log(`[配置] 备选模型: deepseek-chat`);
   }
@@ -343,9 +360,7 @@ async function runEval(): Promise<void> {
 
   for (const tc of TEST_CASES) {
     const startTime = Date.now();
-    const systemPrompt = buildSystemPrompt(
-      tc.kbAvailable ? tc.kbContext : "",
-    );
+    const systemPrompt = buildSystemPrompt(tc.kbAvailable ? tc.kbContext : "");
 
     let rawResponse = "";
     let retryCount = 0;
@@ -360,8 +375,12 @@ async function runEval(): Promise<void> {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         rawResponse = await callLLM(
-          client, model, systemPrompt, tc.question,
-          temperatures[attempt] || 0, useJSONMode,
+          client,
+          model,
+          systemPrompt,
+          tc.question,
+          temperatures[attempt] || 0,
+          useJSONMode,
         );
         retryCount = attempt;
 
@@ -373,13 +392,17 @@ async function runEval(): Promise<void> {
         }
 
         if (attempt < maxRetries - 1 && tc.retryOnFail) {
-          console.log(`       ⚠ 重试 ${attempt + 1}/${maxRetries - 1}: ${validation.errors[0]}`);
+          console.log(
+            `       ⚠ 重试 ${attempt + 1}/${maxRetries - 1}: ${validation.errors[0]}`,
+          );
           validationErrors = validation.errors;
         } else {
           validationErrors = validation.errors;
         }
       } catch (e: any) {
-        console.log(`       ⚠ 调用失败 (尝试 ${attempt + 1}): ${e.message?.slice(0, 80)}`);
+        console.log(
+          `       ⚠ 调用失败 (尝试 ${attempt + 1}): ${e.message?.slice(0, 80)}`,
+        );
         if (attempt < maxRetries - 1 && tc.retryOnFail) {
           // 短暂冷却后重试
           await new Promise((r) => setTimeout(r, 500));
@@ -392,7 +415,12 @@ async function runEval(): Promise<void> {
       try {
         console.log(`       ↳ 降级到备选模型 ${fallbackModel}...`);
         rawResponse = await callLLM(
-          fallbackClient, fallbackModel, systemPrompt, tc.question, 0.0, false,
+          fallbackClient,
+          fallbackModel,
+          systemPrompt,
+          tc.question,
+          0.0,
+          false,
         );
         usedModel = fallbackModel;
         const validation = validateResponse(rawResponse, tc.kbAvailable);
@@ -424,12 +452,17 @@ async function runEval(): Promise<void> {
     }
 
     const status = passed ? "✅" : "❌";
-    console.log(`       结果: ${status} | 重试: ${retryCount}次 | 延迟: ${latencyMs}ms | 模型: ${usedModel}`);
+    console.log(
+      `       结果: ${status} | 重试: ${retryCount}次 | 延迟: ${latencyMs}ms | 模型: ${usedModel}`,
+    );
     if (validationErrors.length > 0) {
       console.log(`       校验: ${validationErrors.join("; ")}`);
     }
     if (parsedAnswer) {
-      const preview = parsedAnswer.length > 100 ? parsedAnswer.slice(0, 100) + "..." : parsedAnswer;
+      const preview =
+        parsedAnswer.length > 100
+          ? parsedAnswer.slice(0, 100) + "..."
+          : parsedAnswer;
       console.log(`       回答: ${preview}`);
     }
     console.log("");
@@ -465,24 +498,32 @@ async function runEval(): Promise<void> {
 
   // 幻觉率: KB 外问题中，没有编造的比例
   const kbExtPassed = kbExternal.filter((r) => r.passed).length;
-  const hallucinationRate = kbExternal.length > 0
-    ? ((kbExternal.length - kbExtPassed) / kbExternal.length * 100).toFixed(1)
-    : "0";
+  const hallucinationRate =
+    kbExternal.length > 0
+      ? (((kbExternal.length - kbExtPassed) / kbExternal.length) * 100).toFixed(
+          1,
+        )
+      : "0";
 
   // KB 忠实度: KB 内问题中，通过的比例
   const kbIntPassed = kbInternal.filter((r) => r.passed).length;
-  const fidelityRate = kbInternal.length > 0
-    ? (kbIntPassed / kbInternal.length * 100).toFixed(1)
-    : "100";
+  const fidelityRate =
+    kbInternal.length > 0
+      ? ((kbIntPassed / kbInternal.length) * 100).toFixed(1)
+      : "100";
 
   // 降级覆盖率: 所有情况都有输出
   const hasOutput = results.filter((r) => r.parsedAnswer.length > 0).length;
 
   // 平均延迟
-  const avgLatency = Math.round(results.reduce((s, r) => s + r.latencyMs, 0) / total);
+  const avgLatency = Math.round(
+    results.reduce((s, r) => s + r.latencyMs, 0) / total,
+  );
 
   // 平均重试次数
-  const avgRetries = (results.reduce((s, r) => s + r.retryCount, 0) / total).toFixed(1);
+  const avgRetries = (
+    results.reduce((s, r) => s + r.retryCount, 0) / total
+  ).toFixed(1);
 
   console.log("═".repeat(60));
   console.log("                质量门禁报告");
@@ -491,13 +532,25 @@ async function runEval(): Promise<void> {
   console.log("┌──────────────────────────┬──────────┬──────────┐");
   console.log("│         指标             │  目标值  │  实测值  │");
   console.log("├──────────────────────────┼──────────┼──────────┤");
-  console.log(`│ 总通过率                 │  > 90%   │  ${(passedCount / total * 100).toFixed(1)}%   │`);
-  console.log(`│ JSON 可解析率            │  > 99%   │  ${(formatPassed / total * 100).toFixed(0)}%    │`);
-  console.log(`│ Schema 通过率            │  > 99%   │  ${(formatPassed / total * 100).toFixed(0)}%    │`);
-  console.log(`│ 幻觉率 (KB外拒绝回答)    │  < 5%    │  ${hallucinationRate}%     │`);
+  console.log(
+    `│ 总通过率                 │  > 90%   │  ${((passedCount / total) * 100).toFixed(1)}%   │`,
+  );
+  console.log(
+    `│ JSON 可解析率            │  > 99%   │  ${((formatPassed / total) * 100).toFixed(0)}%    │`,
+  );
+  console.log(
+    `│ Schema 通过率            │  > 99%   │  ${((formatPassed / total) * 100).toFixed(0)}%    │`,
+  );
+  console.log(
+    `│ 幻觉率 (KB外拒绝回答)    │  < 5%    │  ${hallucinationRate}%     │`,
+  );
   console.log(`│ KB 忠实度 (KB内正确回答) │  > 90%   │  ${fidelityRate}%    │`);
-  console.log(`│ 降级覆盖率 (有输出)      │  100%    │  ${(hasOutput / total * 100).toFixed(0)}%    │`);
-  console.log(`│ 平均响应时间             │  < 5s    │  ${(avgLatency / 1000).toFixed(1)}s   │`);
+  console.log(
+    `│ 降级覆盖率 (有输出)      │  100%    │  ${((hasOutput / total) * 100).toFixed(0)}%    │`,
+  );
+  console.log(
+    `│ 平均响应时间             │  < 5s    │  ${(avgLatency / 1000).toFixed(1)}s   │`,
+  );
   console.log(`│ 平均重试次数             │  < 0.5   │  ${avgRetries}     │`);
   console.log("└──────────────────────────┴──────────┴──────────┘");
   console.log("");
@@ -513,14 +566,18 @@ async function runEval(): Promise<void> {
     const kbLabel = r.kbAvailable ? "[KB内]" : "[KB外]";
     console.log(`${status} ${kbLabel} ${r.name}`);
     console.log(`   Q: ${r.question}`);
-    console.log(`   A: ${r.parsedAnswer.slice(0, 120)}${r.parsedAnswer.length > 120 ? "..." : ""}`);
+    console.log(
+      `   A: ${r.parsedAnswer.slice(0, 120)}${r.parsedAnswer.length > 120 ? "..." : ""}`,
+    );
     if (r.suggestions.length > 0) {
       console.log(`   建议: ${r.suggestions.join(" | ")}`);
     }
     if (!r.passed) {
       console.log(`   ❌ 失败原因: ${r.validationErrors.join("; ")}`);
     }
-    console.log(`   延迟: ${r.latencyMs}ms | 重试: ${r.retryCount} | 模型: ${r.modelUsed}`);
+    console.log(
+      `   延迟: ${r.latencyMs}ms | 重试: ${r.retryCount} | 模型: ${r.modelUsed}`,
+    );
     console.log("");
   }
 
@@ -530,9 +587,13 @@ async function runEval(): Promise<void> {
   console.log("─".repeat(60));
   console.log("");
   console.log("  维度              改动前(估算)    改动后(实测)");
-  console.log(`  JSON可解析率       ~60%            ${(formatPassed / total * 100).toFixed(0)}%`);
+  console.log(
+    `  JSON可解析率       ~60%            ${((formatPassed / total) * 100).toFixed(0)}%`,
+  );
   console.log(`  禁止行为检测       ❌ 无           ✅ 5条规则`);
-  console.log(`  校验层数           1层(LLM核验)   5层(格式→Schema→禁止词→命中→话术)`);
+  console.log(
+    `  校验层数           1层(LLM核验)   5层(格式→Schema→禁止词→命中→话术)`,
+  );
   console.log(`  重试机制           ❌ 无           ✅ 2次+备选模型`);
   console.log(`  确定性fallback     ❌ 无           ✅ KB dump / 固定话术`);
   console.log(`  数据回收           ❌ 无           ✅ JSONL 落盘`);
@@ -540,9 +601,15 @@ async function runEval(): Promise<void> {
   console.log("");
 
   // 保存结果
-  const resultsDir = path.resolve(import.meta.dirname || __dirname, "../../logs/eval");
+  const resultsDir = path.resolve(
+    import.meta.dirname || __dirname,
+    "../../logs/eval",
+  );
   fs.mkdirSync(resultsDir, { recursive: true });
-  const resultsFile = path.join(resultsDir, `eval-${new Date().toISOString().replace(/[:.]/g, "-")}.json`);
+  const resultsFile = path.join(
+    resultsDir,
+    `eval-${new Date().toISOString().replace(/[:.]/g, "-")}.json`,
+  );
   fs.writeFileSync(resultsFile, JSON.stringify(results, null, 2), "utf-8");
   console.log(`详细结果已保存到: ${resultsFile}`);
 }

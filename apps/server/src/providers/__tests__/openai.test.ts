@@ -6,7 +6,10 @@ import type { ChatMessage, StreamChunk } from "../types.js";
 // Mock OpenAI SDK
 vi.mock("openai", () => {
   return {
-    default: vi.fn().mockImplementation(function (this: Record<string, unknown>, config: unknown) {
+    default: vi.fn().mockImplementation(function (
+      this: Record<string, unknown>,
+      config: unknown,
+    ) {
       this.config = config;
       this.chat = {
         completions: {
@@ -58,7 +61,13 @@ describe("OpenAIProvider", () => {
   describe("chatSync", () => {
     it("should return content and usage from OpenAI response", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
       mockClient.chat.completions.create.mockResolvedValueOnce({
         choices: [
           {
@@ -84,7 +93,13 @@ describe("OpenAIProvider", () => {
 
     it("should include jsonMode response_format when enabled", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
       mockClient.chat.completions.create.mockResolvedValueOnce({
         choices: [{ message: { content: "{}" } }],
         usage: { prompt_tokens: 10, completion_tokens: 5 },
@@ -106,7 +121,13 @@ describe("OpenAIProvider", () => {
 
     it("should handle empty content gracefully", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
       mockClient.chat.completions.create.mockResolvedValueOnce({
         choices: [{ message: { content: null } }],
         usage: { prompt_tokens: 5, completion_tokens: 0 },
@@ -125,7 +146,13 @@ describe("OpenAIProvider", () => {
   describe("streamChat", () => {
     it("should yield token chunks for text content", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
 
       // Create an async iterable that simulates streaming chunks
       mockClient.chat.completions.create.mockResolvedValueOnce(
@@ -146,10 +173,7 @@ describe("OpenAIProvider", () => {
       );
 
       const chunks = await collectStream(
-        provider.streamChat(
-          [{ role: "user", content: "Hi" }],
-          "gpt-4o",
-        ),
+        provider.streamChat([{ role: "user", content: "Hi" }], "gpt-4o"),
       );
 
       const tokens = chunks.filter((c) => c.type === "token");
@@ -164,7 +188,13 @@ describe("OpenAIProvider", () => {
 
     it("should yield done event with usage even on empty stream", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
 
       mockClient.chat.completions.create.mockResolvedValueOnce(
         (async function* () {
@@ -186,30 +216,47 @@ describe("OpenAIProvider", () => {
 
     it("should accumulate tool call fragments across chunks", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
 
       mockClient.chat.completions.create.mockResolvedValueOnce(
         (async function* () {
           // First chunk: tool call starts with id and name
           yield {
-            choices: [{
-              delta: {
-                tool_calls: [
-                  { index: 0, id: "call_123", function: { name: "get", arguments: '{"url"' } },
-                ],
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "call_123",
+                      function: { name: "get", arguments: '{"url"' },
+                    },
+                  ],
+                },
               },
-            }],
+            ],
             usage: null,
           };
           // Second chunk: more arguments
           yield {
-            choices: [{
-              delta: {
-                tool_calls: [
-                  { index: 0, function: { arguments: ':"https://example.com"}' } },
-                ],
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      function: { arguments: ':"https://example.com"}' },
+                    },
+                  ],
+                },
               },
-            }],
+            ],
             usage: null,
           };
           // Final chunk: no delta, just usage
@@ -227,19 +274,36 @@ describe("OpenAIProvider", () => {
           "",
           undefined,
           undefined,
-          [{ type: "function", function: { name: "http_request", description: "", parameters: { type: "object", properties: {} } } }],
+          [
+            {
+              type: "function",
+              function: {
+                name: "http_request",
+                description: "",
+                parameters: { type: "object", properties: {} },
+              },
+            },
+          ],
         ),
       );
 
       const toolCalls = chunks.filter((c) => c.type === "tool_call");
       expect(toolCalls.length).toBeGreaterThanOrEqual(1);
       expect(toolCalls[0].tool_call?.name).toBe("get");
-      expect(toolCalls[0].tool_call?.arguments).toContain("https://example.com");
+      expect(toolCalls[0].tool_call?.arguments).toContain(
+        "https://example.com",
+      );
     });
 
     it("should yield done event even if stream errors", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
 
       mockClient.chat.completions.create.mockResolvedValueOnce(
         (async function* () {
@@ -264,7 +328,13 @@ describe("OpenAIProvider", () => {
 
     it("should prepend system prompt as first message", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
 
       mockClient.chat.completions.create.mockResolvedValueOnce(
         (async function* () {
@@ -291,7 +361,13 @@ describe("OpenAIProvider", () => {
 
     it("should pass tool definitions to the API", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
 
       mockClient.chat.completions.create.mockResolvedValueOnce(
         (async function* () {
@@ -303,7 +379,14 @@ describe("OpenAIProvider", () => {
       );
 
       const tools = [
-        { type: "function" as const, function: { name: "calculator", description: "Eval math", parameters: { type: "object" as const, properties: {} } } },
+        {
+          type: "function" as const,
+          function: {
+            name: "calculator",
+            description: "Eval math",
+            parameters: { type: "object" as const, properties: {} },
+          },
+        },
       ];
 
       await collectStream(
@@ -325,7 +408,13 @@ describe("OpenAIProvider", () => {
   describe("performance", () => {
     it("should yield first token with minimal latency", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
 
       mockClient.chat.completions.create.mockResolvedValueOnce(
         (async function* () {
@@ -337,7 +426,10 @@ describe("OpenAIProvider", () => {
       );
 
       const start = Date.now();
-      const gen = provider.streamChat([{ role: "user", content: "Hi" }], "gpt-4o-mini");
+      const gen = provider.streamChat(
+        [{ role: "user", content: "Hi" }],
+        "gpt-4o-mini",
+      );
       const first = await gen.next();
       const elapsed = Date.now() - start;
 
@@ -349,7 +441,13 @@ describe("OpenAIProvider", () => {
   describe("tool_call message conversion", () => {
     it("should convert ChatMessage tool_calls to OpenAI format", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
 
       mockClient.chat.completions.create.mockResolvedValueOnce(
         (async function* () {

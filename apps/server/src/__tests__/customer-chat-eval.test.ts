@@ -50,7 +50,10 @@ function checkMustNotContain(text: string, keywords: string[]): string[] {
   return keywords.filter((kw) => text.includes(kw));
 }
 
-function validateResponseJSON(rawText: string): { valid: boolean; errors: string[] } {
+function validateResponseJSON(rawText: string): {
+  valid: boolean;
+  errors: string[];
+} {
   const errors: string[] = [];
 
   // Layer 1: JSON parse using shared utility
@@ -148,7 +151,9 @@ describe("确定性校验管线（不依赖LLM）", () => {
     });
 
     it("应放过正常的礼貌回答", () => {
-      const hits = runForbiddenScan("您好！根据我们的退换货政策，七日无理由退货需要保证商品完好。");
+      const hits = runForbiddenScan(
+        "您好！根据我们的退换货政策，七日无理由退货需要保证商品完好。",
+      );
       expect(hits).toHaveLength(0);
     });
   });
@@ -278,7 +283,7 @@ describe.skip("LLM 集成评测（需 API Key）", () => {
     console.log(`Total cases: ${EVAL_CASES.length}\n`);
 
     const categories = {
-      "KB内问题": EVAL_CASES.filter((c) => c.kbAvailable),
+      KB内问题: EVAL_CASES.filter((c) => c.kbAvailable),
       "KB外问题（防编造）": EVAL_CASES.filter((c) => !c.kbAvailable),
     };
 

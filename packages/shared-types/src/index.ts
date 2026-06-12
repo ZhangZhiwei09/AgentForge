@@ -1,4 +1,13 @@
-export type { User, AuthUser, CreateUserDTO, SignUpRequest, SignInRequest, AuthResponse, ApiKeyDTO, CreateApiKeyResponse } from "./user";
+export type {
+  User,
+  AuthUser,
+  CreateUserDTO,
+  SignUpRequest,
+  SignInRequest,
+  AuthResponse,
+  ApiKeyDTO,
+  CreateApiKeyResponse,
+} from "./user";
 export type {
   Conversation,
   CreateConversationDTO,
@@ -13,7 +22,12 @@ export type {
 } from "./message";
 export type { LLMProviderInfo, ProviderType, ModelInfo } from "./provider";
 export type { DebugInfo, DebugPanelProps } from "./debug";
-export type { Memory, MemoryType, MemorySearchResult, MemoryInfo } from "./memory";
+export type {
+  Memory,
+  MemoryType,
+  MemorySearchResult,
+  MemoryInfo,
+} from "./memory";
 export type {
   ToolDefinition,
   ToolFunctionDefinition,
@@ -46,6 +60,41 @@ export type {
   AgentStreamEvent,
 } from "./agent";
 export type {
+  WorkflowVariableDef,
+  StepRetryConfig,
+  BaseStep,
+  AgentStep as WorkflowAgentStep,
+  ToolStep as WorkflowToolStep,
+  ConditionStep as WorkflowConditionStep,
+  ParallelStep as WorkflowParallelStep,
+  HumanApprovalStep as WorkflowHumanApprovalStep,
+  TransformStep as WorkflowTransformStep,
+  ParallelBranch,
+  WorkflowStep,
+  WorkflowDefinition,
+  WorkflowStatus,
+  WorkflowDTO,
+  WorkflowRunStatus,
+  StepResult,
+  WorkflowCheckpoint,
+  ProgressSummary,
+  WorkflowRunDTO,
+  WorkflowStepLogStatus,
+  WorkflowStepLogDTO,
+  WorkflowStreamEvent,
+  WorkflowStartedEvent,
+  WorkflowStepStartedEvent,
+  WorkflowStepProgressEvent,
+  WorkflowStepCompletedEvent,
+  WorkflowStepFailedEvent,
+  WorkflowPausedEvent,
+  WorkflowResumedEvent,
+  WorkflowCompletedEvent,
+  WorkflowFailedEvent,
+  WorkflowCancelledEvent,
+  WorkflowApprovalRequiredEvent,
+} from "./workflow";
+export type {
   VoiceClientMessage,
   VoiceServerMessage,
   VoiceAudioInput,
@@ -65,3 +114,30 @@ export type {
   VoiceSessionSummary,
   VoiceProfile,
 } from "./voice";
+export type {
+  AgentRole,
+  TeamDefinition,
+  TeamDefinitionVariable,
+  CollaborationMode,
+  StopCondition,
+  TeamDebateConfig,
+  AgentMessageType,
+  AgentMessagePayload,
+  AgentMessage as TeamAgentMessage,
+  BlackboardEntry,
+  TeamStreamEventType,
+  TeamStreamEvent,
+  TeamStartedEvent,
+  TeamRoundStartEvent,
+  TeamAgentStartedEvent,
+  TeamAgentForwardedEvent,
+  TeamAgentMessageEvent,
+  TeamBlackboardUpdateEvent,
+  TeamAgentCompletedEvent,
+  TeamAgentErrorEvent,
+  TeamCompletedEvent,
+  TeamFailedEvent,
+  TeamDTO,
+  TeamRunDTO,
+  TeamTemplate,
+} from "./team";

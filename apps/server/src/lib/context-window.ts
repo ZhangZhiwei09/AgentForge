@@ -12,7 +12,9 @@ export function estimateTokenCount(messages: ChatMessage[]): number {
     // tool call arguments也计入
     if (m.tool_calls) {
       for (const tc of m.tool_calls) {
-        chars += (tc.function?.name?.length || 0) + (tc.function?.arguments?.length || 0);
+        chars +=
+          (tc.function?.name?.length || 0) +
+          (tc.function?.arguments?.length || 0);
       }
     }
   }

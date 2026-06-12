@@ -23,8 +23,22 @@ describe("useChatStore", () => {
       // Arrange
       useChatStore.setState({
         messages: [
-          { id: "1", role: "user", content: "Hello", conversation_id: "c1", created_at: "", model: "" },
-          { id: "__streaming__", role: "assistant", content: "Hel", conversation_id: "c1", created_at: "", model: "" },
+          {
+            id: "1",
+            role: "user",
+            content: "Hello",
+            conversation_id: "c1",
+            created_at: "",
+            model: "",
+          },
+          {
+            id: "__streaming__",
+            role: "assistant",
+            content: "Hel",
+            conversation_id: "c1",
+            created_at: "",
+            model: "",
+          },
         ],
       });
 
@@ -40,7 +54,14 @@ describe("useChatStore", () => {
       // Arrange
       useChatStore.setState({
         messages: [
-          { id: "__streaming__", role: "assistant", content: "", conversation_id: "c1", created_at: "", model: "" },
+          {
+            id: "__streaming__",
+            role: "assistant",
+            content: "",
+            conversation_id: "c1",
+            created_at: "",
+            model: "",
+          },
         ],
       });
 
@@ -70,7 +91,14 @@ describe("useChatStore", () => {
       // Arrange
       useChatStore.setState({
         messages: [
-          { id: "msg1", role: "assistant", content: "Existing", conversation_id: "c1", created_at: "", model: "" },
+          {
+            id: "msg1",
+            role: "assistant",
+            content: "Existing",
+            conversation_id: "c1",
+            created_at: "",
+            model: "",
+          },
         ],
       });
 
@@ -87,7 +115,14 @@ describe("useChatStore", () => {
       // Arrange
       useChatStore.setState({
         messages: [
-          { id: "1", role: "user", content: "Hello", conversation_id: "c1", created_at: "", model: "" },
+          {
+            id: "1",
+            role: "user",
+            content: "Hello",
+            conversation_id: "c1",
+            created_at: "",
+            model: "",
+          },
         ],
       });
 
@@ -102,7 +137,11 @@ describe("useChatStore", () => {
   describe("addToolCall", () => {
     it("should add a tool call with pending status", () => {
       // Act
-      useChatStore.getState().addToolCall({ id: "tc1", name: "calculator", arguments: '{"expr":"2+2"}' });
+      useChatStore.getState().addToolCall({
+        id: "tc1",
+        name: "calculator",
+        arguments: '{"expr":"2+2"}',
+      });
 
       // Assert
       const toolCalls = useChatStore.getState().toolCalls;
@@ -115,8 +154,12 @@ describe("useChatStore", () => {
 
     it("should accumulate multiple tool calls", () => {
       // Act
-      useChatStore.getState().addToolCall({ id: "tc1", name: "calc", arguments: "{}" });
-      useChatStore.getState().addToolCall({ id: "tc2", name: "search", arguments: "{}" });
+      useChatStore
+        .getState()
+        .addToolCall({ id: "tc1", name: "calc", arguments: "{}" });
+      useChatStore
+        .getState()
+        .addToolCall({ id: "tc2", name: "search", arguments: "{}" });
 
       // Assert
       expect(useChatStore.getState().toolCalls).toHaveLength(2);
@@ -126,7 +169,11 @@ describe("useChatStore", () => {
   describe("setToolResult", () => {
     it("should update tool call result and status", () => {
       // Arrange
-      useChatStore.getState().addToolCall({ id: "tc1", name: "calculator", arguments: '{"expr":"2+2"}' });
+      useChatStore.getState().addToolCall({
+        id: "tc1",
+        name: "calculator",
+        arguments: '{"expr":"2+2"}',
+      });
 
       // Act
       useChatStore.getState().setToolResult("tc1", "4");
@@ -139,8 +186,12 @@ describe("useChatStore", () => {
 
     it("should not affect other tool calls", () => {
       // Arrange
-      useChatStore.getState().addToolCall({ id: "tc1", name: "calc", arguments: "{}" });
-      useChatStore.getState().addToolCall({ id: "tc2", name: "search", arguments: "{}" });
+      useChatStore
+        .getState()
+        .addToolCall({ id: "tc1", name: "calc", arguments: "{}" });
+      useChatStore
+        .getState()
+        .addToolCall({ id: "tc2", name: "search", arguments: "{}" });
 
       // Act
       useChatStore.getState().setToolResult("tc1", "result1");
@@ -153,7 +204,9 @@ describe("useChatStore", () => {
 
     it("should not modify state for unknown tool call id", () => {
       // Arrange
-      useChatStore.getState().addToolCall({ id: "tc1", name: "calc", arguments: "{}" });
+      useChatStore
+        .getState()
+        .addToolCall({ id: "tc1", name: "calc", arguments: "{}" });
 
       // Act
       useChatStore.getState().setToolResult("unknown", "result");
@@ -189,7 +242,10 @@ describe("useChatStore", () => {
       useChatStore.getState().toggleTool("web_search");
 
       // Assert
-      expect(useChatStore.getState().enabledTools).toEqual(["calculator", "web_search"]);
+      expect(useChatStore.getState().enabledTools).toEqual([
+        "calculator",
+        "web_search",
+      ]);
     });
   });
 
@@ -221,10 +277,32 @@ describe("useChatStore", () => {
     it("should clear messages, debug info, memory info, and tool calls", () => {
       // Arrange
       useChatStore.setState({
-        messages: [{ id: "1", role: "user", content: "Hi", conversation_id: "c1", created_at: "", model: "" }],
-        debugInfo: { model: "gpt-4o", provider: "openai", system_prompt: "", temperature: 0.7, max_tokens: 4096, prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, latency_ms: 100, first_token_ms: 50 },
+        messages: [
+          {
+            id: "1",
+            role: "user",
+            content: "Hi",
+            conversation_id: "c1",
+            created_at: "",
+            model: "",
+          },
+        ],
+        debugInfo: {
+          model: "gpt-4o",
+          provider: "openai",
+          system_prompt: "",
+          temperature: 0.7,
+          max_tokens: 4096,
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          total_tokens: 15,
+          latency_ms: 100,
+          first_token_ms: 50,
+        },
         memoryInfo: { injected: 2, extracted: 1 },
-        toolCalls: [{ id: "tc1", name: "calc", arguments: "{}", status: "done" as const }],
+        toolCalls: [
+          { id: "tc1", name: "calc", arguments: "{}", status: "done" as const },
+        ],
       });
 
       // Act
@@ -255,7 +333,12 @@ describe("useChatStore", () => {
     it("should add a message to the list", () => {
       // Act
       useChatStore.getState().appendMessage({
-        id: "m1", role: "user", content: "Hi", conversation_id: "c1", created_at: new Date().toISOString(), model: "deepseek-chat",
+        id: "m1",
+        role: "user",
+        content: "Hi",
+        conversation_id: "c1",
+        created_at: new Date().toISOString(),
+        model: "deepseek-chat",
       });
 
       // Assert

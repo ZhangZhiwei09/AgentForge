@@ -5,10 +5,10 @@ import { settings } from "../config.js";
 
 // Embedding Provider 接口 —— 定义文本向量化的契约
 export interface EmbeddingProvider {
-  embed(texts: string[]): Promise<number[][]>;       // 批量向量化
-  embedSingle(text: string): Promise<number[]>;       // 单条向量化（便捷方法）
-  readonly dimension: number;                         // 向量维度
-  readonly modelName: string;                         // 使用的模型名称
+  embed(texts: string[]): Promise<number[][]>; // 批量向量化
+  embedSingle(text: string): Promise<number[]>; // 单条向量化（便捷方法）
+  readonly dimension: number; // 向量维度
+  readonly modelName: string; // 使用的模型名称
 }
 
 // OpenAI Embedding 实现
@@ -16,7 +16,11 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private client: OpenAI | null = null;
   private _model: string;
 
-  constructor(apiKey: string, baseUrl: string = "https://api.openai.com/v1", model: string = "text-embedding-ada-002") {
+  constructor(
+    apiKey: string,
+    baseUrl: string = "https://api.openai.com/v1",
+    model: string = "text-embedding-ada-002",
+  ) {
     this._model = model;
     if (apiKey) {
       this.client = new OpenAI({
@@ -77,7 +81,9 @@ function initEmbeddingProviders(): void {
 export function getEmbeddingProvider(name: string): EmbeddingProvider {
   initEmbeddingProviders();
   if (!embeddingProviders[name]) {
-    throw new Error(`Embedding provider '${name}' not found. Available: ${Object.keys(embeddingProviders).join(", ")}`);
+    throw new Error(
+      `Embedding provider '${name}' not found. Available: ${Object.keys(embeddingProviders).join(", ")}`,
+    );
   }
   return embeddingProviders[name];
 }
@@ -89,7 +95,11 @@ export function getDefaultEmbeddingProvider(): EmbeddingProvider | null {
   return Object.values(embeddingProviders)[0];
 }
 
-export function listEmbeddingProviders(): Array<{ name: string; model: string; dimension: number }> {
+export function listEmbeddingProviders(): Array<{
+  name: string;
+  model: string;
+  dimension: number;
+}> {
   initEmbeddingProviders();
   return Object.entries(embeddingProviders).map(([name, p]) => ({
     name,

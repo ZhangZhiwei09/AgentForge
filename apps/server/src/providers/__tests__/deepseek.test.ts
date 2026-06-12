@@ -6,7 +6,10 @@ import type { StreamChunk } from "../types.js";
 // Mock OpenAI SDK (DeepSeek uses OpenAI-compatible SDK with different baseUrl)
 vi.mock("openai", () => {
   return {
-    default: vi.fn().mockImplementation(function (this: Record<string, unknown>, config: unknown) {
+    default: vi.fn().mockImplementation(function (
+      this: Record<string, unknown>,
+      config: unknown,
+    ) {
       this.config = config;
       this.chat = {
         completions: {
@@ -55,7 +58,13 @@ describe("DeepSeekProvider", () => {
   describe("chatSync", () => {
     it("should return content and usage", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
       mockClient.chat.completions.create.mockResolvedValueOnce({
         choices: [{ message: { content: "response", role: "assistant" } }],
         usage: { prompt_tokens: 20, completion_tokens: 10 },
@@ -73,7 +82,13 @@ describe("DeepSeekProvider", () => {
 
     it("should append JSON instruction to system prompt in jsonMode", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
       mockClient.chat.completions.create.mockResolvedValueOnce({
         choices: [{ message: { content: "[]" } }],
         usage: { prompt_tokens: 15, completion_tokens: 3 },
@@ -90,14 +105,22 @@ describe("DeepSeekProvider", () => {
 
       const callArgs = mockClient.chat.completions.create.mock.calls[0][0];
       expect(callArgs.messages[0].role).toBe("system");
-      expect(callArgs.messages[0].content).toContain("You are a memory extractor.");
+      expect(callArgs.messages[0].content).toContain(
+        "You are a memory extractor.",
+      );
       expect(callArgs.messages[0].content).toContain("valid JSON object");
       expect(callArgs.messages[0].content).toContain("No markdown");
     });
 
     it("should NOT append JSON instruction when jsonMode is false", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
       mockClient.chat.completions.create.mockResolvedValueOnce({
         choices: [{ message: { content: "normal" } }],
         usage: { prompt_tokens: 10, completion_tokens: 5 },
@@ -119,7 +142,13 @@ describe("DeepSeekProvider", () => {
 
     it("should handle empty result gracefully", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
       mockClient.chat.completions.create.mockResolvedValueOnce({
         choices: [{ message: { content: null } }],
         usage: { prompt_tokens: 5, completion_tokens: 0 },
@@ -137,18 +166,30 @@ describe("DeepSeekProvider", () => {
   describe("streamChat", () => {
     it("should yield token chunks", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
 
       mockClient.chat.completions.create.mockResolvedValueOnce(
         (async function* () {
           yield { choices: [{ delta: { content: "DeepSeek" } }], usage: null };
           yield { choices: [{ delta: { content: " response" } }], usage: null };
-          yield { choices: [{ delta: {} }], usage: { prompt_tokens: 8, completion_tokens: 2 } };
+          yield {
+            choices: [{ delta: {} }],
+            usage: { prompt_tokens: 8, completion_tokens: 2 },
+          };
         })(),
       );
 
       const chunks = await collectStream(
-        provider.streamChat([{ role: "user", content: "Test" }], "deepseek-chat"),
+        provider.streamChat(
+          [{ role: "user", content: "Test" }],
+          "deepseek-chat",
+        ),
       );
 
       const tokens = chunks.filter((c) => c.type === "token");
@@ -163,7 +204,13 @@ describe("DeepSeekProvider", () => {
 
     it("should yield done event with zero usage on empty stream", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
 
       mockClient.chat.completions.create.mockResolvedValueOnce(
         (async function* () {
@@ -181,31 +228,48 @@ describe("DeepSeekProvider", () => {
 
     it("should accumulate tool calls across fragments", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
 
       mockClient.chat.completions.create.mockResolvedValueOnce(
         (async function* () {
           yield {
-            choices: [{
-              delta: {
-                tool_calls: [
-                  { index: 0, id: "deepseek_tc_1", function: { name: "web", arguments: '{"q"' } },
-                ],
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    {
+                      index: 0,
+                      id: "deepseek_tc_1",
+                      function: { name: "web", arguments: '{"q"' },
+                    },
+                  ],
+                },
               },
-            }],
+            ],
             usage: null,
           };
           yield {
-            choices: [{
-              delta: {
-                tool_calls: [
-                  { index: 0, function: { arguments: ':"weather"}' } },
-                ],
+            choices: [
+              {
+                delta: {
+                  tool_calls: [
+                    { index: 0, function: { arguments: ':"weather"}' } },
+                  ],
+                },
               },
-            }],
+            ],
             usage: null,
           };
-          yield { choices: [{ delta: {} }], usage: { prompt_tokens: 12, completion_tokens: 4 } };
+          yield {
+            choices: [{ delta: {} }],
+            usage: { prompt_tokens: 12, completion_tokens: 4 },
+          };
         })(),
       );
 
@@ -216,7 +280,16 @@ describe("DeepSeekProvider", () => {
           "",
           undefined,
           undefined,
-          [{ type: "function", function: { name: "web_search", description: "", parameters: { type: "object", properties: {} } } }],
+          [
+            {
+              type: "function",
+              function: {
+                name: "web_search",
+                description: "",
+                parameters: { type: "object", properties: {} },
+              },
+            },
+          ],
         ),
       );
 
@@ -228,16 +301,32 @@ describe("DeepSeekProvider", () => {
 
     it("should pass tools to the API when provided", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
 
       mockClient.chat.completions.create.mockResolvedValueOnce(
         (async function* () {
-          yield { choices: [{ delta: {} }], usage: { prompt_tokens: 5, completion_tokens: 0 } };
+          yield {
+            choices: [{ delta: {} }],
+            usage: { prompt_tokens: 5, completion_tokens: 0 },
+          };
         })(),
       );
 
       const tools = [
-        { type: "function" as const, function: { name: "search", description: "Search", parameters: { type: "object" as const, properties: {} } } },
+        {
+          type: "function" as const,
+          function: {
+            name: "search",
+            description: "Search",
+            parameters: { type: "object" as const, properties: {} },
+          },
+        },
       ];
 
       await collectStream(
@@ -257,11 +346,20 @@ describe("DeepSeekProvider", () => {
 
     it("should set stream: true in API call", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
 
       mockClient.chat.completions.create.mockResolvedValueOnce(
         (async function* () {
-          yield { choices: [{ delta: { content: "x" } }], usage: { prompt_tokens: 3, completion_tokens: 1 } };
+          yield {
+            choices: [{ delta: { content: "x" } }],
+            usage: { prompt_tokens: 3, completion_tokens: 1 },
+          };
         })(),
       );
 
@@ -277,27 +375,42 @@ describe("DeepSeekProvider", () => {
   describe("tool_call message conversion", () => {
     it("should convert tool_calls and tool_call_id in messages", async () => {
       const provider = createProvider();
-      const mockClient = (provider as unknown as { client: { chat: { completions: { create: ReturnType<typeof vi.fn> } } } }).client;
+      const mockClient = (
+        provider as unknown as {
+          client: {
+            chat: { completions: { create: ReturnType<typeof vi.fn> } };
+          };
+        }
+      ).client;
 
       mockClient.chat.completions.create.mockResolvedValueOnce(
         (async function* () {
-          yield { choices: [{ delta: { content: "Done" } }], usage: { prompt_tokens: 5, completion_tokens: 1 } };
+          yield {
+            choices: [{ delta: { content: "Done" } }],
+            usage: { prompt_tokens: 5, completion_tokens: 1 },
+          };
         })(),
       );
 
       await collectStream(
-        provider.streamChat([
-          { role: "user", content: "Calculate 2+2" },
-          {
-            role: "assistant",
-            content: null,
-            tool_calls: [{
-              id: "tc1", type: "function",
-              function: { name: "calculator", arguments: '{"expr":"2+2"}' },
-            }],
-          },
-          { role: "tool", tool_call_id: "tc1", content: "4" },
-        ], "deepseek-chat"),
+        provider.streamChat(
+          [
+            { role: "user", content: "Calculate 2+2" },
+            {
+              role: "assistant",
+              content: null,
+              tool_calls: [
+                {
+                  id: "tc1",
+                  type: "function",
+                  function: { name: "calculator", arguments: '{"expr":"2+2"}' },
+                },
+              ],
+            },
+            { role: "tool", tool_call_id: "tc1", content: "4" },
+          ],
+          "deepseek-chat",
+        ),
       );
 
       const callArgs = mockClient.chat.completions.create.mock.calls[0][0];

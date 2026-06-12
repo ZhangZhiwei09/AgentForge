@@ -27,9 +27,7 @@ describe("db_query tool", () => {
   });
 
   it("should execute a simple SELECT query", async () => {
-    mockQueryRawUnsafe.mockResolvedValue([
-      { id: 1, name: "test" },
-    ]);
+    mockQueryRawUnsafe.mockResolvedValue([{ id: 1, name: "test" }]);
 
     const result = await dbQueryTool.execute({ query: "SELECT * FROM users" });
     const parsed = JSON.parse(result);
@@ -68,14 +66,18 @@ describe("db_query tool", () => {
   });
 
   it("should reject non-SELECT queries", async () => {
-    const result = await dbQueryTool.execute({ query: "INSERT INTO users VALUES (1)" });
+    const result = await dbQueryTool.execute({
+      query: "INSERT INTO users VALUES (1)",
+    });
     expect(result).toContain("Error");
     expect(result).toContain("SELECT");
     expect(mockQueryRawUnsafe).not.toHaveBeenCalled();
   });
 
   it("should reject UPDATE queries", async () => {
-    const result = await dbQueryTool.execute({ query: "UPDATE users SET name = 'x'" });
+    const result = await dbQueryTool.execute({
+      query: "UPDATE users SET name = 'x'",
+    });
     expect(result).toContain("Error");
     expect(mockQueryRawUnsafe).not.toHaveBeenCalled();
   });
@@ -117,7 +119,9 @@ describe("db_query tool", () => {
   it("should handle empty result set", async () => {
     mockQueryRawUnsafe.mockResolvedValue([]);
 
-    const result = await dbQueryTool.execute({ query: "SELECT * FROM users WHERE id = 999" });
+    const result = await dbQueryTool.execute({
+      query: "SELECT * FROM users WHERE id = 999",
+    });
     const parsed = JSON.parse(result);
 
     expect(parsed.row_count).toBe(0);

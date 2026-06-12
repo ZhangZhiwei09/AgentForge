@@ -8,13 +8,18 @@ import { MemoryEngine } from "./memory-engine.js";
 import { toolRegistry } from "../tools/registry.js";
 import { logger } from "@agentforge/logger";
 import { truncateHistory } from "../lib/context-window.js";
-import { chatMessagesTotal, chatTokensTotal } from "../observability/metrics.js";
+import {
+  chatMessagesTotal,
+  chatTokensTotal,
+} from "../observability/metrics.js";
 
 // 拼在 system prompt 后面的记忆上下文前缀
-const MEMORY_PROMPT_PREFIX = "\n\n# User Context (from memory)\nThe following is what you know about the user from past conversations:\n";
+const MEMORY_PROMPT_PREFIX =
+  "\n\n# User Context (from memory)\nThe following is what you know about the user from past conversations:\n";
 
 // 知识库上下文前缀
-const KNOWLEDGE_PROMPT_PREFIX = "\n\n# Knowledge Base Reference\nUse the following reference documents to answer the user's question accurately:\n";
+const KNOWLEDGE_PROMPT_PREFIX =
+  "\n\n# Knowledge Base Reference\nUse the following reference documents to answer the user's question accurately:\n";
 
 // 最大工具调用轮数（防止无限循环）
 const MAX_TOOL_ROUNDS = 5;
@@ -46,7 +51,9 @@ export class ChatService {
     userMessage: string,
     systemPrompt: string,
     kbIds: string[] | null,
-  ): Promise<[string, Array<{ content: string; score: number; docTitle: string }>]> {
+  ): Promise<
+    [string, Array<{ content: string; score: number; docTitle: string }>]
+  > {
     if (!kbIds || kbIds.length === 0) {
       try {
         const { prisma } = await import("../db.js");
@@ -69,7 +76,11 @@ export class ChatService {
       if (!results.length) return [systemPrompt, []];
 
       const lines: string[] = [];
-      const knowledgeResults: Array<{ content: string; score: number; docTitle: string }> = [];
+      const knowledgeResults: Array<{
+        content: string;
+        score: number;
+        docTitle: string;
+      }> = [];
       results.forEach((r, i) => {
         lines.push(`[Ref ${i + 1}] ${r.content}`);
         knowledgeResults.push({
@@ -80,8 +91,12 @@ export class ChatService {
       });
 
       const knowledgeText = lines.join("\n\n");
-      const enhancedPrompt = systemPrompt + KNOWLEDGE_PROMPT_PREFIX + knowledgeText;
-      logger.info({ refs: results.length, kbs: kbIds.length }, "Knowledge injected");
+      const enhancedPrompt =
+        systemPrompt + KNOWLEDGE_PROMPT_PREFIX + knowledgeText;
+      logger.info(
+        { refs: results.length, kbs: kbIds.length },
+        "Knowledge injected",
+      );
       return [enhancedPrompt, knowledgeResults];
     } catch (e) {
       logger.warn(e, "Knowledge injection failed");
@@ -137,11 +152,13 @@ export class ChatService {
       },
     });
 
-    // 6. 加载历史消息（按时间升序，构成完整对话上下文）
+    // 6. 加载历史消息（取最近 100 条，DESC 后反转以支持 truncateHistory 从后向前选取）
     const history = await prisma.message.findMany({
       where: { conversationId },
-      orderBy: { createdAt: "asc" },
+      orderBy: { createdAt: "desc" },
+      take: 100,
     });
+    history.reverse();
 
     // 7. 构建初始对话消息列表（用于 LLM 上下文），并截断以适应token预算
     const rawMessages: ChatMessage[] = history.map((msg) => ({
@@ -152,9 +169,10 @@ export class ChatService {
     const conversationMessages = truncateHistory(rawMessages, 8000);
 
     // 8. 获取启用的工具定义（仅当显式指定 tools 参数时才发送工具）
-    const toolDefs = enabledTools && enabledTools.length > 0
-      ? toolRegistry.getDefinitions(enabledTools)
-      : [];
+    const toolDefs =
+      enabledTools && enabledTools.length > 0
+        ? toolRegistry.getDefinitions(enabledTools)
+        : [];
     const toolsEnabled = toolDefs.length > 0;
 
     // 9. 预生成助手消息 ID（用于前端在流开始前就知道消息 ID）
@@ -193,46 +211,74 @@ export class ChatService {
       }> = [];
 
       // 调用 LLM（流式） — 收集token和tool_call，延迟执行
-      for await (const chunk of provider.streamChat(
-        conversationMessages,
-        resolvedModel,
-        enhancedPrompt,
-        undefined,
-        undefined,
-        toolDefs.length > 0 ? toolDefs : undefined,
-      )) {
-        if (chunk.type === "token") {
-          if (firstTokenTs === null) firstTokenTs = Date.now();
-          roundContent += chunk.content!;
-          fullContent += chunk.content!;
-          yield {
-            type: "token",
-            content: chunk.content,
-            message_id: assistantMsgId,
-            model: resolvedModel,
-          };
-        } else if (chunk.type === "tool_call" && chunk.tool_call) {
-          const tc = chunk.tool_call;
-          logger.debug({ tool: tc.name, args: tc.arguments.slice(0, 100) }, "Tool call");
+      try {
+        for await (const chunk of provider.streamChat(
+          conversationMessages,
+          resolvedModel,
+          enhancedPrompt,
+          undefined,
+          undefined,
+          toolDefs.length > 0 ? toolDefs : undefined,
+        )) {
+          if (chunk.type === "token") {
+            if (firstTokenTs === null) firstTokenTs = Date.now();
+            roundContent += chunk.content!;
+            fullContent += chunk.content!;
+            yield {
+              type: "token",
+              content: chunk.content,
+              message_id: assistantMsgId,
+              model: resolvedModel,
+            };
+          } else if (chunk.type === "tool_call" && chunk.tool_call) {
+            const tc = chunk.tool_call;
+            logger.debug(
+              { tool: tc.name, args: tc.arguments.slice(0, 100) },
+              "Tool call",
+            );
 
-          let args: Record<string, unknown> = {};
-          try {
-            args = JSON.parse(tc.arguments);
-          } catch {
-            logger.warn({ arguments: tc.arguments }, "Failed to parse tool arguments");
+            let args: Record<string, unknown> = {};
+            try {
+              args = JSON.parse(tc.arguments);
+            } catch {
+              logger.warn(
+                { arguments: tc.arguments },
+                "Failed to parse tool arguments",
+              );
+            }
+            pendingToolCalls.push({ id: tc.id, name: tc.name, args });
+          } else if (chunk.type === "done") {
+            // 累积 token 用量
+            totalPromptTokens += chunk.usage?.prompt_tokens || 0;
+            totalCompletionTokens += chunk.usage?.completion_tokens || 0;
           }
-          pendingToolCalls.push({ id: tc.id, name: tc.name, args });
-        } else if (chunk.type === "done") {
-          // 累积 token 用量
-          totalPromptTokens += chunk.usage?.prompt_tokens || 0;
-          totalCompletionTokens += chunk.usage?.completion_tokens || 0;
         }
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : "Unknown error";
+        logger.error(
+          { err: errMsg, round },
+          "LLM streaming failed in tool loop",
+        );
+        // If we have partial content, save it so the user sees something
+        if (fullContent.length > 0) {
+          break; // exit loop and finalize with what we have
+        }
+        // No content at all — yield error and abort
+        yield {
+          type: "error",
+          content: `AI 服务暂时不可用：${errMsg}`,
+          message_id: assistantMsgId,
+          model: resolvedModel,
+        };
+        return;
       }
 
       // Execute pending tool calls — parallel for parallelizable tools
       if (pendingToolCalls.length > 0) {
         const allTools = toolRegistry.getAll();
-        const toolMetaMap = new Map(allTools.map((t) => [t.definition.function.name, t]));
+        const toolMetaMap = new Map(
+          allTools.map((t) => [t.definition.function.name, t]),
+        );
 
         // Split into parallelizable and sequential
         const parallel: typeof pendingToolCalls = [];
@@ -250,7 +296,11 @@ export class ChatService {
         if (parallel.length > 0) {
           const parallelResults = await Promise.all(
             parallel.map(async (ptc) => ({
-              tc: { id: ptc.id, name: ptc.name, arguments: JSON.stringify(ptc.args) },
+              tc: {
+                id: ptc.id,
+                name: ptc.name,
+                arguments: JSON.stringify(ptc.args),
+              },
               result: await toolRegistry.execute(ptc.name, ptc.args),
             })),
           );
@@ -261,7 +311,11 @@ export class ChatService {
         for (const ptc of sequential) {
           const result = await toolRegistry.execute(ptc.name, ptc.args);
           executedTools.push({
-            tc: { id: ptc.id, name: ptc.name, arguments: JSON.stringify(ptc.args) },
+            tc: {
+              id: ptc.id,
+              name: ptc.name,
+              arguments: JSON.stringify(ptc.args),
+            },
             result,
           });
         }
@@ -309,7 +363,10 @@ export class ChatService {
         });
       }
 
-      logger.debug({ round: round + 1, toolCount: executedTools.length }, "Tool round complete");
+      logger.debug(
+        { round: round + 1, toolCount: executedTools.length },
+        "Tool round complete",
+      );
     }
 
     // 12. 保存助手消息到 PG（累积的完整响应文本）
@@ -354,7 +411,10 @@ export class ChatService {
         // 优雅降级：Redis 不可用，回退同步提取
         const engine = new MemoryEngine();
         const extracted = await engine.extractAndStore(
-          msgs, userId, conversationId, providerName,
+          msgs,
+          userId,
+          conversationId,
+          providerName,
         );
         newMemoryCount = extracted.length;
       }
@@ -368,8 +428,14 @@ export class ChatService {
 
     // 16. 记录指标
     chatMessagesTotal.inc({ provider: providerName, model: resolvedModel });
-    chatTokensTotal.inc({ provider: providerName, type: "prompt" }, totalPromptTokens);
-    chatTokensTotal.inc({ provider: providerName, type: "completion" }, totalCompletionTokens);
+    chatTokensTotal.inc(
+      { provider: providerName, type: "prompt" },
+      totalPromptTokens,
+    );
+    chatTokensTotal.inc(
+      { provider: providerName, type: "completion" },
+      totalCompletionTokens,
+    );
 
     // 17. 发送 done 事件：携带用量统计、工具调用统计和记忆处理结果
     yield {

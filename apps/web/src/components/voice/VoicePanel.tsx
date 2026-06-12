@@ -133,7 +133,10 @@ export function VoicePanel() {
         // Convert Float32Array to base64 PCM
         const pcmBuffer = new Int16Array(inputData.length);
         for (let i = 0; i < inputData.length; i++) {
-          pcmBuffer[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+          pcmBuffer[i] = Math.max(
+            -32768,
+            Math.min(32767, inputData[i] * 32768),
+          );
         }
 
         const base64 = arrayBufferToBase64(pcmBuffer.buffer as ArrayBuffer);
@@ -191,7 +194,10 @@ export function VoicePanel() {
         break;
       }
       case "done":
-        appendVoiceTranscript({ role: "assistant", content: "[Voice response complete]" });
+        appendVoiceTranscript({
+          role: "assistant",
+          content: "[Voice response complete]",
+        });
         setVoiceStatus("idle");
         break;
       case "interrupted":
@@ -225,10 +231,7 @@ export function VoicePanel() {
         {error && (
           <div className="text-xs text-red-400 bg-red-900/30 p-2 rounded">
             {error}
-            <button
-              className="ml-2 underline"
-              onClick={() => setError(null)}
-            >
+            <button className="ml-2 underline" onClick={() => setError(null)}>
               Dismiss
             </button>
           </div>

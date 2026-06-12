@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 
 // Mock prisma with knowledgeInvertedIndex
-vi.mock("../db.js", () => {
+vi.mock("../../db.js", () => {
   const mockPrisma = {
     knowledgeChunk: {
       findMany: vi.fn(),
@@ -26,7 +26,7 @@ vi.mock("../db.js", () => {
 });
 
 // Mock milvus
-vi.mock("../services/milvus.js", () => ({
+vi.mock("../milvus.js", () => ({
   getMilvusClient: vi.fn(),
   MILVUS_KNOWLEDGE_COLLECTION: "knowledge_collection",
   EMBEDDING_DIM: 768,
@@ -34,12 +34,12 @@ vi.mock("../services/milvus.js", () => ({
 }));
 
 // Mock embeddings
-vi.mock("../services/embeddings.js", () => ({
+vi.mock("../embeddings.js", () => ({
   getDefaultEmbeddingProvider: vi.fn(() => null),
 }));
 
 // Mock provider registry
-vi.mock("../providers/registry.js", () => ({
+vi.mock("../../providers/registry.js", () => ({
   getProvider: vi.fn(),
   listProviders: vi.fn(() => []),
   resolveModel: vi.fn(() => ["openai", "gpt-4o-mini"]),

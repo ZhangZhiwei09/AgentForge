@@ -125,10 +125,9 @@ async function calculatorExecute(
       return `Error: result is not a finite number (got: ${result})`;
     }
 
-    const formatted =
-      Number.isInteger(result)
-        ? String(result)
-        : parseFloat(result.toPrecision(12)).toString();
+    const formatted = Number.isInteger(result)
+      ? String(result)
+      : parseFloat(result.toPrecision(12)).toString();
 
     return formatted;
   } catch (err: unknown) {
@@ -152,7 +151,8 @@ const webSearchDef: ToolDefinition = {
       properties: {
         query: {
           type: "string",
-          description: "The search query string — be specific and include relevant keywords.",
+          description:
+            "The search query string — be specific and include relevant keywords.",
         },
         max_results: {
           type: "number",
@@ -267,7 +267,8 @@ const httpRequestDef: ToolDefinition = {
       properties: {
         url: {
           type: "string",
-          description: "The full URL to request (must start with http:// or https://).",
+          description:
+            "The full URL to request (must start with http:// or https://).",
         },
         method: {
           type: "string",

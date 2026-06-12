@@ -1,22 +1,25 @@
-import type { Conversation, CreateConversationDTO } from "@agentforge/shared-types";
+import type {
+  Conversation,
+  CreateConversationDTO,
+} from "@agentforge/shared-types";
 import type { AgentForgeClient } from "../client";
 
 export class ConversationService {
-    constructor(private client: AgentForgeClient) { }
+  constructor(private client: AgentForgeClient) {}
 
-    create(dto?: CreateConversationDTO) {
-        return this.client.createConversation(dto);
-    }
+  create(dto?: CreateConversationDTO) {
+    return this.client.createConversation(dto);
+  }
 
-    list() {
-        return this.client.listConversations();
-    }
+  list() {
+    return this.client.listConversations();
+  }
 
-    get(id: string) {
-        return this.client.getConversation(id);
-    }
+  get(id: string) {
+    return this.client.getConversation(id);
+  }
 
-    delete(id: string) {
-        return this.client.deleteConversation(id);
-    }
+  delete(id: string) {
+    return this.client.deleteConversation(id);
+  }
 }

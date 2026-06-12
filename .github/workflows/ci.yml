@@ -50,11 +50,16 @@ jobs:
       - name: Generate Prisma Client
         run: pnpm db:generate
 
+      - name: Run Database Migrations
+        run: pnpm --filter @agentforge/database exec prisma migrate deploy
+        env:
+          DATABASE_URL: "postgresql://test:test@localhost:5434/agentforge_test"
+
       - name: Lint
         run: pnpm lint
 
       - name: Format Check
-        run: pnpm format --check
+        run: pnpm exec prettier --check "**/*.{ts,tsx,js,jsx,json,css,md}"
 
       - name: Typecheck
         run: pnpm typecheck

@@ -50,7 +50,9 @@ export function useAgentStream() {
         });
 
         if (!res.ok) {
-          const err = await res.json().catch(() => ({ detail: "Unknown error" }));
+          const err = await res
+            .json()
+            .catch(() => ({ detail: "Unknown error" }));
           throw new Error(err.detail ?? `HTTP ${res.status}`);
         }
 
@@ -86,7 +88,16 @@ export function useAgentStream() {
         console.error("Agent stream failed:", err);
       }
     },
-    [currentConversationId, selectedModel, enabledTools, appendMessage, setDebugInfo, setPendingApproval, clearPendingApproval, setPanelMode],
+    [
+      currentConversationId,
+      selectedModel,
+      enabledTools,
+      appendMessage,
+      setDebugInfo,
+      setPendingApproval,
+      clearPendingApproval,
+      setPanelMode,
+    ],
   );
 
   const handleAgentEvent = useCallback(
