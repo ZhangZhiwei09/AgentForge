@@ -5,9 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // Use vi.hoisted to make mock refs available inside vi.mock factories
 const { mockChatSync, mockGetProvider } = vi.hoisted(() => ({
   mockChatSync: vi.fn<
-    (
-      ...args: Array<unknown>
-    ) => Promise<{
+    (...args: Array<unknown>) => Promise<{
       content: string;
       usage: { prompt_tokens: number; completion_tokens: number };
     }>

@@ -137,13 +137,11 @@ describe("useChatStore", () => {
   describe("addToolCall", () => {
     it("should add a tool call with pending status", () => {
       // Act
-      useChatStore
-        .getState()
-        .addToolCall({
-          id: "tc1",
-          name: "calculator",
-          arguments: '{"expr":"2+2"}',
-        });
+      useChatStore.getState().addToolCall({
+        id: "tc1",
+        name: "calculator",
+        arguments: '{"expr":"2+2"}',
+      });
 
       // Assert
       const toolCalls = useChatStore.getState().toolCalls;
@@ -171,13 +169,11 @@ describe("useChatStore", () => {
   describe("setToolResult", () => {
     it("should update tool call result and status", () => {
       // Arrange
-      useChatStore
-        .getState()
-        .addToolCall({
-          id: "tc1",
-          name: "calculator",
-          arguments: '{"expr":"2+2"}',
-        });
+      useChatStore.getState().addToolCall({
+        id: "tc1",
+        name: "calculator",
+        arguments: '{"expr":"2+2"}',
+      });
 
       // Act
       useChatStore.getState().setToolResult("tc1", "4");
