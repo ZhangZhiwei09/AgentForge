@@ -133,6 +133,43 @@ export const workflowSuccessRate = new Gauge({
   registers: [registry],
 });
 
+// V9 Multi-Agent Metrics
+export const teamRunsTotal = new Counter({
+  name: "team_runs_total",
+  help: "Total number of team runs",
+  labelNames: ["mode", "status"] as const,
+  registers: [registry],
+});
+
+export const teamRoundsTotal = new Counter({
+  name: "team_rounds_total",
+  help: "Total team execution rounds",
+  labelNames: ["mode"] as const,
+  registers: [registry],
+});
+
+export const teamMessagesTotal = new Counter({
+  name: "team_messages_total",
+  help: "Total messages exchanged between agents",
+  labelNames: ["type"] as const,
+  registers: [registry],
+});
+
+export const teamAgentDurationMs = new Histogram({
+  name: "team_agent_duration_ms",
+  help: "Duration of individual agent execution within a team run",
+  labelNames: ["role"] as const,
+  buckets: [1000, 5000, 15000, 30000, 60000, 120000],
+  registers: [registry],
+});
+
+export const teamBlackboardWritesTotal = new Counter({
+  name: "team_blackboard_writes_total",
+  help: "Total blackboard write operations",
+  labelNames: ["key"] as const,
+  registers: [registry],
+});
+
 // ---- Endpoint Registration ----
 
 /** Register GET /api/metrics endpoint on the Hono app (before auth middleware) */

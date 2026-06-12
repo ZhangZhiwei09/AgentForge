@@ -23,7 +23,7 @@ V5 Voice Agent         ✅
 ↓
 V6 Workflow Engine    ✅
 ↓
-V9 Multi-Agent
+V9 Multi-Agent    ✅
 ↓
 V10 MCP Ecosystem
 ```
@@ -3054,131 +3054,1258 @@ class DAGExecutor {
 
 ## 1. 核心目标
 
-从单一 Agent 演进为多 Agent 协作系统。多个 Agent 各自承担不同角色，通过消息总线通信，协作完成复杂任务。
+从单一 Agent 演进为多 Agent 协作系统。多个 Agent 各自承担不同角色，通过消息总线通信，共享黑board上下文，协作完成复杂任务。
 
-## 2. 角色模型
+关键能力：
 
-```text
-┌─────────────────────────────────────────────────────────┐
-│                    Multi-Agent System                     │
-│                                                          │
-│  ┌──────────────┐                                        │
-│  │ Orchestrator │  ← 任务分解、分配、协调、汇总            │
-│  └──────┬───────┘                                        │
-│         │                                                │
-│    ┌────┼────────┬────────────┬────────────┐             │
-│    ↓    ↓        ↓            ↓            ↓             │
-│  ┌────┐ ┌────┐ ┌──────┐ ┌────────┐ ┌──────────┐       │
-│  │Plan│ │Exec│ │Review│ │Research│ │Specialist│  ...   │
-│  │ner │ │utor│ │er    │ │er      │ │(Domain)  │       │
-│  └────┘ └────┘ └──────┘ └────────┘ └──────────┘       │
-│                                                          │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │           Message Bus (Shared Context)             │   │
-│  │  - Agent → Agent 直接消息                          │   │
-│  │  - Broadcast 广播                                  │   │
-│  │  - Shared Memory 共享工作内存                       │   │
-│  └──────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
-```
+* **角色系统**：预定义 5 种角色模板（Planner/Executor/Reviewer/Researcher/Orchestrator），每个角色有独立的 system prompt、工具权限、模型配置
+* **消息总线**：Agent 间实时消息传递，支持点对点（direct）、广播（broadcast）、委派（delegate）三种通信模式
+* **黑board共享上下文**：所有 Agent 共享一个结构化工作内存（Blackboard），可读写键值对，作为协作的"白板"
+* **3 种协作模式**：Orchestrator（层级式）、Peer-to-Peer（对等式）、Debate（辩论式），覆盖从简单委派到复杂辩论的场景
+* **回合管理**：可配置的回合制（round-robin）或事件驱动（event-driven）调度策略
+* **Agent 实例复用**：每个角色通过 AgentService（P1-3 ReAct）运行，复用现有的工具调用、审批、推理能力
+* **实时可视化**：SSE 流推送每个 Agent 的思考过程、消息传递、黑board变更，前端多卡片面板展示
 
-### 默认角色定义
+---
 
-| 角色 | 职责 | 工具权限 | 典型 Prompt |
-|------|------|----------|-------------|
-| **Planner** | 分析任务，制定执行计划，分解子任务 | 无工具（纯推理） | "Break this task into steps..." |
-| **Executor** | 执行具体步骤，调用工具 | 全部工具 | "Execute step N: ..." |
-| **Reviewer** | 审查执行结果，发现遗漏和错误 | 只读工具 | "Review the output for errors..." |
-| **Researcher** | 信息搜集，网页搜索和分析 | search/fetch 工具 | "Research the topic: ..." |
-| **Orchestrator** | 整体协调，决定何时委派给谁 | 委派工具 | "Decide who handles this..." |
+## 2. 技术选型
 
-## 3. Agent 间通信协议
+| 组件 | 技术 | 用途 |
+|------|------|------|
+| Agent 运行时 | 复用 AgentService（P1-3） | 每个角色作为一个 Agent 实例运行，复用 ReAct 循环 |
+| 消息传递 | 内存 EventEmitter + DB 持久化 | 同进程内事件驱动，消息同时写入 DB 用于恢复和审计 |
+| 共享上下文 | Blackboard（Map + JSONB） | 结构化键值存储，支持读写锁和版本追踪 |
+| 回合调度 | RoundRobin / EventDriven 策略 | 控制哪个 Agent 何时获得执行权 |
+| 角色定义 | JSON DSL（Zod 校验） | 团队配置存储在 agent_teams.definition JSONB |
+| 实时推送 | SSE（已有基础设施） | 团队运行事件推送到前端（agent_think/agent_msg/blackboard_update 等） |
+| 工具集成 | 复用 ToolRegistry（V4 + P1-6） | 每个角色可配置独立的工具白名单 |
+| 审批集成 | 复用 P1-5 ApprovalGate | 高风险操作的审批在 Agent 实例内处理 |
+| 持久化 | PostgreSQL JSONB | agent_teams + agent_team_runs 表，消息和黑board以 JSONB 存储 |
+
+---
+
+## 3. 角色系统
+
+### 3.1 角色定义模型
+
+每个角色是一个完整的 Agent 配置，包含模型、system prompt、工具白名单、优先级和最大迭代次数。
 
 ```typescript
-// 消息总线上的消息格式
-interface AgentMessage {
-  id: string;
-  from: string;          // 发送 Agent 名称
-  to: string | "broadcast";  // 接收方
-  type: "task" | "result" | "question" | "feedback" | "handoff";
-  payload: {
-    task?: string;
-    result?: unknown;
-    question?: string;
-    feedback?: { approved: boolean; comments: string };
-    context?: Record<string, unknown>;
-  };
-  timestamp: Date;
-  replyTo?: string;      // 回复的消息 ID
+interface AgentRole {
+  name: string;                    // 唯一标识：planner, executor, reviewer, ...
+  displayName: string;             // 显示名称："规划者"、"执行者"、"审查者"
+  description: string;             // 角色描述
+  systemPrompt: string;            // 角色专用 System Prompt（支持 {{variable}} 模板）
+  model?: string;                  // 模型选择（默认继承团队设置）
+  tools: string[];                 // 工具白名单（工具名列表，空数组 = 无工具）
+  maxIterations: number;           // 最大 ReAct 迭代次数（默认 5）
+  temperature?: number;            // LLM 温度（默认 0.7）
+  priority: number;                // 优先级（1-10，数字越大优先级越高）
+  canDelegate: boolean;            // 是否可以将子任务委派给其他 Agent
+  canBroadcast: boolean;           // 是否可以向团队广播消息
+  outputSchema?: object;           // 可选：输出 JSON Schema，用于结构化输出
 }
 ```
 
-## 4. 协作模式
+### 3.2 五种默认角色
 
-### 模式 1：Orchestrator 模式（层级式）
-```
-User Task → Orchestrator
-              ├→ Planner (制定计划)
-              ├→ Executor (执行步骤 1)
-              ├→ Reviewer (审查步骤 1)
-              ├→ Executor (执行步骤 2，含修正)
-              └→ Orchestrator (汇总回复)
-```
+| 角色 | name | 工具权限 | maxIterations | 典型场景 |
+|------|------|----------|---------------|----------|
+| **Planner** (规划者) | `planner` | 无工具（纯推理） | 5 | 分析复杂任务，分解为可执行步骤，输出执行计划 |
+| **Executor** (执行者) | `executor` | 全部工具 | 15 | 执行具体步骤，调用工具获取信息、执行代码、操作文件 |
+| **Reviewer** (审查者) | `reviewer` | 只读工具（web_search, file_read, file_search, db_query） | 5 | 审查执行结果，发现遗漏、错误和不一致，提出改进建议 |
+| **Researcher** (研究员) | `researcher` | web_search, web_fetch, http_request | 10 | 信息搜集，网页搜索和内容分析，提供结构化调研结果 |
+| **Orchestrator** (协调者) | `orchestrator` | 无直接工具，通过委派间接使用 | 10 | 整体协调，决定何时委派给谁，跟踪进度，汇总最终输出 |
 
-### 模式 2：Peer-to-Peer 模式（对等式）
-```
-Agent A (前端) ←→ Agent B (后端)
-  "这个 API 怎么调？"  "需要 userId 参数"
-  "明白了，在这改..."   "检查一下这里..."
-```
+### 3.3 Planner 角色详细定义
 
-### 模式 3：Debate 模式（辩论式）
-```
-Question → Agent A (Pro) + Agent B (Con) + Agent C (Judge)
-              ↓                  ↓                ↓
-           论证支持            论证反对          评估双方
-              ↓                  ↓                ↓
-              └──────────────────┴────────────────┘
-                               ↓
-                          Final Verdict
-```
+```yaml
+name: planner
+displayName: "规划者"
+description: "分析任务并制定执行计划"
+systemPrompt: |
+  你是 Planner，一个任务规划专家。你的职责是分析用户任务并制定清晰的执行计划。
 
-## 5. 数据模型
-
-```sql
--- agent_teams 表
-CREATE TABLE agent_teams (
-  id              UUID PRIMARY KEY,
-  user_id         UUID REFERENCES users(id),
-  name            VARCHAR(200),
-  description     TEXT,
-  agents          JSONB,              -- Agent 配置列表
-  collaboration   ENUM('orchestrator', 'peer', 'debate') DEFAULT 'orchestrator',
-  created_at      TIMESTAMP
-);
-
--- agent_team_runs 表
-CREATE TABLE agent_team_runs (
-  id              UUID PRIMARY KEY,
-  team_id         UUID REFERENCES agent_teams(id),
-  task            TEXT,
-  status          ENUM('running', 'completed', 'failed'),
-  messages        JSONB DEFAULT '[]',  -- Agent 间通信记录
-  result          TEXT,
-  started_at      TIMESTAMP,
-  completed_at    TIMESTAMP
-);
+  规则：
+  1. 将复杂任务分解为 3-7 个具体、可执行的步骤
+  2. 每个步骤描述应清晰、可验证
+  3. 识别步骤间的依赖关系
+  4. 评估每个步骤的优先级（高/中/低）
+  5. 输出格式为 JSON：
+  {
+    "steps": [
+      {
+        "id": "step_1",
+        "description": "...",
+        "assignee": "executor|researcher|reviewer",  // 建议由谁执行
+        "toolHint": "web_search|file_read|...",      // 可选：建议使用的工具
+        "priority": "high|medium|low",
+        "dependsOn": []                              // 依赖的步骤 ID
+      }
+    ],
+    "estimatedTotalSteps": 3,
+    "reasoning": "为什么这样分解..."
+  }
+tools: []
+maxIterations: 5
+canDelegate: true
+canBroadcast: false
 ```
 
-## 6. 验收标准
+### 3.4 Executor 角色详细定义
 
-- [ ] Multi-Agent 消息总线完成
-- [ ] 5 个默认 Agent 角色实现完成（Planner/Executor/Reviewer/Researcher/Orchestrator）
-- [ ] 3 种协作模式完成（Orchestrator / Peer / Debate）
-- [ ] Agent Team CRUD API 完成
-- [ ] Agent Team Run SSE 流（展示各 Agent 的思考过程）
-- [ ] 前端：Multi-Agent 可视化面板（Agent 卡片 + 消息流）
-- [ ] 复杂任务 demo 验证（如：研究一个主题 → 写报告 → 审查修改）
+```yaml
+name: executor
+displayName: "执行者"
+description: "执行分配的任务步骤，调用工具获取结果"
+systemPrompt: |
+  你是 Executor，一个任务执行专家。你收到 Planner 分配的任务步骤，使用可用工具完成执行。
+
+  规则：
+  1. 仔细阅读分配给你的步骤，确保理解目标
+  2. 选择最合适的工具来完成任务
+  3. 工具调用失败时，尝试替代方案或报告失败原因
+  4. 完成后输出明确的执行结果，包含关键发现和数据
+  5. 不要修改任务的目标——只执行，不重新规划
+tools: [全部已注册工具]
+maxIterations: 15
+canDelegate: false
+canBroadcast: false
+```
+
+### 3.5 Reviewer 角色详细定义
+
+```yaml
+name: reviewer
+displayName: "审查者"
+description: "审查执行结果，发现错误和遗漏"
+systemPrompt: |
+  你是 Reviewer，一个质量保证专家。你的职责是审查 Executor 和 Researcher 的输出。
+
+  审查维度：
+  1. 准确性：事实是否准确？数据是否可靠？
+  2. 完整性：是否遗漏了重要信息？
+  3. 逻辑性：推理是否一致？结论是否合理？
+  4. 安全性：是否有潜在风险？
+  5. 表达质量：输出是否清晰、专业？
+
+  输出格式：
+  {
+    "verdict": "pass|revise|reject",
+    "score": 1-10,
+    "issues": [
+      { "severity": "critical|major|minor", "description": "...", "location": "...", "suggestion": "..." }
+    ],
+    "summary": "总体评价..."
+  }
+tools: [web_search, file_read, file_search, db_query]
+maxIterations: 5
+canDelegate: false
+canBroadcast: false
+```
+
+### 3.6 Researcher 角色详细定义
+
+```yaml
+name: researcher
+displayName: "研究员"
+description: "搜集和分析信息，提供结构化调研结果"
+systemPrompt: |
+  你是 Researcher，一个信息搜集和分析专家。
+
+  工作流程：
+  1. 理解调研问题，确定搜索策略
+  2. 使用 web_search 和 web_fetch 搜集多源信息
+  3. 交叉验证关键事实
+  4. 输出结构化调研报告：
+  {
+    "question": "原始问题",
+    "findings": [
+      { "source": "URL", "keyPoints": ["...", "..."], "reliability": "high|medium|low" }
+    ],
+    "synthesis": "综合分析...",
+    "gaps": ["未解决的问题"]
+  }
+tools: [web_search, web_fetch, http_request]
+maxIterations: 10
+canDelegate: false
+canBroadcast: false
+```
+
+### 3.7 Orchestrator 角色详细定义
+
+```yaml
+name: orchestrator
+displayName: "协调者"
+description: "协调多 Agent 团队，委派任务，汇总结果"
+systemPrompt: |
+  你是 Orchestrator，一个团队协调者。你管理一个由 Planner、Executor、Reviewer、Researcher 组成的 AI Agent 团队。
+
+  工作流程：
+  1. 收到用户任务后，先委派给 Planner 制定计划
+  2. 审核计划，必要时要求 Planner 修改
+  3. 按依赖顺序委派任务给 Executor 或 Researcher
+  4. 每次执行后，委派给 Reviewer 审查（如果是关键任务）
+  5. 跟踪进度，处理失败和重试
+  6. 汇总所有输出，形成最终回复给用户
+
+  委派命令格式（调用 delegate 函数）：
+  {
+    "action": "delegate",
+    "to": "planner|executor|reviewer|researcher",
+    "task": "具体任务描述",
+    "context": { "相关背景信息": "..." },
+    "expectedOutput": "期望的输出格式",
+    "priority": "high|medium|low"
+  }
+
+  规则：
+  - 关键步骤（代码执行、数据变更）必须经过 Reviewer 审查
+  - 同一时间最多委派一个 Agent（串行协作）
+  - 累计最多委派 20 次（防止无限循环）
+  - 当所有步骤完成或失败时，输出最终结果并标记为 done
+tools: []
+maxIterations: 10
+canDelegate: true
+canBroadcast: true
+```
+
+---
+
+## 4. 消息总线
+
+### 4.1 消息格式
+
+```typescript
+interface AgentMessage {
+  id: string;                          // 消息唯一 ID
+  teamRunId: string;                   // 所属团队运行 ID
+  from: string;                        // 发送 Agent 名称（role name）
+  to: string | "broadcast" | "orchestrator";  // 接收方
+  type: AgentMessageType;              // 消息类型（见下方枚举）
+  payload: AgentMessagePayload;        // 消息载荷
+  timestamp: string;                   // ISO 8601 时间戳
+  replyTo?: string;                    // 回复的消息 ID（可选）
+  correlationId?: string;              // 关联 ID：同一任务链的消息共享同一 ID
+}
+
+type AgentMessageType =
+  | "task"          // 分配任务：Orchestrator → Agent
+  | "result"        // 任务结果：Agent → Orchestrator
+  | "question"      // 提问：Agent → Agent/Orchestrator
+  | "clarification" // 澄清：Agent 请求更多上下文
+  | "feedback"      // 反馈：Reviewer → Executor
+  | "handoff"       // 转交：Agent A 将任务转交给 Agent B
+  | "broadcast"     // 广播：向所有 Agent 发送通知
+  | "status"        // 状态更新：Agent 报告自己的进度
+  | "error"         // 错误报告：Agent 报告执行错误
+  | "done";         // 完成通知：Agent 表示自己完成当前工作
+
+interface AgentMessagePayload {
+  task?: string;                       // 任务描述
+  result?: unknown;                    // 任务结果
+  question?: string;                   // 提问内容
+  feedback?: {                         // 审查反馈
+    verdict: "pass" | "revise" | "reject";
+    score: number;
+    issues: Array<{ severity: string; description: string; suggestion: string }>;
+    summary: string;
+  };
+  context?: Record<string, unknown>;   // 附加上下文
+  status?: {                           // 进度状态
+    completed: number;
+    total: number;
+    currentStep?: string;
+  };
+  error?: {
+    message: string;
+    code?: string;
+    recoverable: boolean;
+  };
+}
+```
+
+### 4.2 消息总线实现
+
+消息总线采用内存 EventEmitter + DB 持久化双层架构：
+
+```typescript
+class MessageBus {
+  private emitter: EventEmitter;
+  private messages: AgentMessage[] = [];       // 当前运行的全部消息（内存）
+  private subscriptions: Map<string, (msg: AgentMessage) => void> = new Map();
+
+  /** 发送消息 */
+  async send(from: string, to: string, type: AgentMessageType, payload: AgentMessagePayload): Promise<AgentMessage> {
+    const msg: AgentMessage = {
+      id: randomUUID(),
+      from, to, type, payload,
+      timestamp: new Date().toISOString(),
+    };
+    this.messages.push(msg);
+
+    // 持久化到 DB
+    await this.persistMessage(msg);
+
+    // 通知订阅者
+    this.emitter.emit(to, msg);
+    if (to === "broadcast") {
+      this.emitter.emit("broadcast", msg);
+    }
+
+    return msg;
+  }
+
+  /** 订阅特定 Agent 的消息 */
+  subscribe(agentName: string, handler: (msg: AgentMessage) => void): () => void {
+    this.emitter.on(agentName, handler);
+    return () => this.emitter.off(agentName, handler);  // 返回取消订阅函数
+  }
+
+  /** 获取会话中的所有消息（用于恢复和审计） */
+  getHistory(): AgentMessage[] {
+    return [...this.messages];
+  }
+
+  /** 等待来自特定 Agent 的消息（Promise-based，用于同步等待） */
+  waitFor(from: string, timeoutMs: number = 120000): Promise<AgentMessage> {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`Timeout waiting for ${from}`)), timeoutMs);
+      const unsubscribe = this.subscribe(from, (msg) => {
+        clearTimeout(timer);
+        unsubscribe();
+        resolve(msg);
+      });
+    });
+  }
+
+  private async persistMessage(msg: AgentMessage): Promise<void> {
+    // 写入 agent_team_runs.messages JSONB 数组
+  }
+}
+```
+
+---
+
+## 5. Blackboard 共享上下文
+
+### 5.1 设计思路
+
+Blackboard 是所有 Agent 共享的结构化工作内存——Agent 可以读取别人写的结果，写入自己的发现，形成累积的知识构建。
+
+### 5.2 数据结构
+
+```typescript
+interface BlackboardEntry {
+  key: string;                         // 键名（如 "plan", "research_findings", "review_result"）
+  value: unknown;                      // 任意 JSON 值
+  writtenBy: string;                   // 写入者 Agent 名称
+  timestamp: string;                   // 写入时间
+  version: number;                     // 版本号（每次写入递增）
+  metadata?: {
+    description?: string;              // 简短描述
+    tags?: string[];                   // 标签（便于检索）
+    ttl?: number;                      // 可选过期时间（秒）
+  };
+}
+
+class Blackboard {
+  private entries: Map<string, BlackboardEntry> = new Map();
+  private history: BlackboardEntry[] = [];  // 所有历史版本
+
+  /** 写入（带版本控制） */
+  write(key: string, value: unknown, agentName: string, metadata?: BlackboardEntry["metadata"]): BlackboardEntry {
+    const prevEntry = this.entries.get(key);
+    const entry: BlackboardEntry = {
+      key, value, writtenBy: agentName,
+      timestamp: new Date().toISOString(),
+      version: (prevEntry?.version ?? 0) + 1,
+      metadata,
+    };
+    this.entries.set(key, entry);
+    this.history.push(entry);
+    return entry;
+  }
+
+  /** 读取 */
+  read(key: string): unknown | undefined {
+    return this.entries.get(key)?.value;
+  }
+
+  /** 读取全部（用于 Agent context） */
+  snapshot(): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const [key, entry] of this.entries) {
+      result[key] = entry.value;
+    }
+    return result;
+  }
+
+  /** 按 Agent 名读取其写入的所有条目 */
+  entriesByAgent(agentName: string): BlackboardEntry[] {
+    return this.history.filter((e) => e.writtenBy === agentName);
+  }
+
+  /** 获取 key 的变更历史 */
+  getHistory(key: string): BlackboardEntry[] {
+    return this.history.filter((e) => e.key === key);
+  }
+
+  /** 删除（带权限检查——只有写入者可以删除） */
+  delete(key: string, agentName: string): boolean {
+    const entry = this.entries.get(key);
+    if (entry && entry.writtenBy === agentName) {
+      this.entries.delete(key);
+      return true;
+    }
+    return false;
+  }
+
+  /** 转换为可序列化的上下文，注入到每个 Agent 的 System Prompt */
+  toContextString(): string {
+    if (this.entries.size === 0) return "(Blackboard is empty)";
+    let ctx = "## Shared Blackboard (最新值):\n";
+    for (const [key, entry] of this.entries) {
+      const val = typeof entry.value === "string" ? entry.value : JSON.stringify(entry.value);
+      ctx += `- **${key}** (written by ${entry.writtenBy}, v${entry.version}): ${val.substring(0, 300)}\n`;
+    }
+    return ctx;
+  }
+}
+```
+
+### 5.3 Blackboard 使用约定
+
+| Key | 写入者 | 用途 |
+|-----|--------|------|
+| `plan` | Planner | 任务分解计划 |
+| `research_findings` | Researcher | 调研结果 |
+| `execution_result_{stepId}` | Executor | 每个步骤的执行结果 |
+| `review_result_{stepId}` | Reviewer | 每个步骤的审查结果 |
+| `final_output` | Orchestrator | 最终汇总输出 |
+| `team_notes` | 任意 Agent | 团队共享笔记 |
+
+---
+
+## 6. 协作模式
+
+### 6.1 模式 1：Orchestrator 模式（层级式）
+
+Orchestrator 作为中央协调者，按层级委派任务。这是默认模式，适合大多数场景。
+
+```
+执行流程：
+User Task → Orchestrator.receive(task)
+                │
+                ├→ [Round 1] delegate to Planner: "制定计划"
+                │       Planner → Blackboard.write("plan", {...})
+                │       Planner → MessageBus.send("orchestrator", "result", {result: plan})
+                │
+                ├→ [Round 2] Orchestrator 审核 plan
+                │       if 不通过 → delegate to Planner: "修改计划"
+                │
+                ├→ [Round 3] delegate to Researcher: "调研 X"
+                │       Researcher → Blackboard.write("research_findings", {...})
+                │       Researcher → MessageBus.send("orchestrator", "result", {...})
+                │
+                ├→ [Round 4] delegate to Executor: "执行 step_1"
+                │       Executor → Blackboard.write("execution_result_step_1", {...})
+                │       Executor → MessageBus.send("orchestrator", "result", {...})
+                │
+                ├→ [Round 5] delegate to Reviewer: "审查 step_1"
+                │       Reviewer → Blackboard.write("review_result_step_1", {...})
+                │       Reviewer → MessageBus.send("orchestrator", "feedback", {verdict, ...})
+                │
+                ├→ [Round 6] if 审查不通过 → delegate to Executor: "修正 step_1"
+                │
+                ├→ [Round 7+] ... 重复执行→审查循环直到所有步骤完成 ...
+                │
+                └→ Orchestrator → 汇总 Blackboard 所有内容
+                   最终输出给用户
+```
+
+**回合调度策略：串行委派** — Orchestrator 一次只委派一个 Agent，等待其完成后再决定下一步。
+
+```typescript
+class OrchestratorMode {
+  private orchestratorRole: AgentRole;
+  private team: AgentRole[];
+  private maxRounds: number = 20;
+
+  async *execute(task: string, context: ExecutionContext): AsyncGenerator<TeamStreamEvent> {
+    const bus = new MessageBus();
+    const bb = new Blackboard();
+
+    // 初始化 Orchestrator
+    const orch = new AgentService();
+    let conversationId = context.conversationId;
+
+    for (let round = 0; round < this.maxRounds; round++) {
+      // 构建包含 Blackboard 和消息历史的系统提示
+      const enrichedPrompt = this.buildOrchestratorContext(task, bb, bus);
+
+      // 执行 Orchestrator 的一轮推理
+      for await (const event of orch.run(conversationId, enrichedPrompt, {
+        maxIterations: this.orchestratorRole.maxIterations,
+        tools: null, // Orchestrator 无工具，通过 delegate 函数委派
+      })) {
+        yield this.mapToTeamEvent(event, "orchestrator");
+      }
+
+      // 解析 Orchestrator 的决策
+      const decision = this.parseOrchestratorDecision(/* last event */);
+
+      if (decision.action === "done") {
+        break;  // 任务完成
+      }
+
+      if (decision.action === "delegate") {
+        const targetAgent = this.team.find(a => a.name === decision.to);
+        if (!targetAgent) continue;
+
+        // 执行被委派的 Agent
+        yield* this.executeAgent(targetAgent, decision.task, context, bb, bus);
+      }
+    }
+
+    // 汇总最终结果
+    yield { type: "team_completed", output: bb.snapshot() };
+  }
+}
+```
+
+### 6.2 模式 2：Peer-to-Peer 模式（对等式）
+
+所有 Agent 地位平等，通过消息总线自由对话。适合"讨论式"协作场景，如结对编程、方案讨论。
+
+```
+执行流程：
+User Task → 同时启动 Agent A + Agent B（各自有不同视角/专长）
+                │
+                ├→ Agent A (前端专家) ←→ Agent B (后端专家)
+                │    │                        │
+                │    ├─ "API 设计应该是 REST 还是 GraphQL？"
+                │    │                        ├─ "REST 更适合，因为..."
+                │    │                        ├─ "但需要实时功能的端点..."
+                │    ├─ "同意。那 path 用 /api/users 还是 /users？"
+                │    │                        ├─ "/api/users，保持版本前缀"
+                │    └─ "好的，我来写前端 TypeScript 类型..."
+                │                             └─ "我来写后端 Hono 路由..."
+                │
+                └→ 对话达到自然终止条件 → 汇总对话结果 → 输出给用户
+```
+
+**回合调度策略：事件驱动** — 当某个 Agent 的消息引用另一个 Agent 时，被引用者获得执行回合。
+
+```typescript
+class PeerMode {
+  async *execute(agents: AgentRole[], task: string, context: ExecutionContext): AsyncGenerator<TeamStreamEvent> {
+    const bus = new MessageBus();
+    const bb = new Blackboard();
+
+    // 同时启动所有 Agent（并发，每个独立运行 ReAct）
+    const agentTasks = agents.map((role) =>
+      this.runPeerAgent(role, task, agents.map(a => a.name), context, bus, bb)
+    );
+
+    // 使用事件驱动调度：有消息到达时触发对应 Agent
+    // 这里简化为一轮一轮地处理，实际实现中有更复杂的调度
+    // ...
+
+    yield { type: "team_completed", output: bb.snapshot() };
+  }
+}
+```
+
+### 6.3 模式 3：Debate 模式（辩论式）
+
+多个 Agent 分为正反两方（或多方），各自论证立场，最终由 Judge Agent 裁定。
+
+```
+执行流程：
+Question → Blackboard.write("debate_question", q)
+                │
+                ├→ [并行] Agent A (Pro) + Agent B (Con)
+                │     │                      │
+                │     ├─ 论证 1 (成立)        ├─ 反驳 1 (不成立)
+                │     ├─ 论证 2 (成立)        ├─ 反驳 2 (部分成立)
+                │     └─ 论证 3 (成立)        └─ 反驳 3 (不成立)
+                │
+                ├→ [串行] Agent C (Judge) 评估双方论点
+                │     ├─ 阅读 Pro 的全部论证
+                │     ├─ 阅读 Con 的全部反驳
+                │     ├─ 交叉对比
+                │     └─ 输出裁判结果: { winner: "pro", reasoning: "...", score: { pro: 8, con: 5 } }
+                │
+                └→ 最终裁定 + 双方论证记录 → 输出给用户
+```
+
+**回合调度策略：先并行辩论，后串行裁判** — 正反方同时运行（最多各 N 轮），结束后 Judge 执行。
+
+---
+
+## 7. Team DSL（团队定义语言）
+
+### 7.1 完整 Schema
+
+```typescript
+interface TeamDefinition {
+  name: string;                                  // 团队名称
+  version: string;                               // 版本号
+  description?: string;                          // 描述
+  collaborationMode: "orchestrator" | "peer" | "debate";  // 协作模式
+  agents: AgentRole[];                           // 角色列表（2-10 个）
+  orchestrator?: string;                         // Orchestrator 模式的协调者（默认第一个 agent）
+  debate?: {                                     // Debate 模式配置（仅 debate 模式）
+    question: string;                            // 辩论问题
+    proAgent: string;                            // 正方 Agent 名称
+    conAgent: string;                            // 反方 Agent 名称
+    judgeAgent: string;                          // 裁判 Agent 名称
+    maxRounds: number;                           // 每方最大发言轮数（默认 3）
+  };
+  maxTotalIterations: number;                    // 团队总迭代次数上限（默认 50）
+  stopCondition?: "all_done" | "orchestrator_decides" | "consensus";  // 停止条件
+  timeout?: number;                              // 全局超时（秒，默认 600）
+  onFailure?: "stop" | "continue" | "retry";     // Agent 失败时的团队行为
+  variables?: Record<string, {                   // 团队级变量
+    type: string;
+    default?: unknown;
+    description?: string;
+  }>;
+}
+```
+
+### 7.2 示例：代码审查团队
+
+```json
+{
+  "name": "代码审查团队",
+  "version": "1.0",
+  "description": "多角色代码审查：安全、性能、可维护性并行审查",
+  "collaborationMode": "orchestrator",
+  "agents": [
+    {
+      "name": "orchestrator",
+      "displayName": "代码审查协调者",
+      "systemPrompt": "你是代码审查协调者...",
+      "tools": [],
+      "maxIterations": 8,
+      "priority": 10,
+      "canDelegate": true,
+      "canBroadcast": true
+    },
+    {
+      "name": "security_reviewer",
+      "displayName": "安全审查员",
+      "systemPrompt": "你是应用安全专家...",
+      "tools": ["file_read", "file_search", "web_search"],
+      "maxIterations": 5,
+      "priority": 8,
+      "canDelegate": false,
+      "canBroadcast": false
+    },
+    {
+      "name": "performance_reviewer",
+      "displayName": "性能审查员",
+      "systemPrompt": "你是性能优化专家...",
+      "tools": ["file_read", "file_search"],
+      "maxIterations": 5,
+      "priority": 8,
+      "canDelegate": false,
+      "canBroadcast": false
+    },
+    {
+      "name": "maintainability_reviewer",
+      "displayName": "可维护性审查员",
+      "systemPrompt": "你是代码质量专家...",
+      "tools": ["file_read", "file_search"],
+      "maxIterations": 5,
+      "priority": 8,
+      "canDelegate": false,
+      "canBroadcast": false
+    }
+  ],
+  "maxTotalIterations": 50,
+  "stopCondition": "orchestrator_decides",
+  "timeout": 600
+}
+```
+
+---
+
+## 8. Team Executor（团队执行引擎）
+
+### 8.1 核心架构
+
+```typescript
+class TeamExecutor {
+  private modeExecutors: Map<string, CollaborationModeExecutor>;
+
+  constructor() {
+    this.modeExecutors = new Map([
+      ["orchestrator", new OrchestratorMode()],
+      ["peer", new PeerMode()],
+      ["debate", new DebateMode()],
+    ]);
+  }
+
+  async *execute(
+    definition: TeamDefinition,
+    task: string,
+    context: ExecutionContext,
+  ): AsyncGenerator<TeamStreamEvent> {
+    const mode = definition.collaborationMode;
+    const executor = this.modeExecutors.get(mode);
+    if (!executor) throw new Error(`Unknown collaboration mode: ${mode}`);
+
+    // 1. 验证团队定义
+    this.validateTeam(definition);
+
+    // 2. 初始化消息总线和 Blackboard
+    const bus = new MessageBus();
+    const bb = new Blackboard();
+
+    // 3. 写入初始任务到 Blackboard
+    bb.write("task", task, "system");
+
+    // 4. 启动团队执行
+    yield* executor.execute(definition, task, { ...context, bus, bb });
+  }
+
+  private validateTeam(definition: TeamDefinition): void {
+    // 校验：至少 2 个角色
+    // 校验：Orchestrator 模式必须有 canDelegate=true 的角色
+    // 校验：Debate 模式必须有 pro/con/judge 三个角色
+    // 校验：所有角色名称唯一
+    // 校验：工具白名单中的工具存在
+  }
+}
+```
+
+### 8.2 Agent 实例化
+
+每个角色通过 AgentService 实例化，但使用不同的 System Prompt 和工具白名单：
+
+```typescript
+async *runAgent(
+  role: AgentRole,
+  task: string,
+  blackboard: Blackboard,
+  messageBus: MessageBus,
+  context: ExecutionContext,
+): AsyncGenerator<TeamStreamEvent> {
+  const agentService = new AgentService();
+
+  // 构建增强 System Prompt（角色 prompt + Blackboard 上下文 + 消息历史）
+  const enrichedTask = `
+${role.systemPrompt}
+
+## 当前 Blackboard（共享上下文）
+${blackboard.toContextString()}
+
+## 最近消息
+${messageBus.getHistory().slice(-10).map(m => `[${m.from}→${m.to}] ${m.type}: ${JSON.stringify(m.payload).substring(0, 200)}`).join('\n')}
+
+## 任务
+${task}
+
+请执行你的角色职责。使用 agent_decide 函数来报告你的决策。
+`;
+
+  for await (const event of agentService.run(context.conversationId, enrichedTask, {
+    maxIterations: role.maxIterations,
+    tools: role.tools.length > 0 ? role.tools : null,
+  })) {
+    // 将 Agent 事件转换为团队事件
+    yield this.mapAgentToTeamEvent(event, role.name);
+  }
+}
+```
+
+### 8.3 回合生命周期
+
+```
+┌──────────────────────────────────────────────────────┐
+│               Team Round Lifecycle                     │
+│                                                       │
+│  1. SelectNextAgent(schedulingStrategy)               │
+│     ↓                                                 │
+│  2. BuildContext(blackboard + messages)               │
+│     ↓                                                 │
+│  3. RunAgent(role, task, context) — ReAct loop        │
+│     ├→ agent_think: observation                      │
+│     ├→ agent_act: tool_call                          │
+│     ├→ agent_observe: tool_result                    │
+│     └→ agent_respond / agent_done                    │
+│     ↓                                                 │
+│  4. ProcessAgentOutput()                              │
+│     ├→ Extract blackboard writes                     │
+│     ├→ Extract messages to send                      │
+│     └→ Extract task completion status                │
+│     ↓                                                 │
+│  5. DispatchMessages()                                │
+│     ├→ Direct messages → receiver's inbox            │
+│     └→ Broadcast → all agents' inbox                 │
+│     ↓                                                 │
+│  6. CheckStopCondition()                              │
+│     ├→ all_done → STOP + synthesize output           │
+│     ├→ max rounds exceeded → STOP + warning          │
+│     └→ else → go to step 1                           │
+└──────────────────────────────────────────────────────┘
+```
+
+---
+
+## 9. SSE 协议扩展
+
+为 Multi-Agent 新增 12 种事件类型，前端可以实时看到每个 Agent 的思考过程：
+
+| 事件类型 | 触发时机 | 关键字段 |
+|----------|----------|----------|
+| `team_started` | 团队开始执行 | `teamRunId, teamName, mode, agents[]` |
+| `team_round_start` | 新一轮开始 | `roundNumber, totalRounds` |
+| `agent_started` | 某个 Agent 开始执行 | `agentName, role, task` |
+| `agent_think` | Agent 的 observation（复用） | `agentName, observation` |
+| `agent_plan` | Agent 的 plan（复用） | `agentName, plan` |
+| `agent_act` | Agent 调用工具（复用） | `agentName, tool, args` |
+| `agent_observe` | Agent 观察工具结果（复用） | `agentName, result` |
+| `agent_message` | Agent 发送消息 | `from, to, type, payload` |
+| `blackboard_update` | Blackboard 写入 | `key, value, writtenBy, version` |
+| `agent_completed` | Agent 完成本轮 | `agentName, output, durationMs` |
+| `agent_error` | Agent 执行错误 | `agentName, error` |
+| `team_completed` | 团队执行完成 | `output, totalDurationMs, roundsCount` |
+| `team_failed` | 团队执行失败 | `error` |
+
+### Event Stream 示例
+
+```
+event: team_started
+data: {"type":"team_started","teamRunId":"run_001","teamName":"代码审查团队","mode":"orchestrator","agents":[{"name":"orchestrator","role":"协调者"},{"name":"security_reviewer","role":"安全审查员"},{"name":"performance_reviewer","role":"性能审查员"}]}
+
+event: team_round_start
+data: {"type":"team_round_start","roundNumber":1,"totalRounds":20}
+
+event: agent_started
+data: {"type":"agent_started","agentName":"orchestrator","task":"审查 PR #42 的代码变更"}
+
+event: agent_think
+data: {"type":"agent_think","agentName":"orchestrator","observation":"收到代码审查任务，需要先委派给安全/性能/可维护性审查员"}
+
+event: agent_message
+data: {"type":"agent_message","from":"orchestrator","to":"security_reviewer","type":"task","payload":{"task":"审查 auth.ts 的安全漏洞"}}
+
+event: blackboard_update
+data: {"type":"blackboard_update","key":"task","value":"审查 PR #42","writtenBy":"system","version":1}
+
+event: agent_completed
+data: {"type":"agent_completed","agentName":"orchestrator","durationMs":3200}
+
+event: team_completed
+data: {"type":"team_completed","output":{"security_findings":[],"perf_findings":[],"maint_findings":[]},"totalDurationMs":45200,"roundsCount":6}
+```
+
+---
+
+## 10. 数据模型
+
+### 10.1 Prisma Schema
+
+```prisma
+model AgentTeam {
+  id             String   @id @db.VarChar(36)
+  userId         String   @db.VarChar(36)
+  name           String   @db.VarChar(200)
+  description    String?  @db.Text
+  definition     Json     // TeamDefinition JSON
+  tags           Json     @default("[]")  // string[]
+  status         String   @default("draft") @db.VarChar(20) // draft | active | archived
+  version        Int      @default(1)
+  runCount       Int      @default(0)
+  lastRunAt      DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user           User     @relation(fields: [userId], references: [id])
+  runs           AgentTeamRun[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([updatedAt])
+  @@map("agent_teams")
+}
+
+model AgentTeamRun {
+  id             String   @id @db.VarChar(36)
+  teamId         String   @db.VarChar(36)
+  userId         String   @db.VarChar(36)
+  conversationId String?  @db.VarChar(36)
+  task           String   @db.Text
+  status         String   @default("running") @db.VarChar(20) // running | completed | failed | cancelled
+  mode           String   @db.VarChar(20)     // orchestrator | peer | debate
+  messages       Json     @default("[]")      // AgentMessage[]
+  blackboard     Json     @default("{}")      // Blackboard 最终快照
+  checkpoint     Json?                         // 检查点（用于恢复）
+  output         Json?                         // 最终输出
+  error          String?  @db.Text
+  roundsCount    Int      @default(0)
+  durationMs     Int?
+  startedAt      DateTime @default(now())
+  completedAt    DateTime?
+
+  team           AgentTeam @relation(fields: [teamId], references: [id])
+  user           User      @relation(fields: [userId], references: [id])
+
+  @@index([teamId])
+  @@index([userId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("agent_team_runs")
+}
+```
+
+### 10.2 User 模型扩展
+
+在 `User` 模型中添加反向关系：
+
+```prisma
+agentTeams    AgentTeam[]
+agentTeamRuns AgentTeamRun[]
+```
+
+---
+
+## 11. API 设计
+
+### 11.1 端点清单
+
+```
+# Team CRUD
+POST   /api/teams                               # 创建团队
+GET    /api/teams                               # 列出团队（支持 ?status, ?mode, ?page）
+GET    /api/teams/templates                     # 列出内置团队模板
+POST   /api/teams/validate                      # 验证团队定义
+GET    /api/teams/:id                           # 获取团队 + 定义
+PUT    /api/teams/:id                           # 更新团队（version 递增）
+DELETE /api/teams/:id                           # 删除团队
+
+# Team Execution
+POST   /api/teams/:id/run                       # 启动团队运行（SSE 流）
+GET    /api/teams/runs/:runId                   # 获取运行详情 + 消息历史
+GET    /api/teams/runs/:runId/stream            # 运行 SSE 事件流
+POST   /api/teams/runs/:runId/cancel            # 取消运行
+POST   /api/teams/runs/:runId/pause             # 暂停
+POST   /api/teams/runs/:runId/resume            # 从检查点恢复
+
+# Run History
+GET    /api/teams/:id/runs                      # 列出团队的历史运行
+GET    /api/teams/:id/runs/:runId               # 获取运行详情
+```
+
+### 11.2 关键端点详情
+
+**POST /api/teams/:id/run（启动团队运行）**
+
+```typescript
+// 请求
+{
+  "task": "审查 apps/server/src 目录的代码安全性",
+  "variables": { "targetDir": "apps/server/src" },
+  "conversationId?": "conv_xxx"  // 可选：关联到对话
+}
+
+// 响应：SSE 流（见第 9 节事件类型）
+```
+
+**POST /api/teams/validate**
+
+```typescript
+// 请求：TeamDefinition JSON
+// 响应：
+{
+  "valid": true | false,
+  "errors?": [{ "path": "agents[0].name", "message": "Agent name is required" }]
+}
+```
+
+### 11.3 路由实现
+
+```typescript
+// apps/server/src/routes/teams.ts
+const teamRoutes = new Hono();
+
+teamRoutes.post("/", auth, async (c) => {
+  const userId = c.get("userId");
+  const body = await c.req.json();
+  const team = await teamService.create(userId, body);
+  return c.json(team, 201);
+});
+
+teamRoutes.get("/templates", auth, async (c) => {
+  return c.json(teamService.listTemplates());
+});
+
+teamRoutes.post("/:id/run", auth, async (c) => {
+  const userId = c.get("userId");
+  const { id } = c.req.param();
+  const { task, variables, conversationId } = await c.req.json();
+
+  return streamSSE(c, async (yield) => {
+    for await (const event of teamService.runTeam(id, userId, task, variables, conversationId)) {
+      yield event;
+    }
+  });
+});
+
+// ... 其余端点
+```
+
+---
+
+## 12. 前端设计
+
+### 12.1 团队列表页
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  🤖 Multi-Agent Teams                              [+ 创建团队] │
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  📋 代码审查团队          orchestrator · v3 · 活跃           ││
+│  │  4 个 Agent：协调者 + 安全/性能/可维护性审查员               ││
+│  │  最近运行: 2 小时前 · 运行 12 次                              ││
+│  │  [运行] [编辑] [历史] [删除]                                  ││
+│  └─────────────────────────────────────────────────────────────┘│
+│                                                                  │
+│  ┌─────────────────────────────────────────────────────────────┐│
+│  │  🎯 技术调研团队           peer · v1 · 草稿                   ││
+│  │  3 个 Agent：研究员(前端) + 研究员(后端) + 架构师             ││
+│  │  从未运行                                                      ││
+│  │  [运行] [编辑] [删除]                                         ││
+│  └─────────────────────────────────────────────────────────────┘│
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### 12.2 团队运行监控面板
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  🔴 Live: 代码审查团队 — 审查 PR #42          ⏱ 32s  [取消]    │
+│                                                                   │
+│  ┌─────────────────────────────┐ ┌─────────────────────────────┐ │
+│  │ 🎯 Orchestrator (协调者)    │ │ 📋 Blackboard               │ │
+│  │ ● Active                    │ │                              │ │
+│  │ 上一动作：委派 security      │ │ task: "审查 PR #42"         │ │
+│  │ 消息: 6 条                  │ │ plan: {steps: [...]}        │ │
+│  │                             │ │ security_review: {...}      │ │
+│  │ [展开思考链▼]               │ │                              │ │
+│  └─────────────────────────────┘ └─────────────────────────────┘ │
+│                                                                   │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────────────────┐  │
+│  │ 🔒 Security  │ │ ⚡ Perf      │ │ 🔧 Maintainability      │  │
+│  │ ● Running    │ │ ○ Pending    │ │ ○ Pending               │  │
+│  │ Step 2/5     │ │              │ │                         │  │
+│  │ [思考链▼]    │ │ [等待中...]   │ │ [等待中...]              │  │
+│  └──────────────┘ └──────────────┘ └──────────────────────────┘  │
+│                                                                   │
+│  ── 消息总线 ──────────────────────────────────────────────────  │
+│  [orch→security] task: "审查 auth.ts"                      0.3s  │
+│  [security→orch] status: {completed: 1, total: 3}          2.1s  │
+│  [security→orch] result: {findings: [...]}                 5.8s  │
+│  [orch→perf] task: "审查性能..."                            6.2s  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 12.3 团队编辑器
+
+团队编辑器采用 JSON 编辑 + 表单编辑双模式，与 Workflow 编辑器类似：
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  编辑团队：代码审查团队                                          │
+│                                                                   │
+│  名称：[代码审查团队          ]  模式：[orchestrator ▼]          │
+│  描述：[多角色代码审查...     ]                                  │
+│                                                                   │
+│  ── Agent 角色配置 ────────────────────────────────────────────  │
+│                                                                   │
+│  ┌─ Agent 1 ───────────────────────────────────────────────┐     │
+│  │ 名称：[orchestrator      ]  显示名：[协调者             ] │     │
+│  │ 工具：[                    ]  最大迭代：[8              ] │     │
+│  │ 优先级：[10               ]  ☑ 可委派  ☑ 可广播         │     │
+│  │                                                          │     │
+│  │ System Prompt:                                          │     │
+│  │ ┌──────────────────────────────────────────────────────┐ │     │
+│  │ │ 你是代码审查协调者...                                │ │     │
+│  │ └──────────────────────────────────────────────────────┘ │     │
+│  └──────────────────────────────────────────────────────────┘     │
+│  [+ 添加 Agent]                                                  │
+│                                                                   │
+│  ── 高级选项 ──────────────────────────────────────────────────  │
+│  最大总迭代：[50             ]  超时：[600      ] 秒             │
+│  失败行为：[stop ▼]                                              │
+│                                                                   │
+│  [保存] [另存为新团队] [验证] [取消]                             │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 13. 内置团队模板
+
+### 13.1 模板列表
+
+| 模板 ID | 名称 | 模式 | 角色数 | 用途 |
+|---------|------|------|--------|------|
+| `code-review-team` | 代码审查团队 | orchestrator | 4 | 多维度代码审查（安全/性能/可维护性） |
+| `research-synthesis` | 调研综合团队 | orchestrator | 3 | 研究员×2（不同角度）→ 综合者 |
+| `debate-analyzer` | 辩论分析团队 | debate | 3 | 正反辩论 + 裁判裁决 |
+| `pair-programming` | 结对编程团队 | peer | 2 | 前端+后端协作开发 |
+
+### 13.2 示例模板：research-synthesis
+
+```typescript
+{
+  id: "research-synthesis",
+  name: "调研综合团队",
+  description: "两个研究员从不同角度调研同一主题，由综合者汇总形成完整报告",
+  category: "research",
+  definition: {
+    name: "调研综合团队",
+    version: "1.0",
+    description: "多角度主题调研 + 综合分析",
+    collaborationMode: "orchestrator",
+    agents: [
+      {
+        name: "orchestrator",
+        displayName: "调研协调者",
+        systemPrompt: "你是调研协调者。收到调研主题后，委派两个研究员从不同角度调研，最后汇总形成报告...",
+        tools: [],
+        maxIterations: 8,
+        priority: 10,
+        canDelegate: true,
+        canBroadcast: true,
+      },
+      {
+        name: "technical_researcher",
+        displayName: "技术研究员",
+        systemPrompt: "你是技术研究员。从技术实现角度调研主题...",
+        tools: ["web_search", "web_fetch", "http_request"],
+        maxIterations: 8,
+        priority: 8,
+        canDelegate: false,
+        canBroadcast: false,
+      },
+      {
+        name: "business_researcher",
+        displayName: "商业研究员",
+        systemPrompt: "你是商业研究员。从商业价值和市场角度调研主题...",
+        tools: ["web_search", "web_fetch"],
+        maxIterations: 8,
+        priority: 8,
+        canDelegate: false,
+        canBroadcast: false,
+      },
+    ],
+    maxTotalIterations: 40,
+    stopCondition: "orchestrator_decides",
+    timeout: 600,
+  },
+}
+```
+
+---
+
+## 14. 与现有系统集成
+
+### 14.1 AgentService 集成（P1-3）
+
+每个 Agent 角色通过 AgentService.run() 运行。关键集成点：
+
+- **System Prompt 注入**：角色的 systemPrompt + Blackboard 上下文 + 消息历史 = 完整的系统提示
+- **工具白名单**：角色的 tools 白名单直接传给 AgentService.run() 的 tools 参数
+- **审批处理**：Agent 执行过程中的 `agent_ask_user` 事件通过回调冒泡到团队层
+- **事件转换**：AgentStreamEvent → TeamStreamEvent（添加 agentName 字段）
+
+### 14.2 ToolRegistry 集成（V4 + P1-6）
+
+- 每个角色的 tools 白名单在创建时验证（工具名是否在 ToolRegistry 中已注册）
+- 工具执行指标仍由 ToolRegistry 的 Prometheus 计数器跟踪
+
+### 14.3 Workflow 集成（V6）
+
+Workflow 中的 `agent` 步骤类型可以配置为使用团队而非单个 Agent：
+
+```typescript
+// V6 workflow step 扩展
+{
+  id: "code_review_step",
+  type: "agent",
+  agent_type: "team",        // 新增：team 模式
+  team_id: "team_001",       // 预创建的团队 ID
+  task: "审查代码变更",
+  output_as: "review_result",
+}
+```
+
+### 14.4 审批集成（P1-5）
+
+- 当 Agent 在执行中调用高风险工具时，审批事件冒泡到团队层
+- 团队层可以选择：自动批准（白名单）、转交 Orchestrator 决策、暂停等待用户输入
+
+---
+
+## 15. 指标监控
+
+新增 Prometheus 指标：
+
+| 指标名 | 类型 | 标签 | 说明 |
+|--------|------|------|------|
+| `team_runs_total` | Counter | `mode, status` | 团队运行总数 |
+| `team_rounds_total` | Counter | `mode` | 团队总轮数 |
+| `team_messages_total` | Counter | `type` | 消息类型计数 |
+| `team_agent_duration_ms` | Histogram | `role` | 每个角色的执行时长 |
+| `team_blackboard_writes_total` | Counter | `key` | Blackboard 写入计数 |
+
+```typescript
+// 在 metrics.ts 中注册
+export const teamRunsTotal = new Counter({
+  name: "team_runs_total",
+  help: "Total number of team runs",
+  labelNames: ["mode", "status"],
+});
+
+export const teamAgentDurationMs = new Histogram({
+  name: "team_agent_duration_ms",
+  help: "Duration of individual agent execution within a team run",
+  labelNames: ["role"],
+  buckets: [1000, 5000, 15000, 30000, 60000, 120000],
+});
+```
+
+---
+
+## 16. 验收标准
+
+- [x] 消息总线 MessageBus 实现完成（send/subscribe/waitFor/persist）
+- [x] Blackboard 共享上下文实现完成（write/read/snapshot/history/context注入）
+- [x] 5 种默认角色实现完成（Planner/Executor/Reviewer/Researcher/Orchestrator，每个含完整 SystemPrompt）
+- [x] 3 种协作模式实现完成：
+  - [x] Orchestrator 模式：串行委派 + 回合管理 + 汇总输出
+  - [x] Peer-to-Peer 模式：事件驱动 + 自由对话 + 自然终止
+  - [x] Debate 模式：并行辩论 + 裁判裁决
+- [x] Team DSL Zod Schema 定义完成（递归校验 + 角色 + 模式）
+- [x] Team Executor 执行引擎完成（按模式分发 + Agent 实例化 + 回合循环）
+- [x] 数据模型：Prisma Schema（agent_teams + agent_team_runs）+ 迁移
+- [x] Team CRUD API 完成（create/list/get/update/delete/validate）
+- [x] Team Run API 完成（run SSE / history / cancel / pause / resume）
+- [x] SSE 事件类型扩展（12 种 team_ 事件 + agent_message + blackboard_update）
+- [x] 4 个内置团队模板：code-review-team, research-synthesis, debate-analyzer, pair-programming
+- [x] 与 AgentService（P1-3）/ ToolRegistry（V4）/ ApprovalGate（P1-5）集成验证
+- [ ] 与 Workflow V6 集成（agent 步骤类型支持 team 模式）
+- [x] Prometheus 指标（team_runs_total, team_agent_duration_ms 等 5 项）
+- [ ] 前端：团队列表页 + 团队编辑器（JSON + 表单双模式）
+- [ ] 前端：团队运行监控面板（Agent 卡片 + Blackboard 面板 + 消息总线日志）
+- [ ] 端到端验证：调研综合团队执行通过（"调研 RAG vs Agent 技术选型"）
 
 
 # 二十、V10 MCP Ecosystem Model Context Protocol
