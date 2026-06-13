@@ -67,17 +67,24 @@ const ROUTER_SYSTEM_PROMPT = `你是一个客服查询分类器。你的唯一�
 - 问题超出能力范围但用户坚持
 - 用户情绪激动、不满意AI回复
 
-## 分类规则
+## 分类规则（按优先级）
 1. 优先判断是否 SAFETY —— 安全是第一优先级
-2. 如果用户明确要求转人工 → HUMAN
-3. 如果需要查询数据库/调用系统 → TOOL
-4. 如果是问候、感谢、自我介绍等 → SMALL_TALK
-5. 涉及业务政策、流程、规则 → BUSINESS
-6. 不确定时优先选 BUSINESS（安全兜底，走RAG不会编造）
+2. 明确要求"转人工"、"找真人"、"我要投诉"、"叫经理" → HUMAN（不是 SMALL_TALK！）
+3. 涉及订单查询、物流追踪、需要调数据 → TOOL
+4. 涉及退货、退款、换货、会员、支付、发票等业务政策 → BUSINESS（不是 SMALL_TALK！）
+5. 仅问候、感谢、道别、身份询问、能力询问 → SMALL_TALK
+6. 不确定时选 BUSINESS（安全兜底，走RAG不会编造）
+
+## 常见误分类提醒
+- "退货怎么操作" → BUSINESS（不要误判为 SMALL_TALK）
+- "我要投诉" → HUMAN（不要误判为 SMALL_TALK）
+- "查一下我的订单" → TOOL（不要误判为 BUSINESS）
+- "转人工" → HUMAN
+- "在吗" → SMALL_TALK
 
 ## 输出格式
 严格按照以下 JSON 格式输出，不要任何前言后记：
-{"route": "SMALL_TALK", "confidence": 0.95, "reasoning": "用户在进行身份询问", "suggested_tools": [], "escalation_reason": ""}`;
+{"route": "BUSINESS", "confidence": 0.9, "reasoning": "用户询问退货流程", "suggested_tools": [], "escalation_reason": ""}`;
 
 // ── IntentDetector → RouteName 映射（fallback 用） ──
 
@@ -90,7 +97,9 @@ const INTENT_TO_ROUTE: Record<string, RouteName> = {
   其他咨询: "BUSINESS", // 默认走 BUSINESS（RAG 兜底）
 };
 
-// ── 安全关键词快速通道（零延迟，不走 LLM） ──
+// ── 关键词快速路由（零延迟，不走 LLM） ──
+// 处理高置信度模式：SAFETY 扫描 + HUMAN/TOOL/BUSINESS 快速路由
+// 这些规则弥补 LLM Router 的分类不稳定问题
 
 const SAFETY_KEYWORDS = [
   /忽略.*(指令|规则|限制|之前)/i,
@@ -100,12 +109,82 @@ const SAFETY_KEYWORDS = [
   /pretend.*(you\s*are|to\s*be)/i,
 ];
 
+const HUMAN_KEYWORDS = [
+  /转人工/,
+  /找(人工|真人|客服|你们经理|你们领导)/,
+  /(打|联系|给.*)(客服)?电话/,
+  /我要投诉/,
+  /投诉.*(你们|客服|服务)/,
+  /叫.*(经理|领导|负责人)/,
+];
+
+const BUSINESS_KEYWORDS = [
+  /退货/,
+  /退款/,
+  /换货/,
+  /退换/,
+  /运费险/,
+  /会员.*(权益|等级|积分)/,
+  /优惠券/,
+  /发票/,
+];
+
+const TOOL_KEYWORDS = [
+  /(查|我的|帮我查).*订单/,
+  /订单.*(在哪|到哪|状态|进度)/,
+  /快递.*(到哪|状态|单号)/,
+  /物流.*(到哪|查询)/,
+  /(我的|查).*余额/,
+];
+
+interface QuickRouteResult {
+  route: RouteName;
+  confidence: number;
+  reasoning: string;
+}
+
 /**
- * 在调 Router LLM 之前，先用正则快速扫描是否明显是安全违规
- * 命中 → 直接返回 SAFETY，零延迟阻止
+ * 在调 Router LLM 之前，先用正则快速扫描高置信度模式
+ * 返回 null 表示需要走 LLM Router
  */
-function quickSafetyScan(message: string): boolean {
-  return SAFETY_KEYWORDS.some((p) => p.test(message));
+function quickRouteScan(message: string): QuickRouteResult | null {
+  // SAFETY 优先
+  if (SAFETY_KEYWORDS.some((p) => p.test(message))) {
+    return {
+      route: "SAFETY",
+      confidence: 1.0,
+      reasoning: "正则快速扫描命中安全关键词",
+    };
+  }
+
+  // HUMAN：明确要求转人工
+  if (HUMAN_KEYWORDS.some((p) => p.test(message))) {
+    return {
+      route: "HUMAN",
+      confidence: 0.9,
+      reasoning: "正则扫描命中人工转接关键词",
+    };
+  }
+
+  // TOOL：明确涉及订单/物流查询
+  if (TOOL_KEYWORDS.some((p) => p.test(message))) {
+    return {
+      route: "TOOL",
+      confidence: 0.85,
+      reasoning: "正则扫描命中工具操作关键词",
+    };
+  }
+
+  // BUSINESS：明确涉及业务政策
+  if (BUSINESS_KEYWORDS.some((p) => p.test(message))) {
+    return {
+      route: "BUSINESS",
+      confidence: 0.85,
+      reasoning: "正则扫描命中业务政策关键词",
+    };
+  }
+
+  return null; // 需要 LLM Router
 }
 
 // ═══════════════════════════════════════════════════════
@@ -123,7 +202,7 @@ export class QueryRouter {
    * 对用户消息进行分类，返回路由决策。
    *
    * 流程：
-   * 1. 正则快速扫描安全关键词 → SAFETY（零延迟）
+   * 1. 关键词快速路由（SAFETY/HUMAN/TOOL/BUSINESS 高置信度模式）→ 零延迟
    * 2. LLM 调用（廉价模型 + jsonMode）→ 结构化分类
    * 3. 失败/低置信度 → 回退 regex IntentDetector → BUSINESS
    */
@@ -131,13 +210,10 @@ export class QueryRouter {
     message: string,
     history: ChatMessage[],
   ): Promise<RouterDecision> {
-    // ── 快速安全扫描 ──
-    if (quickSafetyScan(message)) {
-      return {
-        route: "SAFETY",
-        confidence: 1.0,
-        reasoning: "正则快速扫描命中安全关键词",
-      };
+    // ── 快速路由扫描（高置信度模式） ──
+    const quickResult = quickRouteScan(message);
+    if (quickResult) {
+      return quickResult;
     }
 
     const [providerName, model] = resolveModel(this.modelId);
