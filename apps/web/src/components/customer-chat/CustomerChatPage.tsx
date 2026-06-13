@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useCustomerChatStream } from "@/hooks/useCustomerChatStream";
 import type { CSMessage } from "@/hooks/useCustomerChatStream";
+import { RichMessageRenderer } from "@/components/markdown/RichMessageRenderer";
 import { FAQSidebar } from "./FAQSidebar";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { QuickReplies } from "./QuickReplies";
@@ -135,12 +136,15 @@ export function CustomerChatPage() {
                         }`}
                       >
                         {msg.id === "__stream__" && isStreaming ? (
-                          <span>
-                            {msg.content}
-                            <span className="inline-block w-1.5 h-4 ml-0.5 bg-current animate-pulse rounded-sm" />
-                          </span>
+                          <div>
+                            <RichMessageRenderer
+                              content={msg.content}
+                              isStreaming
+                            />
+                            <span className="inline-block w-1.5 h-4 ml-0.5 bg-current animate-pulse rounded-sm align-middle" />
+                          </div>
                         ) : (
-                          msg.content
+                          <RichMessageRenderer content={msg.content} />
                         )}
                       </div>
 

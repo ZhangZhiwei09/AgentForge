@@ -10,32 +10,17 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { QuickReplies } from "./QuickReplies";
+import { RichMessageRenderer } from "@/components/markdown/RichMessageRenderer";
+import { extractCardBlocks } from "@/components/markdown/card-parser";
+import type {
+  KnowledgeResult,
+  ToolCallRecord,
+  CSMessage,
+  ContentBlock,
+} from "@agentforge/shared-types";
 
-// 知识库检索结果（后端返回）
-interface KnowledgeResult {
-  content: string; // chunk 文本（截断 300 字符）
-  score: number; // Milvus 相似度分数（0.0~1.0）
-  docTitle: string; // 所属文档标题
-}
-
-interface ToolCallRecord {
-  id: string;
-  name: string;
-  arguments: string;
-  result?: string;
-  status: "pending" | "done";
-}
-
-interface ChatMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: number;
-  // 关联的知识库检索结果（仅 assistant 消息有）
-  knowledge?: KnowledgeResult[];
-  // 关联的工具调用记录
-  toolCalls?: ToolCallRecord[];
-}
+// 使用共享类型，本地别名保持代码兼容
+type ChatMessage = CSMessage;
 
 export function CustomerChat() {
   const [isOpen, setIsOpen] = useState(false);
@@ -155,6 +140,7 @@ export function CustomerChat() {
       let streamContent = "";
       let knowledgeResults: KnowledgeResult[] | undefined;
       const toolCalls: ToolCallRecord[] = [];
+      const contentBlocks: ContentBlock[] = [];
 
       while (true) {
         const { done, value } = await reader.read();
@@ -254,6 +240,12 @@ export function CustomerChat() {
               continue;
             }
 
+            // content_block 事件：ToolAgent 产出的结构化卡片
+            if (chunk.type === "content_block" && chunk.block) {
+              contentBlocks.push(chunk.block as ContentBlock);
+              continue;
+            }
+
             if (chunk.type === "token" && chunk.content) {
               streamContent += chunk.content;
               setMessages((prev) => {
@@ -277,10 +269,18 @@ export function CustomerChat() {
                 ];
               });
             } else if (chunk.type === "done") {
-              // 服务端已完成校验，streamContent 已是干净的回答文本
               if (chunk.suggestions && Array.isArray(chunk.suggestions)) {
                 setSuggestions(chunk.suggestions);
               }
+
+              // ── 解析 markdown 中的卡片围栏 ──
+              const { blocks: parsedBlocks } =
+                extractCardBlocks(streamContent);
+              const allBlocks = dedupeBlocks([
+                ...contentBlocks,
+                ...parsedBlocks.map((b) => b.block),
+              ]);
+
               if (chunk.message_id) {
                 setMessages((prev) => {
                   const last = prev[prev.length - 1];
@@ -292,6 +292,8 @@ export function CustomerChat() {
                         id: chunk.message_id as string,
                         content: streamContent,
                         knowledge: knowledgeResults,
+                        contentBlocks:
+                          allBlocks.length > 0 ? allBlocks : undefined,
                         toolCalls: [...toolCalls],
                       },
                     ];
@@ -401,7 +403,17 @@ export function CustomerChat() {
                         : "bg-white border border-[hsl(var(--border))] text-[hsl(var(--foreground))] rounded-bl-md"
                     }`}
                   >
-                    {msg.content}
+                    {msg.id === "__stream__" ? (
+                      <div>
+                        <RichMessageRenderer
+                          content={msg.content}
+                          isStreaming
+                        />
+                        <span className="inline-block w-1.5 h-4 ml-0.5 bg-current animate-pulse rounded-sm align-middle" />
+                      </div>
+                    ) : (
+                      <RichMessageRenderer content={msg.content} />
+                    )}
                   </div>
                 </div>
 
@@ -540,4 +552,21 @@ export function CustomerChat() {
       )}
     </>
   );
+}
+
+/** 去重 ContentBlock：避免 SSE content_block 和 Markdown fence 双重渲染 */
+function dedupeBlocks(blocks: ContentBlock[]): ContentBlock[] {
+  const seen = new Set<string>();
+  return blocks.filter((b) => {
+    let key = b.type;
+    if ("data" in b && b.data) {
+      const d = b.data as unknown as Record<string, unknown>;
+      if (d.orderId) key += ":" + d.orderId;
+      else if (d.title) key += ":" + d.title;
+      else key += ":" + JSON.stringify(d);
+    }
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }

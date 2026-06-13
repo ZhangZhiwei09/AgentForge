@@ -189,3 +189,27 @@ export type {
   VideoSessionResponse,
   VideoSessionSummary,
 } from "./video";
+export type {
+  ContentBlock,
+  ContentBlockType,
+  TextBlock,
+  OrderCardBlock,
+  OrderCardData,
+  PolicyCardBlock,
+  PolicyCardData,
+  ActionCardBlock,
+  ActionCardData,
+  StatusCardBlock,
+  StatusCardData,
+  TableBlock,
+  TableBlockData,
+  ContentBlockChunk,
+  CardFenceType,
+  ParsedCardFence,
+} from "./content-block";
+export type {
+  KnowledgeResult,
+  ToolCallRecord,
+  CSMessage,
+  CSStreamMeta,
+} from "./customer-chat";

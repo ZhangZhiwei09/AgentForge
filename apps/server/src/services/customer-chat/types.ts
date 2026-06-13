@@ -2,6 +2,7 @@
 // RouteAgent 接口 + RouteContext + SSE 事件协议
 
 import type { ChatMessage } from "../../providers/types.js";
+import type { ContentBlock } from "@agentforge/shared-types";
 
 // ── 路由分类 ──
 
@@ -73,6 +74,11 @@ export type RouteStreamEvent =
       fallback_used?: boolean;
       route?: RouteName;
       conversational?: boolean;
+    }
+  | {
+      type: "content_block";
+      block: ContentBlock;
+      message_id: string;
     }
   | {
       type: "error";
