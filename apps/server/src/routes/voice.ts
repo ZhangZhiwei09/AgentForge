@@ -162,7 +162,8 @@ voiceRoutes.get("/api/voice/stream", async (c) => {
     );
   });
 
-  // Perform the upgrade manually using the raw socket
+  // Perform the upgrade manually using the raw socket.
+  // CRITICAL: Prevent Hono's adapter from double-writing (see customer-video.ts).
   const socket = (
     req as IncomingMessage & {
       socket: { on: Function; removeListener?: Function };
@@ -170,10 +171,19 @@ voiceRoutes.get("/api/voice/stream", async (c) => {
   ).socket;
   const head = Buffer.alloc(0);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const res = env?.res as any;
+
   wss.handleUpgrade(req, socket, head, (ws: WebSocket) => {
     wss.emit("connection", ws, req);
   });
 
-  // Return empty response — the socket has been upgraded
+  if (res) {
+    res.writeHead = () => res;
+    res.write = () => true;
+    res.end = () => res;
+    res.setHeader = () => res;
+  }
+
   return new Response(null, { status: 101 });
 });

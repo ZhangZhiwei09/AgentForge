@@ -16,7 +16,7 @@ function AppShell({ children }: { children: React.ReactNode }) {
   const isLoginPage = location.pathname === "/login";
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden">
+    <div className="flex flex-col overflow-hidden" style={{ height: "100dvh", width: "100dvw" }}>
       {!isLoginPage && <TopNav />}
       {children}
     </div>

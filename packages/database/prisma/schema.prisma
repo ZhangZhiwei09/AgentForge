@@ -76,6 +76,7 @@ model Conversation {
   ratings        SatisfactionRating[]
   approvals      AgentApproval[]
   voiceSessions  VoiceSession[]
+  videoSessions  VideoSession[]
 
   @@index([sessionId], map: "ix_conversations_session_id")
   @@index([userId], map: "ix_conversations_user_id")
@@ -253,6 +254,26 @@ model VoiceSession {
 
   @@index([conversationId], map: "ix_voice_sessions_conversation_id")
   @@map("voice_sessions")
+}
+
+model VideoSession {
+  id                String       @id @db.VarChar(36)
+  conversationId    String       @map("conversation_id") @db.VarChar(36)
+  status            String       @default("active") @db.VarChar(20)
+  videoDurationSec  Int          @default(0) @map("video_duration_sec")
+  audioDurationSec  Int          @default(0) @map("audio_duration_sec")
+  asrTokenCount     Int          @default(0) @map("asr_token_count")
+  ttsCharCount      Int          @default(0) @map("tts_char_count")
+  visionFramesCount Int          @default(0) @map("vision_frames_count")
+  transcript        Json         @default("[]")
+  agentConfig       Json?        @map("agent_config")
+  endedAt           DateTime?    @map("ended_at") @db.Timestamptz(6)
+  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId], map: "ix_video_sessions_conversation_id")
+  @@map("video_sessions")
 }
 
 model Workflow {

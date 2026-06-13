@@ -7,6 +7,7 @@ import {
   ChevronUp,
   PanelRightClose,
   PanelRightOpen,
+  Video,
 } from "lucide-react";
 import { useCustomerChatStream } from "@/hooks/useCustomerChatStream";
 import type { CSMessage } from "@/hooks/useCustomerChatStream";
@@ -16,6 +17,7 @@ import { QuickReplies } from "./QuickReplies";
 import { SatisfactionRating } from "./SatisfactionRating";
 import { ChatSessionInfo } from "./ChatSessionInfo";
 import { CustomerServiceDashboard } from "./CustomerServiceDashboard";
+import { CustomerVideoCall } from "./CustomerVideoCall";
 
 export function CustomerChatPage() {
   const {
@@ -30,6 +32,7 @@ export function CustomerChatPage() {
   const [input, setInput] = useState("");
   const [showRightPanel, setShowRightPanel] = useState(true);
   const [showDashboard, setShowDashboard] = useState(false);
+  const [showVideoCall, setShowVideoCall] = useState(false);
   const [expandedKnowledge, setExpandedKnowledge] = useState<Set<string>>(
     new Set(),
   );
@@ -92,10 +95,12 @@ export function CustomerChatPage() {
   return (
     <div
       className="flex flex-1 overflow-hidden"
-      style={{ height: "calc(100vh - 48px)" }}
+      style={{ height: "calc(100dvh - 48px)" }}
     >
-      {/* 左侧 FAQ 边栏 */}
-      <FAQSidebar onSelectQuestion={handleFAQSelect} />
+      {/* 左侧 FAQ 边栏 — 移动端隐藏 */}
+      <div className="hidden md:block">
+        <FAQSidebar onSelectQuestion={handleFAQSelect} />
+      </div>
 
       {/* 中间聊天区域 */}
       <main className="flex flex-1 flex-col bg-[hsl(var(--cs-bg))]">
@@ -104,7 +109,7 @@ export function CustomerChatPage() {
           {!hasRealMessages ? (
             <WelcomeScreen onSend={handleFAQSelect} />
           ) : (
-            <div className="mx-auto max-w-2xl space-y-4 px-6 py-6">
+            <div className="mx-auto max-w-2xl space-y-4 px-3 sm:px-6 py-4 sm:py-6">
               {messages
                 .filter((m) => m.id !== "welcome")
                 .map((msg) => (
@@ -279,9 +284,9 @@ export function CustomerChatPage() {
         </div>
 
         {/* 输入区域 */}
-        <div className="border-t border-[hsl(var(--cs-border))] bg-white px-6 py-4">
+        <div className="border-t border-[hsl(var(--cs-border))] bg-white px-3 sm:px-6 py-3 sm:py-4">
           <div className="mx-auto max-w-2xl">
-            <div className="flex items-center gap-3 rounded-xl border border-[hsl(var(--cs-border))] bg-[hsl(var(--cs-bg))] px-4 py-2.5 focus-within:ring-2 focus-within:ring-[hsl(var(--cs-primary))]/20 focus-within:border-[hsl(var(--cs-primary))] transition-all shadow-sm">
+            <div className="flex items-center gap-2 sm:gap-3 rounded-xl border border-[hsl(var(--cs-border))] bg-[hsl(var(--cs-bg))] px-3 sm:px-4 py-2 sm:py-2.5 focus-within:ring-2 focus-within:ring-[hsl(var(--cs-primary))]/20 focus-within:border-[hsl(var(--cs-primary))] transition-all shadow-sm">
               <input
                 ref={inputRef}
                 type="text"
@@ -292,6 +297,15 @@ export function CustomerChatPage() {
                 placeholder="输入您的问题，Enter 发送..."
                 className="flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-gray-400 disabled:opacity-50"
               />
+              <button
+                onClick={() => setShowVideoCall(true)}
+                disabled={isStreaming}
+                className="flex-shrink-0 rounded-lg border border-[hsl(var(--cs-border))] bg-white p-2 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--cs-primary))] hover:border-[hsl(var(--cs-primary))] transition-all disabled:opacity-30"
+                aria-label="开始视频通话"
+                title="视频客服"
+              >
+                <Video className="h-4 w-4" />
+              </button>
               <button
                 onClick={handleSend}
                 disabled={!input.trim() || isStreaming}
@@ -309,8 +323,15 @@ export function CustomerChatPage() {
         </div>
       </main>
 
-      {/* 右侧会话信息面板 */}
-      {showRightPanel && (
+      {/* 右侧面板：视频通话 或 会话信息 */}
+      {showVideoCall ? (
+        <div className="fixed inset-0 z-50 bg-gray-900 md:relative md:inset-auto md:w-[360px] md:border-l md:border-gray-700">
+          <CustomerVideoCall
+            sessionId={sessionId}
+            onClose={() => setShowVideoCall(false)}
+          />
+        </div>
+      ) : showRightPanel ? (
         <div className="w-56 border-l border-[hsl(var(--cs-border))] bg-white">
           <div className="flex items-center justify-between border-b border-[hsl(var(--cs-border))] px-3 py-2">
             <span className="text-xs font-medium text-[hsl(var(--muted-foreground))]">
@@ -330,10 +351,10 @@ export function CustomerChatPage() {
             onDashboard={() => setShowDashboard(true)}
           />
         </div>
-      )}
+      ) : null}
 
       {/* 展开右侧面板按钮 */}
-      {!showRightPanel && (
+      {!showRightPanel && !showVideoCall && (
         <button
           onClick={() => setShowRightPanel(true)}
           className="absolute right-4 top-16 rounded-lg border border-[hsl(var(--cs-border))] bg-white p-1.5 shadow-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"

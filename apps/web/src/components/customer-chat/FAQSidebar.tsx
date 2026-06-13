@@ -34,30 +34,32 @@ export function FAQSidebar({ onSelectQuestion }: FAQSidebarProps) {
   const [docContent, setDocContent] = useState<string | null>(null);
   const [docLoading, setDocLoading] = useState(false);
 
-  // 加载 FAQ 分类
+  // 加载 FAQ 分类和文档（使用公开的 customer-chat 接口）
   useEffect(() => {
     async function loadFAQs() {
       try {
-        const res = await fetch("/api/knowledge/bases");
-        if (!res.ok) throw new Error("Failed to fetch knowledge bases");
-        const bases = await res.json();
+        // Fetch categories and documents in parallel
+        const [catRes, docsRes] = await Promise.all([
+          fetch("/api/customer-chat/faq/categories"),
+          fetch("/api/customer-chat/faq"),
+        ]);
 
-        const cats: FAQCategory[] = [];
-        for (const base of bases) {
-          const docsRes = await fetch(
-            `/api/knowledge/bases/${base.id}/documents`,
-          );
-          if (!docsRes.ok) continue;
-          const docs: FAQDocument[] = await docsRes.json();
-          const completedDocs = docs.filter((d) => d.status === "completed");
-          if (completedDocs.length > 0) {
-            cats.push({
-              name: base.name || "常见问题",
-              documents: completedDocs,
-              count: completedDocs.length,
-            });
-          }
-        }
+        if (!catRes.ok || !docsRes.ok) throw new Error("Failed to fetch FAQs");
+
+        const { categories: catList } = await catRes.json();
+        const { documents: docList } = await docsRes.json();
+
+        const completedDocs = (docList as FAQDocument[]).filter(
+          (d) => d.status === "completed",
+        );
+
+        const cats: FAQCategory[] = catList
+          .filter((cat: FAQCategory) => cat.count > 0)
+          .map((cat: FAQCategory) => ({
+            ...cat,
+            documents: completedDocs, // All docs available for each category
+          }));
+
         setCategories(cats);
       } catch (err) {
         console.error("Failed to load FAQs:", err);
@@ -73,11 +75,10 @@ export function FAQSidebar({ onSelectQuestion }: FAQSidebarProps) {
     setDocLoading(true);
     setDocContent(null);
     try {
-      const res = await fetch(`/api/knowledge/documents/${docId}`);
+      const res = await fetch(`/api/customer-chat/faq/${docId}`);
       if (res.ok) {
         const doc = await res.json();
-        // 截取前 500 字符作为预览
-        setDocContent(doc.content?.slice(0, 500) || "");
+        setDocContent(doc.content || "");
       }
     } catch {
       setDocContent("加载失败");

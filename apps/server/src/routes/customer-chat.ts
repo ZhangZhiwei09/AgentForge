@@ -390,6 +390,41 @@ customerChatRoutes.get("/api/customer-chat/faq/categories", async (c) => {
   return c.json({ categories });
 });
 
+// GET /api/customer-chat/faq/:docId —— 获取 FAQ 文档内容（公开）
+customerChatRoutes.get("/api/customer-chat/faq/:docId", async (c) => {
+  const docId = c.req.param("docId");
+  if (!docId) {
+    return c.json({ detail: "缺少文档 ID" }, 400);
+  }
+
+  try {
+    const doc = await prisma.knowledgeDocument.findUnique({
+      where: { id: docId },
+      include: {
+        chunks: {
+          orderBy: { chunkIndex: "asc" },
+          take: 1, // Just get the first chunk for preview
+        },
+      },
+    });
+
+    if (!doc) {
+      return c.json({ detail: "文档不存在" }, 404);
+    }
+
+    return c.json({
+      id: doc.id,
+      title: doc.title,
+      content: doc.chunks[0]?.content?.slice(0, 500) || "",
+      chunkCount: doc.chunkCount,
+      status: doc.status,
+    });
+  } catch (err) {
+    logger.error({ docId, error: (err as Error)?.message }, "FAQ detail fetch error");
+    return c.json({ detail: "获取文档失败" }, 500);
+  }
+});
+
 // ════════════════════════════════════════════════════════════════
 // 客服数据概览（基础分析）
 // ════════════════════════════════════════════════════════════════

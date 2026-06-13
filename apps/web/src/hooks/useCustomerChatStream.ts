@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback } from "react";
+import { generateUUID } from "@/lib/uuid";
 
 export interface KnowledgeResult {
   content: string;
@@ -46,7 +47,7 @@ export function useCustomerChatStream() {
   const [currentMeta, setCurrentMeta] = useState<StreamMeta | null>(null);
   const [sessionId, setSessionId] = useState<string>(() => {
     return (
-      localStorage.getItem("customer_chat_session_id") || crypto.randomUUID()
+      localStorage.getItem("customer_chat_session_id") || generateUUID()
     );
   });
   const abortRef = useRef<AbortController | null>(null);
@@ -90,7 +91,7 @@ export function useCustomerChatStream() {
   }, [sessionId]);
 
   const clearSession = useCallback(() => {
-    const newId = crypto.randomUUID();
+    const newId = generateUUID();
     setSessionId(newId);
     localStorage.setItem("customer_chat_session_id", newId);
     setMessages([

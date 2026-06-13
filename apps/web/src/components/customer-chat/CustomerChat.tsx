@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from "react";
+import { generateUUID } from "@/lib/uuid";
 import {
   MessageCircle,
   X,
@@ -55,7 +56,7 @@ export function CustomerChat() {
   );
   const [sessionId, setSessionId] = useState<string>(() => {
     return (
-      localStorage.getItem("customer_chat_session_id") || crypto.randomUUID()
+      localStorage.getItem("customer_chat_session_id") || generateUUID()
     );
   });
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -63,7 +64,7 @@ export function CustomerChat() {
   const abortRef = useRef<AbortController | null>(null);
 
   function clearSession() {
-    const newId = crypto.randomUUID();
+    const newId = generateUUID();
     setSessionId(newId);
     localStorage.setItem("customer_chat_session_id", newId);
     setMessages([
