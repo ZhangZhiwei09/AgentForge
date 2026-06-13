@@ -13,6 +13,7 @@ import { databaseTools } from "./database-tools.js";
 import { networkTools } from "./network-tools.js";
 import { sandboxTools } from "./sandbox-tools.js";
 import { customerServiceTools } from "./customer-service-tools.js";
+import { appGenTools } from "./app-gen-tools.js";
 import { logger } from "@agentforge/logger";
 import {
   toolCallsTotal,
@@ -40,6 +41,7 @@ class ToolRegistry {
       ...networkTools,
       ...sandboxTools,
       ...customerServiceTools,
+      ...appGenTools,
     ];
     for (const tool of allTools) {
       this.register(tool);

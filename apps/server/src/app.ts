@@ -22,6 +22,7 @@ import { voiceRoutes } from "./routes/voice.js";
 import { videoRoutes } from "./routes/video.js";
 import { workflowRoutes } from "./routes/workflows.js";
 import { teamRoutes } from "./routes/teams.js";
+import { appProjectRoutes } from "./routes/app-project.js";
 import { registerMetricsEndpoint } from "./observability/metrics.js";
 import type { AuthUser } from "@agentforge/shared-types";
 
@@ -73,6 +74,7 @@ export async function createApp() {
   app.route("/", videoRoutes); // /api/video/*, WS /api/video/stream
   app.route("/", workflowRoutes); // /api/workflows/*, /api/workflows/runs/*
   app.route("/", teamRoutes); // /api/teams/*, /api/teams/runs/*
+  app.route("/", appProjectRoutes); // /api/projects/* (WeaveFox V12)
 
   // P1-1 Bull Board 监控面板 — 仅在 Redis 可用时挂载
   try {

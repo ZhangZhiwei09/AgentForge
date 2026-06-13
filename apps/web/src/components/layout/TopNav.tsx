@@ -1,5 +1,5 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { MessageCircle, Bot, LogOut, User, BarChart3 } from "lucide-react";
+import { MessageCircle, Bot, LogOut, User, BarChart3, Wand2 } from "lucide-react";
 
 export function TopNav() {
   const token = localStorage.getItem("accessToken");
@@ -47,6 +47,20 @@ export function TopNav() {
             <Bot className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             <span className="hidden sm:inline">AI 助手</span>
             <span className="sm:hidden">AI</span>
+          </NavLink>
+          <NavLink
+            to="/projects/new"
+            className={({ isActive }) =>
+              `flex items-center gap-1 sm:gap-1.5 rounded-md px-2 sm:px-3 py-1.5 text-xs sm:text-sm font-medium transition-colors ${
+                isActive
+                  ? "bg-[hsl(var(--cs-primary))] text-white"
+                  : "text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] hover:bg-[hsl(var(--muted))]"
+              }`
+            }
+          >
+            <Wand2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">应用创作</span>
+            <span className="sm:hidden">创作</span>
           </NavLink>
           <NavLink
             to="/admin/cs"

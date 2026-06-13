@@ -4,6 +4,8 @@ import { TopNav } from "./components/layout/TopNav";
 import { LoginPage } from "./components/auth/LoginPage";
 import { CustomerChatPage } from "./components/customer-chat/CustomerChatPage";
 import { CSAdminPage } from "./components/admin/CSAdminPage";
+import { AppGenLayout } from "./components/app-gen/AppGenLayout";
+import { NewProjectPage } from "./components/app-gen/NewProjectPage";
 
 function AuthGuard({ children }: { children: React.ReactNode }) {
   const token = localStorage.getItem("accessToken");
@@ -33,6 +35,30 @@ export default function App() {
           element={
             <AuthGuard>
               <ChatLayout />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/projects/new"
+          element={
+            <AuthGuard>
+              <NewProjectPage />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/projects/:id"
+          element={
+            <AuthGuard>
+              <AppGenLayout />
+            </AuthGuard>
+          }
+        />
+        <Route
+          path="/projects"
+          element={
+            <AuthGuard>
+              <AppGenLayout />
             </AuthGuard>
           }
         />
