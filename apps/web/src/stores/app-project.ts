@@ -1,7 +1,18 @@
 import { create } from "zustand";
-import type { AppProjectDTO, ProjectFileDTO, AppGenRunDTO, AppFilePlan } from "@agentforge/shared-types";
+import type {
+  AppProjectDTO,
+  ProjectFileDTO,
+  AppGenRunDTO,
+  AppFilePlan,
+} from "@agentforge/shared-types";
 
-export type AppGenStatus = "idle" | "planning" | "generating" | "reviewing" | "done" | "error";
+export type AppGenStatus =
+  | "idle"
+  | "planning"
+  | "generating"
+  | "reviewing"
+  | "done"
+  | "error";
 
 interface AppProjectState {
   // Project list
@@ -91,7 +102,8 @@ export const useAppProjectStore = create<AppProjectState>((set, get) => ({
     set((s) => ({
       files: [...s.files.filter((f) => f.path !== file.path), file],
       activeFilePath: s.activeFilePath || file.path,
-      activeFileContent: s.activeFilePath === file.path ? file.content : s.activeFileContent,
+      activeFileContent:
+        s.activeFilePath === file.path ? file.content : s.activeFileContent,
     })),
   setActiveFile: (path) => {
     if (!path) {
@@ -111,7 +123,8 @@ export const useAppProjectStore = create<AppProjectState>((set, get) => ({
   setGenPlan: (plan) => set({ genPlan: plan }),
   addGenError: (error) => set((s) => ({ genErrors: [...s.genErrors, error] })),
   clearGenErrors: () => set({ genErrors: [] }),
-  addGenTokens: (tokens) => set((s) => ({ genTokensUsed: s.genTokensUsed + tokens })),
+  addGenTokens: (tokens) =>
+    set((s) => ({ genTokensUsed: s.genTokensUsed + tokens })),
   toggleFileTree: () => set((s) => ({ showFileTree: !s.showFileTree })),
   togglePreview: () => set((s) => ({ showPreview: !s.showPreview })),
   setEditMode: (v) => set({ editMode: v }),

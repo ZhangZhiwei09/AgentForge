@@ -54,9 +54,7 @@ function renderInterleaved(
 
   // 渲染文本（如果还有内容）
   if (cleanMarkdown) {
-    elements.push(
-      <MarkdownRenderer key="text-main" content={cleanMarkdown} />,
-    );
+    elements.push(<MarkdownRenderer key="text-main" content={cleanMarkdown} />);
   }
 
   // 渲染每个卡片

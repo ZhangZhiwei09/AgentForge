@@ -46,7 +46,7 @@ export interface CitationReport {
 // ── 配置常量 ──
 
 /** embedding 余弦相似度阈值：低于此值视为弱引证 */
-const EMBEDDING_CITATION_THRESHOLD = 0.70;
+const EMBEDDING_CITATION_THRESHOLD = 0.7;
 
 /** 弱引证阈值：低于此值视为完全无引证 */
 const EMBEDDING_UNCITED_THRESHOLD = 0.55;
@@ -126,7 +126,8 @@ interface EntityExtract {
 }
 
 function extractEntities(text: string): EntityExtract {
-  const numbers = text.match(/[0-9]+(\s*[天个工作日小时分钟元块折件次张%％])?/g) || [];
+  const numbers =
+    text.match(/[0-9]+(\s*[天个工作日小时分钟元块折件次张%％])?/g) || [];
   const keywords =
     text.match(
       /(退货|退款|换货|物流|快递|发货|运费|配送|签收|会员|积分|等级|优惠券|折扣|发票|保修|政策|规则|流程|规定|条件|要求)/g,
@@ -146,22 +147,23 @@ function keywordCitationScore(sentence: string, chunkText: string): number {
   // 数字重叠分数（权重最高 —— 数字不匹配 = 高风险）
   const numberOverlap =
     sentEntities.numbers.length > 0
-      ? sentEntities.numbers.filter((n) => chunkEntities.numbers.includes(n)).length /
-        sentEntities.numbers.length
+      ? sentEntities.numbers.filter((n) => chunkEntities.numbers.includes(n))
+          .length / sentEntities.numbers.length
       : 1; // 没有数字则不扣分
 
   // 关键词重叠分数
   const keywordOverlap =
     sentEntities.keywords.length > 0
-      ? sentEntities.keywords.filter((k) => chunkEntities.keywords.includes(k)).length /
-        sentEntities.keywords.length
+      ? sentEntities.keywords.filter((k) => chunkEntities.keywords.includes(k))
+          .length / sentEntities.keywords.length
       : 0.5;
 
   // 政策术语重叠
   const policyOverlap =
     sentEntities.policyTerms.length > 0
-      ? sentEntities.policyTerms.filter((p) => chunkEntities.policyTerms.includes(p)).length /
-        sentEntities.policyTerms.length
+      ? sentEntities.policyTerms.filter((p) =>
+          chunkEntities.policyTerms.includes(p),
+        ).length / sentEntities.policyTerms.length
       : 1;
 
   // 加权综合：数字 40% + 关键词 35% + 术语 25%
@@ -180,7 +182,9 @@ export class CitationVerifier {
     try {
       this.embeddingProvider = getDefaultEmbeddingProvider();
     } catch {
-      logger.info("CitationVerifier: no embedding provider available, using keyword fallback");
+      logger.info(
+        "CitationVerifier: no embedding provider available, using keyword fallback",
+      );
     }
   }
 
@@ -191,7 +195,10 @@ export class CitationVerifier {
    * @param kbChunks - 知识库检索返回的文本 chunk 列表
    * @returns CitationReport - 逐句引证分析报告
    */
-  async verify(answerText: string, kbChunks: string[]): Promise<CitationReport> {
+  async verify(
+    answerText: string,
+    kbChunks: string[],
+  ): Promise<CitationReport> {
     // 无 KB 时快速返回
     if (kbChunks.length === 0) {
       return this.emptyReport(answerText);
@@ -202,7 +209,10 @@ export class CitationVerifier {
       try {
         return await this.verifyWithEmbeddings(answerText, kbChunks);
       } catch (e) {
-        logger.warn(e, "CitationVerifier: embedding verification failed, falling back to keyword");
+        logger.warn(
+          e,
+          "CitationVerifier: embedding verification failed, falling back to keyword",
+        );
       }
     }
 
@@ -235,7 +245,8 @@ export class CitationVerifier {
     let sentenceEmbeddings: number[][] = [];
     if (factualSentences.length > 0) {
       try {
-        sentenceEmbeddings = await this.embeddingProvider!.embed(factualSentences);
+        sentenceEmbeddings =
+          await this.embeddingProvider!.embed(factualSentences);
       } catch {
         // 批量失败则逐条重试
         for (const s of factualSentences) {
@@ -243,7 +254,9 @@ export class CitationVerifier {
             const emb = await this.embeddingProvider!.embedSingle(s);
             sentenceEmbeddings.push(emb);
           } catch {
-            sentenceEmbeddings.push(new Array(this.embeddingProvider!.dimension).fill(0));
+            sentenceEmbeddings.push(
+              new Array(this.embeddingProvider!.dimension).fill(0),
+            );
           }
         }
       }
@@ -309,15 +322,14 @@ export class CitationVerifier {
     }
 
     const factualCount = factualIndices.length || 1;
-    const coverageRate = sentenceResults.filter(
-      (s) => s.isFactual && s.status === "cited",
-    ).length / factualCount;
+    const coverageRate =
+      sentenceResults.filter((s) => s.isFactual && s.status === "cited")
+        .length / factualCount;
 
     return {
       sentences: sentenceResults,
       coverageRate: Math.round(coverageRate * 1000) / 1000,
-      avgScore:
-        Math.round((totalFactualScore / factualCount) * 1000) / 1000,
+      avgScore: Math.round((totalFactualScore / factualCount) * 1000) / 1000,
       level: "embedding",
       weakSentenceIndices: weakIndices,
     };
@@ -395,15 +407,14 @@ export class CitationVerifier {
     }
 
     const effectiveCount = factualCount || 1;
-    const coverageRate = sentenceResults.filter(
-      (s) => s.isFactual && s.status === "cited",
-    ).length / effectiveCount;
+    const coverageRate =
+      sentenceResults.filter((s) => s.isFactual && s.status === "cited")
+        .length / effectiveCount;
 
     return {
       sentences: sentenceResults,
       coverageRate: Math.round(coverageRate * 1000) / 1000,
-      avgScore:
-        Math.round((totalFactualScore / effectiveCount) * 1000) / 1000,
+      avgScore: Math.round((totalFactualScore / effectiveCount) * 1000) / 1000,
       level: "keyword_fallback",
       weakSentenceIndices: weakIndices,
     };

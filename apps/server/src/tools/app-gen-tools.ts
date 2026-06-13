@@ -248,7 +248,12 @@ async function reviewCodeExecute(
   const code = (args.code as string) || "";
   const language = (args.language as string) || "tsx";
 
-  if (!code.trim()) return JSON.stringify({ passes: true, issues: [], summary: "空文件，无需审阅" });
+  if (!code.trim())
+    return JSON.stringify({
+      passes: true,
+      issues: [],
+      summary: "空文件，无需审阅",
+    });
 
   // Provide review guidance context — the LLM performs the actual review
   return JSON.stringify({
@@ -262,7 +267,9 @@ async function reviewCodeExecute(
       accessibility: "是否包含必要的 ARIA 属性、语义化标签",
       performance: "是否存在不必要的重渲染、内存泄漏风险",
       security: "是否存在 XSS、注入等安全风险",
-      typescript: language.includes("ts") ? "类型是否完整、准确，是否滥用 any" : null,
+      typescript: language.includes("ts")
+        ? "类型是否完整、准确，是否滥用 any"
+        : null,
     },
     instruction:
       "请对以上代码进行全面审阅。输出 JSON 格式：{ path, issues: [{ severity, line?, message, suggestion? }], summary, passes: boolean }。对于通过审阅的代码，设置 passes: true 并给出正面总结。",

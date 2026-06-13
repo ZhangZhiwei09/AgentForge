@@ -2,7 +2,10 @@
 // crypto.randomUUID() requires secure context (HTTPS or localhost),
 // which fails on http://192.168.x.x accessed from mobile devices.
 export function generateUUID(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return crypto.randomUUID();
   }
   // Fallback: manual UUID v4 generation using crypto.getRandomValues()

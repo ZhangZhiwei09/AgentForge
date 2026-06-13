@@ -9,12 +9,8 @@ import { useAppProjectStore } from "@/stores/app-project";
 export function AppGenLayout() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const {
-    currentProjectId,
-    setCurrentProject,
-    setFiles,
-    setProjects,
-  } = useAppProjectStore();
+  const { currentProjectId, setCurrentProject, setFiles, setProjects } =
+    useAppProjectStore();
 
   // Load projects on mount
   useEffect(() => {
@@ -56,7 +52,10 @@ export function AppGenLayout() {
   }, [id]);
 
   return (
-    <div className="flex flex-1 overflow-hidden" style={{ height: "calc(100dvh - 48px)" }}>
+    <div
+      className="flex flex-1 overflow-hidden"
+      style={{ height: "calc(100dvh - 48px)" }}
+    >
       {/* Left sidebar: Project list */}
       <div className="w-56 flex-shrink-0 border-r border-gray-200">
         <AppProjectList />

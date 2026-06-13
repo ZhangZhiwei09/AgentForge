@@ -1,5 +1,12 @@
 import { NavLink, useNavigate } from "react-router-dom";
-import { MessageCircle, Bot, LogOut, User, BarChart3, Wand2 } from "lucide-react";
+import {
+  MessageCircle,
+  Bot,
+  LogOut,
+  User,
+  BarChart3,
+  Wand2,
+} from "lucide-react";
 
 export function TopNav() {
   const token = localStorage.getItem("accessToken");

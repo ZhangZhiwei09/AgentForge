@@ -3,7 +3,10 @@
 import { streamSSE } from "hono/streaming";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
-import { appProjectService, AppProjectService } from "../services/app-project.js";
+import {
+  appProjectService,
+  AppProjectService,
+} from "../services/app-project.js";
 import { codeGenService } from "../services/codegen.js";
 import { logger } from "@agentforge/logger";
 import { createHono } from "../lib/hono.js";
@@ -15,7 +18,10 @@ export const appProjectRoutes = createHono();
 const createProjectSchema = z.object({
   name: z.string().min(1).max(255).optional(),
   description: z.string().max(1000).optional(),
-  prompt: z.string().min(1).max(16000, "Prompt must be at most 16000 characters"),
+  prompt: z
+    .string()
+    .min(1)
+    .max(16000, "Prompt must be at most 16000 characters"),
   framework: z.enum(["react", "vue", "html", "nextjs"]).default("react"),
   type: z.enum(["frontend", "fullstack"]).default("frontend"),
 });
@@ -23,7 +29,9 @@ const createProjectSchema = z.object({
 const updateProjectSchema = z.object({
   name: z.string().min(1).max(255).optional(),
   description: z.string().max(1000).nullable().optional(),
-  status: z.enum(["draft", "generating", "previewing", "deployed", "archived"]).optional(),
+  status: z
+    .enum(["draft", "generating", "previewing", "deployed", "archived"])
+    .optional(),
 });
 
 const generateSchema = z.object({
@@ -81,7 +89,10 @@ appProjectRoutes.post(
         await stream.writeSSE({ data: "[DONE]" });
       } catch (e) {
         const errMsg = e instanceof Error ? e.message : "Unknown error";
-        logger.error({ error: errMsg, projectId: project.id }, "Code generation failed");
+        logger.error(
+          { error: errMsg, projectId: project.id },
+          "Code generation failed",
+        );
         await stream.writeSSE({
           data: JSON.stringify({
             type: "appgen_error",
@@ -223,7 +234,12 @@ appProjectRoutes.put(
     }
 
     const { content, language } = c.req.valid("json");
-    const file = await appProjectService.saveFile(projectId, filePath, content, language);
+    const file = await appProjectService.saveFile(
+      projectId,
+      filePath,
+      content,
+      language,
+    );
     return c.json(file);
   },
 );

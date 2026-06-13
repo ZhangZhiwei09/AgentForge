@@ -4,7 +4,8 @@ import { useNavigate } from "react-router-dom";
 
 export function AppProjectList() {
   const navigate = useNavigate();
-  const { projects, currentProjectId, setCurrentProject } = useAppProjectStore();
+  const { projects, currentProjectId, setCurrentProject } =
+    useAppProjectStore();
 
   const handleNewProject = () => {
     // Navigate to the new project page
@@ -50,7 +51,9 @@ export function AppProjectList() {
               key={project.id}
               onClick={() => handleSelectProject(project)}
               className={`w-full text-left p-3 border-b border-gray-800 hover:bg-gray-800 transition-colors ${
-                currentProjectId === project.id ? "bg-gray-800 border-l-2 border-l-blue-500" : ""
+                currentProjectId === project.id
+                  ? "bg-gray-800 border-l-2 border-l-blue-500"
+                  : ""
               }`}
             >
               <div className="flex items-center gap-2">
@@ -59,12 +62,18 @@ export function AppProjectList() {
                     statusColors[project.status] || "bg-gray-500"
                   }`}
                 />
-                <span className="text-sm font-medium truncate">{project.name}</span>
+                <span className="text-sm font-medium truncate">
+                  {project.name}
+                </span>
               </div>
               <div className="flex items-center gap-2 mt-1 ml-4">
-                <span className="text-xs text-gray-500">{project.framework}</span>
+                <span className="text-xs text-gray-500">
+                  {project.framework}
+                </span>
                 <span className="text-xs text-gray-600">•</span>
-                <span className="text-xs text-gray-500 capitalize">{project.status}</span>
+                <span className="text-xs text-gray-500 capitalize">
+                  {project.status}
+                </span>
               </div>
             </button>
           ))

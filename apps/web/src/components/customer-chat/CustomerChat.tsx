@@ -40,9 +40,7 @@ export function CustomerChat() {
     new Set(),
   );
   const [sessionId, setSessionId] = useState<string>(() => {
-    return (
-      localStorage.getItem("customer_chat_session_id") || generateUUID()
-    );
+    return localStorage.getItem("customer_chat_session_id") || generateUUID();
   });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -274,8 +272,7 @@ export function CustomerChat() {
               }
 
               // ── 解析 markdown 中的卡片围栏 ──
-              const { blocks: parsedBlocks } =
-                extractCardBlocks(streamContent);
+              const { blocks: parsedBlocks } = extractCardBlocks(streamContent);
               const allBlocks = dedupeBlocks([
                 ...contentBlocks,
                 ...parsedBlocks.map((b) => b.block),

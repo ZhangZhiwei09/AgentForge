@@ -52,7 +52,13 @@ export type VideoClientMessage =
 
 export interface VideoStatusEvent {
   type: "status";
-  status: "connecting" | "connected" | "listening" | "processing" | "speaking" | "idle";
+  status:
+    | "connecting"
+    | "connected"
+    | "listening"
+    | "processing"
+    | "speaking"
+    | "idle";
 }
 
 export interface VideoTranscriptEvent {

@@ -220,14 +220,14 @@ function tryExtractCard(result: string): ContentBlock | null {
     // check_shipping_status 结果 → StatusCard
     if (data.trackingNo || (data.carrier && data.status)) {
       const steps = Array.isArray(data.history)
-        ? data.history.map((h: Record<string, unknown>, i: number, arr: unknown[]) => ({
-            label: String(h.status ?? h.description ?? ""),
-            status:
-              i === arr.length - 1
-                ? ("active" as const)
-                : ("done" as const),
-            description: `${h.time ?? ""} ${h.location ?? ""}`,
-          }))
+        ? data.history.map(
+            (h: Record<string, unknown>, i: number, arr: unknown[]) => ({
+              label: String(h.status ?? h.description ?? ""),
+              status:
+                i === arr.length - 1 ? ("active" as const) : ("done" as const),
+              description: `${h.time ?? ""} ${h.location ?? ""}`,
+            }),
+          )
         : undefined;
 
       return {
@@ -332,5 +332,7 @@ function buildCardFence(block: ContentBlock): string | null {
       return null;
   }
 
-  return "```card:" + fenceType + "\n" + JSON.stringify(data, null, 2) + "\n```";
+  return (
+    "```card:" + fenceType + "\n" + JSON.stringify(data, null, 2) + "\n```"
+  );
 }

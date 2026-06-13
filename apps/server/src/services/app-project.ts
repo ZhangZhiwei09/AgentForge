@@ -37,7 +37,10 @@ export class AppProjectService {
       },
     });
 
-    logger.info({ projectId: id, userId, name: project.name }, "AppProject created");
+    logger.info(
+      { projectId: id, userId, name: project.name },
+      "AppProject created",
+    );
     return this.toDTO(project);
   }
 
@@ -53,7 +56,10 @@ export class AppProjectService {
   /**
    * Get a single project by ID, verifying ownership.
    */
-  async getProject(projectId: string, userId: string): Promise<AppProjectDTO | null> {
+  async getProject(
+    projectId: string,
+    userId: string,
+  ): Promise<AppProjectDTO | null> {
     const project = await prisma.appProject.findFirst({
       where: { id: projectId, userId },
     });
@@ -88,7 +94,9 @@ export class AppProjectService {
       where: { id: projectId },
       data: {
         ...(input.name !== undefined ? { name: input.name } : {}),
-        ...(input.description !== undefined ? { description: input.description } : {}),
+        ...(input.description !== undefined
+          ? { description: input.description }
+          : {}),
         ...(input.status !== undefined ? { status: input.status } : {}),
       },
     });
@@ -172,7 +180,10 @@ export class AppProjectService {
   /**
    * Get a specific file by path.
    */
-  async getFile(projectId: string, filePath: string): Promise<ProjectFileDTO | null> {
+  async getFile(
+    projectId: string,
+    filePath: string,
+  ): Promise<ProjectFileDTO | null> {
     const file = await prisma.projectFile.findFirst({
       where: { projectId, path: filePath },
     });
@@ -222,7 +233,8 @@ export class AppProjectService {
     // No empty paths
     if (!filePath || filePath.trim().length === 0) return false;
     // No absolute paths
-    if (filePath.startsWith("/") || filePath.match(/^[A-Za-z]:\\/)) return false;
+    if (filePath.startsWith("/") || filePath.match(/^[A-Za-z]:\\/))
+      return false;
     // No path traversal
     if (filePath.includes("..")) return false;
     // Must have a reasonable length
@@ -337,8 +349,14 @@ export class AppProjectService {
       previewUrl: project.previewUrl,
       deployUrl: project.deployUrl,
       metadata: project.metadata as Record<string, unknown>,
-      createdAt: project.createdAt instanceof Date ? project.createdAt.toISOString() : project.createdAt,
-      updatedAt: project.updatedAt instanceof Date ? project.updatedAt.toISOString() : project.updatedAt,
+      createdAt:
+        project.createdAt instanceof Date
+          ? project.createdAt.toISOString()
+          : project.createdAt,
+      updatedAt:
+        project.updatedAt instanceof Date
+          ? project.updatedAt.toISOString()
+          : project.updatedAt,
     };
   }
 
@@ -351,8 +369,14 @@ export class AppProjectService {
       language: file.language,
       size: file.size,
       version: file.version,
-      createdAt: file.createdAt instanceof Date ? file.createdAt.toISOString() : file.createdAt,
-      updatedAt: file.updatedAt instanceof Date ? file.updatedAt.toISOString() : file.updatedAt,
+      createdAt:
+        file.createdAt instanceof Date
+          ? file.createdAt.toISOString()
+          : file.createdAt,
+      updatedAt:
+        file.updatedAt instanceof Date
+          ? file.updatedAt.toISOString()
+          : file.updatedAt,
     };
   }
 }

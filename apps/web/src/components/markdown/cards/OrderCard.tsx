@@ -4,34 +4,32 @@
 import { Package, Truck, Clock } from "lucide-react";
 import type { OrderCardData } from "@agentforge/shared-types";
 
-const STATUS_COLORS: Record<
-  string,
-  { bg: string; text: string; dot: string }
-> = {
-  pending: { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-400" },
-  paid: { bg: "bg-blue-50", text: "text-blue-700", dot: "bg-blue-400" },
-  shipped: {
-    bg: "bg-indigo-50",
-    text: "text-indigo-700",
-    dot: "bg-indigo-400",
-  },
-  delivered: {
-    bg: "bg-green-50",
-    text: "text-green-700",
-    dot: "bg-green-400",
-  },
-  cancelled: { bg: "bg-red-50", text: "text-red-700", dot: "bg-red-400" },
-  returned: {
-    bg: "bg-orange-50",
-    text: "text-orange-700",
-    dot: "bg-orange-400",
-  },
-  refunded: {
-    bg: "bg-purple-50",
-    text: "text-purple-700",
-    dot: "bg-purple-400",
-  },
-};
+const STATUS_COLORS: Record<string, { bg: string; text: string; dot: string }> =
+  {
+    pending: { bg: "bg-amber-50", text: "text-amber-700", dot: "bg-amber-400" },
+    paid: { bg: "bg-blue-50", text: "text-blue-700", dot: "bg-blue-400" },
+    shipped: {
+      bg: "bg-indigo-50",
+      text: "text-indigo-700",
+      dot: "bg-indigo-400",
+    },
+    delivered: {
+      bg: "bg-green-50",
+      text: "text-green-700",
+      dot: "bg-green-400",
+    },
+    cancelled: { bg: "bg-red-50", text: "text-red-700", dot: "bg-red-400" },
+    returned: {
+      bg: "bg-orange-50",
+      text: "text-orange-700",
+      dot: "bg-orange-400",
+    },
+    refunded: {
+      bg: "bg-purple-50",
+      text: "text-purple-700",
+      dot: "bg-purple-400",
+    },
+  };
 
 const defaultStatus = {
   bg: "bg-gray-50",

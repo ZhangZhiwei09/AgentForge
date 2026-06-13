@@ -119,7 +119,10 @@ export class CodeGenService {
     try {
       plan = await this.planAppStructure(prompt, framework, resolvedModel);
     } catch (err) {
-      logger.error({ error: (err as Error).message }, "Plan phase failed, using default plan");
+      logger.error(
+        { error: (err as Error).message },
+        "Plan phase failed, using default plan",
+      );
     }
 
     // Fallback to default plan if planning fails
@@ -171,7 +174,10 @@ export class CodeGenService {
             content,
             size: Buffer.byteLength(content, "utf-8"),
           };
-          logger.info({ file: filePlan.path, size: content.length }, "File generated");
+          logger.info(
+            { file: filePlan.path, size: content.length },
+            "File generated",
+          );
         } else {
           errors.push(`${filePlan.path}: empty content returned`);
           logger.warn({ file: filePlan.path }, "Empty content from LLM");
@@ -179,7 +185,10 @@ export class CodeGenService {
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : "Unknown error";
         errors.push(`${filePlan.path}: ${errorMsg}`);
-        logger.error({ file: filePlan.path, error: errorMsg }, "File generation failed");
+        logger.error(
+          { file: filePlan.path, error: errorMsg },
+          "File generation failed",
+        );
         yield {
           type: "appgen_error",
           message_id: randomUUID(),
@@ -190,7 +199,11 @@ export class CodeGenService {
 
     // 6. Phase 3: Quick review of key files
     if (generatedFiles.length > 0) {
-      yield { type: "appgen_review", message_id: randomUUID(), review: "Reviewing..." };
+      yield {
+        type: "appgen_review",
+        message_id: randomUUID(),
+        review: "Reviewing...",
+      };
 
       try {
         const review = await this.reviewApp(plan, projectId, resolvedModel);
@@ -205,7 +218,12 @@ export class CodeGenService {
     }
 
     // 7. Complete the run
-    await appProjectService.completeGenRun(runId, generatedFiles, totalTokens, errors);
+    await appProjectService.completeGenRun(
+      runId,
+      generatedFiles,
+      totalTokens,
+      errors,
+    );
 
     yield {
       type: "appgen_done",
@@ -252,8 +270,17 @@ export class CodeGenService {
     ];
 
     try {
-      const content = await this.callLLM(messages, model, PLAN_SYSTEM_PROMPT, 0.3, MAX_TOKENS_PLAN);
-      logger.info({ contentLength: content.length, preview: content.slice(0, 200) }, "Plan LLM response");
+      const content = await this.callLLM(
+        messages,
+        model,
+        PLAN_SYSTEM_PROMPT,
+        0.3,
+        MAX_TOKENS_PLAN,
+      );
+      logger.info(
+        { contentLength: content.length, preview: content.slice(0, 200) },
+        "Plan LLM response",
+      );
       return this.extractFilePlan(content);
     } catch (err) {
       logger.error({ error: (err as Error).message }, "Plan LLM call failed");
@@ -304,14 +331,25 @@ ${langGuide}
     ];
 
     try {
-      const content = await this.callLLM(messages, model, GENERATE_SYSTEM_PROMPT, 0.5, MAX_TOKENS_FILE);
+      const content = await this.callLLM(
+        messages,
+        model,
+        GENERATE_SYSTEM_PROMPT,
+        0.5,
+        MAX_TOKENS_FILE,
+      );
       const extracted = this.extractFileContent(content, filePlan.path);
       return {
-        content: extracted || `// Generated: ${filePlan.path}\n${content.slice(0, 500)}`,
+        content:
+          extracted ||
+          `// Generated: ${filePlan.path}\n${content.slice(0, 500)}`,
         tokens: Math.ceil(content.length / 3),
       };
     } catch (err) {
-      logger.error({ file: filePlan.path, error: (err as Error).message }, "File generation LLM error");
+      logger.error(
+        { file: filePlan.path, error: (err as Error).message },
+        "File generation LLM error",
+      );
       return {
         content: `// Error generating ${filePlan.path}\n// ${(err as Error).message}`,
         tokens: 0,
@@ -353,10 +391,18 @@ ${code.slice(0, 3000)}
           },
         ];
 
-        const result = await this.callLLM(messages, model, REVIEW_SYSTEM_PROMPT, 0.2, 1000);
+        const result = await this.callLLM(
+          messages,
+          model,
+          REVIEW_SYSTEM_PROMPT,
+          0.2,
+          1000,
+        );
         const lines = result.split("\n").filter((l) => l.trim());
         const summary = lines.slice(0, 2).join(" ");
-        reviews.push(`**${fp.path.split("/").pop()}:** ${summary || "Looks good."}`);
+        reviews.push(
+          `**${fp.path.split("/").pop()}:** ${summary || "Looks good."}`,
+        );
       } catch {
         reviews.push(`**${fp.path.split("/").pop()}:** Review skipped.`);
       }
@@ -414,15 +460,23 @@ ${code.slice(0, 3000)}
     if (jsonMatch) {
       try {
         const parsed = parseJSONFromLLMResponse(jsonMatch[0]) as any;
-        if (parsed?.files && Array.isArray(parsed.files) && parsed.files.length > 0) {
+        if (
+          parsed?.files &&
+          Array.isArray(parsed.files) &&
+          parsed.files.length > 0
+        ) {
           return parsed.files.map((f: any) => ({
             path: String(f.path || ""),
-            language: (f.language as ProjectLanguage) || this.detectLang(f.path),
+            language:
+              (f.language as ProjectLanguage) || this.detectLang(f.path),
             description: String(f.description || ""),
           }));
         }
       } catch (e) {
-        logger.warn({ error: (e as Error).message }, "Failed to parse plan JSON");
+        logger.warn(
+          { error: (e as Error).message },
+          "Failed to parse plan JSON",
+        );
       }
     }
 
@@ -452,20 +506,31 @@ ${code.slice(0, 3000)}
   private detectLang(path: string): ProjectLanguage {
     const ext = path.split(".").pop()?.toLowerCase();
     switch (ext) {
-      case "tsx": return "tsx";
-      case "ts": return "ts";
-      case "css": return "css";
-      case "html": return "html";
-      case "json": return "json";
-      case "js": case "jsx": return "js";
-      default: return "tsx";
+      case "tsx":
+        return "tsx";
+      case "ts":
+        return "ts";
+      case "css":
+        return "css";
+      case "html":
+        return "html";
+      case "json":
+        return "json";
+      case "js":
+      case "jsx":
+        return "js";
+      default:
+        return "tsx";
     }
   }
 
   /**
    * Extract file content from LLM response using FILE: marker.
    */
-  private extractFileContent(text: string, expectedPath: string): string | null {
+  private extractFileContent(
+    text: string,
+    expectedPath: string,
+  ): string | null {
     // Pattern: ```FILE:path\n...\n```
     const safePath = expectedPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const fileBlockRegex = new RegExp(
@@ -504,7 +569,11 @@ ${code.slice(0, 3000)}
     }
 
     // Try to match by filename
-    const fileName = expectedPath.split("/").pop()?.replace(/\.[^.]+$/, "") || "";
+    const fileName =
+      expectedPath
+        .split("/")
+        .pop()
+        ?.replace(/\.[^.]+$/, "") || "";
     for (const b of blocks) {
       if (b.code.includes(fileName)) {
         return b.code;
@@ -522,13 +591,41 @@ ${code.slice(0, 3000)}
   private getDefaultPlan(framework: string): AppFilePlan[] {
     if (framework === "react") {
       return [
-        { path: "index.html", language: "html", description: "HTML entry point with root div" },
-        { path: "package.json", language: "json", description: "Project dependencies and scripts" },
-        { path: "tsconfig.json", language: "json", description: "TypeScript configuration" },
-        { path: "vite.config.ts", language: "ts", description: "Vite build configuration" },
-        { path: "src/main.tsx", language: "tsx", description: "React entry point, renders App" },
-        { path: "src/App.tsx", language: "tsx", description: "Main app component with all logic" },
-        { path: "src/index.css", language: "css", description: "Global styles and CSS variables" },
+        {
+          path: "index.html",
+          language: "html",
+          description: "HTML entry point with root div",
+        },
+        {
+          path: "package.json",
+          language: "json",
+          description: "Project dependencies and scripts",
+        },
+        {
+          path: "tsconfig.json",
+          language: "json",
+          description: "TypeScript configuration",
+        },
+        {
+          path: "vite.config.ts",
+          language: "ts",
+          description: "Vite build configuration",
+        },
+        {
+          path: "src/main.tsx",
+          language: "tsx",
+          description: "React entry point, renders App",
+        },
+        {
+          path: "src/App.tsx",
+          language: "tsx",
+          description: "Main app component with all logic",
+        },
+        {
+          path: "src/index.css",
+          language: "css",
+          description: "Global styles and CSS variables",
+        },
       ];
     }
     return [

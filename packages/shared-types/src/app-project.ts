@@ -1,10 +1,22 @@
 // App Project types — shared between frontend and backend for WeaveFox-like app generation
 
 // Project status
-export type ProjectStatus = "draft" | "generating" | "previewing" | "deployed" | "archived";
+export type ProjectStatus =
+  | "draft"
+  | "generating"
+  | "previewing"
+  | "deployed"
+  | "archived";
 export type ProjectType = "frontend" | "fullstack";
 export type ProjectFramework = "react" | "vue" | "html" | "nextjs";
-export type ProjectLanguage = "tsx" | "ts" | "css" | "html" | "json" | "js" | "py";
+export type ProjectLanguage =
+  | "tsx"
+  | "ts"
+  | "css"
+  | "html"
+  | "json"
+  | "js"
+  | "py";
 
 // Data transfer objects
 export interface AppProjectDTO {

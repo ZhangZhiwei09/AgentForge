@@ -5,11 +5,10 @@ import { ChevronRight } from "lucide-react";
 import type { ActionCardData } from "@agentforge/shared-types";
 
 const STYLE_CLASSES: Record<string, string> = {
-  primary:
-    "bg-[hsl(var(--cs-primary))] text-white hover:opacity-90 shadow-sm",
-  secondary: "bg-white border border-[hsl(var(--border))] text-gray-700 hover:bg-gray-50",
-  danger:
-    "bg-red-50 border border-red-200 text-red-600 hover:bg-red-100",
+  primary: "bg-[hsl(var(--cs-primary))] text-white hover:opacity-90 shadow-sm",
+  secondary:
+    "bg-white border border-[hsl(var(--border))] text-gray-700 hover:bg-gray-50",
+  danger: "bg-red-50 border border-red-200 text-red-600 hover:bg-red-100",
 };
 
 interface Props {
@@ -22,9 +21,7 @@ export function ActionCard({ data, onAction }: Props) {
   return (
     <div className="my-2 rounded-xl border border-[hsl(var(--border))] bg-white shadow-sm p-4">
       {data.title && (
-        <p className="text-sm font-semibold text-gray-800 mb-1">
-          {data.title}
-        </p>
+        <p className="text-sm font-semibold text-gray-800 mb-1">{data.title}</p>
       )}
       {data.description && (
         <p className="text-xs text-gray-500 mb-3">{data.description}</p>
@@ -32,8 +29,7 @@ export function ActionCard({ data, onAction }: Props) {
       <div className="flex flex-wrap gap-2">
         {data.actions.map((act, i) => {
           const styleClass =
-            STYLE_CLASSES[act.style ?? "secondary"] ??
-            STYLE_CLASSES.secondary;
+            STYLE_CLASSES[act.style ?? "secondary"] ?? STYLE_CLASSES.secondary;
           return (
             <button
               key={i}

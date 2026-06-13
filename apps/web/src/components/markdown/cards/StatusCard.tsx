@@ -64,9 +64,7 @@ export function StatusCard({ data }: Props) {
                   {!isLast && (
                     <div
                       className={`h-full min-h-[20px] w-0.5 ${
-                        step.status === "done"
-                          ? "bg-green-300"
-                          : "bg-gray-200"
+                        step.status === "done" ? "bg-green-300" : "bg-gray-200"
                       }`}
                     />
                   )}
@@ -75,9 +73,7 @@ export function StatusCard({ data }: Props) {
                 <div className="pb-4">
                   <p
                     className={`text-xs font-medium ${
-                      step.status === "wait"
-                        ? "text-gray-400"
-                        : "text-gray-700"
+                      step.status === "wait" ? "text-gray-400" : "text-gray-700"
                     }`}
                   >
                     {step.label}

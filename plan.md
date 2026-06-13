@@ -4577,11 +4577,11 @@ V1-V11 完成后，AgentForge 已经是一个功能完备的 Agent 平台。以�
 
 ### 2.1 竞品技术方案对比
 
-| 产品 | 传输协议 | 视频方案 | 模型 | 核心亮点 |
-|------|----------|----------|------|----------|
-| **豆包** (字节) | **RTC (UDP)** | 服务端定时抽帧 (100-1000ms) | Doubao-Vision-Pro-32K | 弱网最优、语义判停、双路推理 |
-| **ChatGPT Vision** (OpenAI) | **WebRTC** | Realtime API 浏览器直连 | GPT-4o | <500ms 延迟、浏览器原生支持 |
-| **Gemini Live** (Google) | **WebSocket** | 客户端 JPEG 抽帧 | Gemini 2.5 Flash | 开发者控制力强、Python 友好 |
+| 产品                        | 传输协议      | 视频方案                    | 模型                  | 核心亮点                     |
+| --------------------------- | ------------- | --------------------------- | --------------------- | ---------------------------- |
+| **豆包** (字节)             | **RTC (UDP)** | 服务端定时抽帧 (100-1000ms) | Doubao-Vision-Pro-32K | 弱网最优、语义判停、双路推理 |
+| **ChatGPT Vision** (OpenAI) | **WebRTC**    | Realtime API 浏览器直连     | GPT-4o                | <500ms 延迟、浏览器原生支持  |
+| **Gemini Live** (Google)    | **WebSocket** | 客户端 JPEG 抽帧            | Gemini 2.5 Flash      | 开发者控制力强、Python 友好  |
 
 ### 2.2 豆包视频通话技术揭秘
 
@@ -4594,13 +4594,13 @@ V1-V11 完成后，AgentForge 已经是一个功能完备的 Agent 平台。以�
 
 **为什么豆包选择 RTC 而非 WebSocket：**
 
-| 维度 | RTC (UDP) | WebSocket (TCP) |
-|------|-----------|-----------------|
-| 20% 丢包环境 | 流畅可用 | 严重卡顿，~15% 用户不可用 |
-| 80% 极端丢包 | 不可用率仅 1%，延迟约 4.6s | **完全不可用** |
-| 音视频同步 | RTCP 自动时钟同步 | 需手动实现 NTP 级同步 |
-| 回声消除 | 浏览器原生 AEC | 需自行处理 |
-| 带宽自适应 | GCC 自动调整码率 | 需手动管理 |
+| 维度         | RTC (UDP)                  | WebSocket (TCP)           |
+| ------------ | -------------------------- | ------------------------- |
+| 20% 丢包环境 | 流畅可用                   | 严重卡顿，~15% 用户不可用 |
+| 80% 极端丢包 | 不可用率仅 1%，延迟约 4.6s | **完全不可用**            |
+| 音视频同步   | RTCP 自动时钟同步          | 需手动实现 NTP 级同步     |
+| 回声消除     | 浏览器原生 AEC             | 需自行处理                |
+| 带宽自适应   | GCC 自动调整码率           | 需手动管理                |
 
 **豆包的核心技术创新：**
 
@@ -4616,6 +4616,7 @@ V1-V11 完成后，AgentForge 已经是一个功能完备的 Agent 平台。以�
 4. **视频帧长期记忆压缩**：用 VLM 对每帧做摘要，只存摘要文本，避免 50 张图片塞满 context window
 
 **全链路延迟：**
+
 - 端到端延迟：**< 1 秒**
 - 模型响应 p99：**< 800ms**
 - 语音交互延迟：**< 300ms**
@@ -4646,14 +4647,14 @@ V1-V11 完成后，AgentForge 已经是一个功能完备的 Agent 平台。以�
 
 ### 2.5 技术选型决策框架
 
-| 条件 | 选 WebRTC | 选 WebSocket |
-|------|----------|-------------|
-| 用户在网络不稳定环境 | ✅ 必选 | ❌ 体验差 |
-| 需要 <500ms 端到端延迟 | ✅ 必选 | ❌ TCP 延迟不可控 |
-| 需要服务端媒体处理（审核/录制） | ❌ 媒体绕过服务器 | ✅ 完全可控 |
-| 团队 WebRTC 经验不足 | ❌ 学习曲线陡峭 | ✅ 标准库即可 |
-| 需要快速验证产品闭环 | ❌ 基础设施重 | ✅ 极简实现 |
-| Python/Node.js 后端 | ❌ WebRTC 库不成熟 | ✅ 原生支持 |
+| 条件                            | 选 WebRTC          | 选 WebSocket      |
+| ------------------------------- | ------------------ | ----------------- |
+| 用户在网络不稳定环境            | ✅ 必选            | ❌ 体验差         |
+| 需要 <500ms 端到端延迟          | ✅ 必选            | ❌ TCP 延迟不可控 |
+| 需要服务端媒体处理（审核/录制） | ❌ 媒体绕过服务器  | ✅ 完全可控       |
+| 团队 WebRTC 经验不足            | ❌ 学习曲线陡峭    | ✅ 标准库即可     |
+| 需要快速验证产品闭环            | ❌ 基础设施重      | ✅ 极简实现       |
+| Python/Node.js 后端             | ❌ WebRTC 库不成熟 | ✅ 原生支持       |
 
 ---
 
@@ -4735,6 +4736,7 @@ VideoSessionService.processVideoAudioAndRespond():
 ### 3.3 WebSocket 协议
 
 **Client → Server：**
+
 - `start_video` — 初始化视频会话
 - `video_frame` — base64 JPEG 帧 + 时间戳
 - `audio` — base64 PCM 音频块
@@ -4743,6 +4745,7 @@ VideoSessionService.processVideoAudioAndRespond():
 - `stop_video` — 结束通话
 
 **Server → Client：**
+
 - `status` — 状态变化 (connecting/connected/listening/processing/speaking)
 - `transcript` — ASR 转录结果
 - `vision_context` — AI 观察到的画面描述
@@ -4772,6 +4775,7 @@ VideoSessionService.processVideoAudioAndRespond():
 ```
 
 **优势：**
+
 - 每月 10,000 分钟免费额度
 - 支持 iOS/Android/Web/小程序全平台
 - 开箱即用的智能降噪、回声消除、弱网对抗
@@ -4791,42 +4795,44 @@ VideoSessionService.processVideoAudioAndRespond():
 
 ## 5. 技术选型对比：WebSocket vs WebRTC vs RTC
 
-| 维度 | WebSocket (当前) | WebRTC (通用) | 火山引擎 RTC |
-|------|-----------------|--------------|-------------|
-| 传输协议 | TCP | UDP (SRTP) | UDP (私有优化) |
-| 弱网表现 | 20%丢包即卡顿 | 80%丢包仍可用 | 80%丢包可用率 99% |
-| 服务端复杂度 | 极低 (标准库) | 高 (需 WebRTC 库) | 低 (SDK 接入) |
-| 音视频同步 | 手动实现 | RTCP 自动 | 内置同步 |
-| 回声消除 | 手动处理 | 浏览器原生 | SDK 内置 |
-| 延迟 | 300ms-1s+ | 50-200ms (传输) | <100ms (传输) |
-| 全链路延迟 | ~1.5s | ~500ms | ~800ms |
-| 开发成本 | 1-2 天 | 1-2 周 | 1-3 天 |
-| 运维成本 | 低 | 中 (TURN 服务器) | 低 (SaaS) |
-| 供应商锁定 | 无 | 无 | 火山引擎 |
-| 适合场景 | MVP/原型验证 | 通用生产环境 | 国内生产环境首选 |
+| 维度         | WebSocket (当前) | WebRTC (通用)     | 火山引擎 RTC      |
+| ------------ | ---------------- | ----------------- | ----------------- |
+| 传输协议     | TCP              | UDP (SRTP)        | UDP (私有优化)    |
+| 弱网表现     | 20%丢包即卡顿    | 80%丢包仍可用     | 80%丢包可用率 99% |
+| 服务端复杂度 | 极低 (标准库)    | 高 (需 WebRTC 库) | 低 (SDK 接入)     |
+| 音视频同步   | 手动实现         | RTCP 自动         | 内置同步          |
+| 回声消除     | 手动处理         | 浏览器原生        | SDK 内置          |
+| 延迟         | 300ms-1s+        | 50-200ms (传输)   | <100ms (传输)     |
+| 全链路延迟   | ~1.5s            | ~500ms            | ~800ms            |
+| 开发成本     | 1-2 天           | 1-2 周            | 1-3 天            |
+| 运维成本     | 低               | 中 (TURN 服务器)  | 低 (SaaS)         |
+| 供应商锁定   | 无               | 无                | 火山引擎          |
+| 适合场景     | MVP/原型验证     | 通用生产环境      | 国内生产环境首选  |
 
 ---
 
 ## 6. 文件清单
 
 ### 新建文件
-| 文件 | 用途 |
-|------|------|
-| `packages/shared-types/src/video.ts` | 视频 WebSocket 协议类型定义（客户端/服务端消息、HTTP 类型） |
-| `apps/server/src/services/video.ts` | VideoSessionService — 核心状态机 + ASR → Vision LLM → TTS 流水线 |
-| `apps/server/src/services/multimodal-provider.ts` | 多模态 LLM 提供者（OpenAI GPT-4o Vision），独立于现有 LLMProvider |
-| `apps/server/src/routes/video.ts` | WebSocket 信令端点 (WS /api/video/stream) + HTTP 端点 |
-| `apps/web/src/components/video/VideoCallPanel.tsx` | 前端视频通话 UI（摄像头预览、Canvas 抽帧、音频采集、控制栏） |
+
+| 文件                                               | 用途                                                              |
+| -------------------------------------------------- | ----------------------------------------------------------------- |
+| `packages/shared-types/src/video.ts`               | 视频 WebSocket 协议类型定义（客户端/服务端消息、HTTP 类型）       |
+| `apps/server/src/services/video.ts`                | VideoSessionService — 核心状态机 + ASR → Vision LLM → TTS 流水线  |
+| `apps/server/src/services/multimodal-provider.ts`  | 多模态 LLM 提供者（OpenAI GPT-4o Vision），独立于现有 LLMProvider |
+| `apps/server/src/routes/video.ts`                  | WebSocket 信令端点 (WS /api/video/stream) + HTTP 端点             |
+| `apps/web/src/components/video/VideoCallPanel.tsx` | 前端视频通话 UI（摄像头预览、Canvas 抽帧、音频采集、控制栏）      |
 
 ### 修改文件
-| 文件 | 修改内容 |
-|------|----------|
-| `packages/database/prisma/schema.prisma` | 新增 `video_sessions` 表 + Conversation 模型新增 `videoSessions` 关系 |
-| `packages/shared-types/src/index.ts` | 导出所有视频协议类型 |
-| `apps/server/src/app.ts` | 注册 videoRoutes |
-| `apps/server/src/config.ts` | 新增 `videoEnabled`、`videoModel`、`videoVisionFps` 配置项 |
-| `apps/web/src/stores/chat.ts` | 新增 videoStatus、videoTranscript、videoVisionContext 等状态 + PanelMode 扩展 |
-| `apps/web/src/components/layout/ChatLayout.tsx` | 新增 Video 标签页按钮和面板渲染 |
+
+| 文件                                            | 修改内容                                                                      |
+| ----------------------------------------------- | ----------------------------------------------------------------------------- |
+| `packages/database/prisma/schema.prisma`        | 新增 `video_sessions` 表 + Conversation 模型新增 `videoSessions` 关系         |
+| `packages/shared-types/src/index.ts`            | 导出所有视频协议类型                                                          |
+| `apps/server/src/app.ts`                        | 注册 videoRoutes                                                              |
+| `apps/server/src/config.ts`                     | 新增 `videoEnabled`、`videoModel`、`videoVisionFps` 配置项                    |
+| `apps/web/src/stores/chat.ts`                   | 新增 videoStatus、videoTranscript、videoVisionContext 等状态 + PanelMode 扩展 |
+| `apps/web/src/components/layout/ChatLayout.tsx` | 新增 Video 标签页按钮和面板渲染                                               |
 
 ---
 
@@ -4854,11 +4860,11 @@ CREATE TABLE video_sessions (
 
 ## 8. API 端点
 
-| 端点 | 方法 | 用途 |
-|------|------|------|
-| `/api/video/stream` | WebSocket | 视频通话主通道（信令 + 音视频数据） |
-| `/api/video/models` | GET | 列出支持视觉的模型 |
-| `/api/video/sessions` | POST | 创建视频会话配置 |
+| 端点                  | 方法      | 用途                                |
+| --------------------- | --------- | ----------------------------------- |
+| `/api/video/stream`   | WebSocket | 视频通话主通道（信令 + 音视频数据） |
+| `/api/video/models`   | GET       | 列出支持视觉的模型                  |
+| `/api/video/sessions` | POST      | 创建视频会话配置                    |
 
 ---
 
@@ -4914,18 +4920,18 @@ CREATE TABLE video_sessions (
 
 ## 建议执行顺序
 
-| 批次        | 阶段                                | 预估工期 | 关键产出                                             |
-| ----------- | ----------------------------------- | -------- | ---------------------------------------------------- |
-| **Batch 1** | P0-1 认证 + P0-2 日志 + P0-3 测试   | 2-3 周   | 多用户可以注册登录，结构化日志，vitest 测试套件      |
-| **Batch 2** | P0-4 CI/CD + P0-5 安全加固          | 1 周     | GitHub Actions 流水线，Rate Limiting，参数校验       |
-| **Batch 3** | P1-3 Agent 推理框架 + P1-4 工作内存 | 2 周     | ReAct 循环，Agent Scratchpad，本质从 chatbot → agent |
-| **Batch 4** | P1-6 工具生态 + P1-5 审批门         | 2-3 周   | 6+ 个生产工具，代码沙箱，人工审批                    |
-| **Batch 5** | P1-1 后台队列 + P1-2 可观测性       | 1-2 周   | BullMQ 解耦，Prometheus + Grafana                    |
-| **Batch 6** | V5 Voice Agent                      | 2 周     | WebSocket 音频流，ASR/TTS，打断机制                  |
-| **Batch 7** | V6 Workflow Engine                  | 3-4 周   | DAG 执行器，检查点恢复，工作流模板                   |
-| **Batch 8** | V9 Multi-Agent                      | 3-4 周   | 多角色 Agent，消息总线，协作模式                     |
-| **Batch 9** | V11 多模态视频对话 Phase 1 ✅       | 1 周     | WebSocket + Canvas 抽帧 + GPT-4o Vision + TTS       |
-| **Batch 10** | V11 多模态视频对话 Phase 2（待定）  | 2-3 周   | 升级 RTC 传输、语义判停、声纹降噪、移动端适配       |
+| 批次         | 阶段                                | 预估工期 | 关键产出                                             |
+| ------------ | ----------------------------------- | -------- | ---------------------------------------------------- |
+| **Batch 1**  | P0-1 认证 + P0-2 日志 + P0-3 测试   | 2-3 周   | 多用户可以注册登录，结构化日志，vitest 测试套件      |
+| **Batch 2**  | P0-4 CI/CD + P0-5 安全加固          | 1 周     | GitHub Actions 流水线，Rate Limiting，参数校验       |
+| **Batch 3**  | P1-3 Agent 推理框架 + P1-4 工作内存 | 2 周     | ReAct 循环，Agent Scratchpad，本质从 chatbot → agent |
+| **Batch 4**  | P1-6 工具生态 + P1-5 审批门         | 2-3 周   | 6+ 个生产工具，代码沙箱，人工审批                    |
+| **Batch 5**  | P1-1 后台队列 + P1-2 可观测性       | 1-2 周   | BullMQ 解耦，Prometheus + Grafana                    |
+| **Batch 6**  | V5 Voice Agent                      | 2 周     | WebSocket 音频流，ASR/TTS，打断机制                  |
+| **Batch 7**  | V6 Workflow Engine                  | 3-4 周   | DAG 执行器，检查点恢复，工作流模板                   |
+| **Batch 8**  | V9 Multi-Agent                      | 3-4 周   | 多角色 Agent，消息总线，协作模式                     |
+| **Batch 9**  | V11 多模态视频对话 Phase 1 ✅       | 1 周     | WebSocket + Canvas 抽帧 + GPT-4o Vision + TTS        |
+| **Batch 10** | V11 多模态视频对话 Phase 2（待定）  | 2-3 周   | 升级 RTC 传输、语义判停、声纹降噪、移动端适配        |
 
 > **总计预估：** 16-22 周（约 4-5.5 个月，1 人全职）。可根据实际人力并行推进。
 

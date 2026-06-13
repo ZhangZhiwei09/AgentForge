@@ -118,7 +118,8 @@ const createSupportTicketDef: ToolDefinition = {
         priority: {
           type: "string",
           enum: ["normal", "urgent"],
-          description: "工单优先级：normal（普通，24小时响应）或 urgent（紧急，1小时响应）",
+          description:
+            "工单优先级：normal（普通，24小时响应）或 urgent（紧急，1小时响应）",
         },
         order_id: {
           type: "string",
@@ -161,7 +162,8 @@ async function createSupportTicketExecute(
   } catch (e) {
     logger.error(e, "create_support_ticket failed");
     return JSON.stringify({
-      error: "工单创建服务暂时不可用，请稍后再试。如有紧急问题，请拨打客服热线：400-XXX-XXXX。",
+      error:
+        "工单创建服务暂时不可用，请稍后再试。如有紧急问题，请拨打客服热线：400-XXX-XXXX。",
     });
   }
 }
@@ -244,7 +246,8 @@ const checkShippingStatusDef: ToolDefinition = {
         },
         order_id: {
           type: "string",
-          description: "订单号（如果没有运单号，可通过订单号关联查询），如 ORD-2024-001234",
+          description:
+            "订单号（如果没有运单号，可通过订单号关联查询），如 ORD-2024-001234",
         },
       },
       required: [],

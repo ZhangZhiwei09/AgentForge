@@ -76,9 +76,7 @@ export function hasUnclosedFence(markdown: string): CardFenceType | null {
   // 对每个 card 开头，检查其后是否有对应的闭合 ```
   // 简化策略：看最后一个 card 开头后面是否有 ``` 闭合它
   const lastStart = starts[starts.length - 1];
-  const afterLastStart = markdown.slice(
-    lastStart.index! + lastStart[0].length,
-  );
+  const afterLastStart = markdown.slice(lastStart.index! + lastStart[0].length);
 
   // 在 card 内容之后查找闭合的 ```
   // 闭合的 ``` 应该在单独一行（前面是 \n，后面是行尾或 \n）

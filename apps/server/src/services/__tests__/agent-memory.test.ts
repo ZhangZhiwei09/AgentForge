@@ -72,8 +72,7 @@ vi.mock("../../db.js", () => ({
     },
     message: {
       create: vi.fn(async (args: { data: Record<string, unknown> }) => {
-        const msgs =
-          messageStore.get(args.data.conversationId as string) || [];
+        const msgs = messageStore.get(args.data.conversationId as string) || [];
         msgs.push(args.data);
         messageStore.set(args.data.conversationId as string, msgs);
         return args.data;
@@ -179,7 +178,11 @@ describe("Agent Memory Compression", () => {
         plan: `Plan ${i + 1}`,
         decision:
           i === 6
-            ? ({ action: "respond", content: "Done", summary: "All done" } as const)
+            ? ({
+                action: "respond",
+                content: "Done",
+                summary: "All done",
+              } as const)
             : i === 0
               ? ({
                   action: "tool_call",

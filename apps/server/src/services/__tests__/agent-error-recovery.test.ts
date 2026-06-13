@@ -2,10 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 // ---- Hoisted mock refs ----
-const {
-  mockAgentStreamChat,
-  mockToolExecute,
-} = vi.hoisted(() => ({
+const { mockAgentStreamChat, mockToolExecute } = vi.hoisted(() => ({
   mockAgentStreamChat: vi.fn(),
   mockToolExecute: vi.fn(),
 }));
@@ -152,7 +149,10 @@ describe("Agent Error Recovery", () => {
             }),
           },
         };
-        yield { type: "done", usage: { prompt_tokens: 10, completion_tokens: 5 } };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 10, completion_tokens: 5 },
+        };
       });
 
       const events = await collect(service.run("conv-err", "Test retry"));
@@ -244,7 +244,10 @@ describe("Agent Error Recovery", () => {
               }),
             },
           };
-          yield { type: "done", usage: { prompt_tokens: 10, completion_tokens: 8 } };
+          yield {
+            type: "done",
+            usage: { prompt_tokens: 10, completion_tokens: 8 },
+          };
         } else {
           // Second call: LLM responds after tool result
           yield {
@@ -262,7 +265,10 @@ describe("Agent Error Recovery", () => {
               }),
             },
           };
-          yield { type: "done", usage: { prompt_tokens: 10, completion_tokens: 5 } };
+          yield {
+            type: "done",
+            usage: { prompt_tokens: 10, completion_tokens: 5 },
+          };
         }
       });
 
@@ -299,10 +305,15 @@ describe("Agent Error Recovery", () => {
             }),
           },
         };
-        yield { type: "done", usage: { prompt_tokens: 10, completion_tokens: 8 } };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 10, completion_tokens: 8 },
+        };
       });
 
-      const eventsPromise = collect(service.run("conv-err", "Test tool degradation"));
+      const eventsPromise = collect(
+        service.run("conv-err", "Test tool degradation"),
+      );
       await vi.runAllTimersAsync();
       const events = await eventsPromise;
 
@@ -342,10 +353,15 @@ describe("Agent Error Recovery", () => {
             }),
           },
         };
-        yield { type: "done", usage: { prompt_tokens: 5, completion_tokens: 3 } };
+        yield {
+          type: "done",
+          usage: { prompt_tokens: 5, completion_tokens: 3 },
+        };
       });
 
-      const eventsPromise = collect(service.run("conv-err", "Test error recording"));
+      const eventsPromise = collect(
+        service.run("conv-err", "Test error recording"),
+      );
       await vi.runAllTimersAsync();
       await eventsPromise;
 

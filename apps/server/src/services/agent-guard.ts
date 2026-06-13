@@ -50,27 +50,65 @@ const MODEL_RATES: Record<string, { prompt: number; completion: number }> = {
 
 // ---- PII 检测模式 ----
 
-const PII_PATTERNS: Array<{ name: string; regex: RegExp; description: string }> = [
+const PII_PATTERNS: Array<{
+  name: string;
+  regex: RegExp;
+  description: string;
+}> = [
   // 中国身份证号（18位）
-  { name: "cn_id_card", regex: /\b\d{17}[\dXx]\b/, description: "中国身份证号" },
+  {
+    name: "cn_id_card",
+    regex: /\b\d{17}[\dXx]\b/,
+    description: "中国身份证号",
+  },
   // 中国手机号
   { name: "cn_phone", regex: /\b1[3-9]\d{9}\b/, description: "中国手机号" },
   // 中国固定电话
-  { name: "cn_landline", regex: /\b0\d{2,3}[-\s]?\d{7,8}\b/, description: "中国固定电话" },
+  {
+    name: "cn_landline",
+    regex: /\b0\d{2,3}[-\s]?\d{7,8}\b/,
+    description: "中国固定电话",
+  },
   // 邮箱地址
-  { name: "email", regex: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/, description: "邮箱地址" },
+  {
+    name: "email",
+    regex: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/,
+    description: "邮箱地址",
+  },
   // 银行卡号（16-19位）
   { name: "bank_card", regex: /\b\d{16,19}\b/, description: "银行卡号" },
   // IP 地址
-  { name: "ip_address", regex: /\b(?:\d{1,3}\.){3}\d{1,3}\b/, description: "IP地址" },
+  {
+    name: "ip_address",
+    regex: /\b(?:\d{1,3}\.){3}\d{1,3}\b/,
+    description: "IP地址",
+  },
   // API Key 模式
-  { name: "api_key", regex: /\b(sk-[a-zA-Z0-9]{20,})|(key-[a-zA-Z0-9]{20,})|(api[_-]?key[=:]\s*['"]?\w{10,})/i, description: "API密钥" },
+  {
+    name: "api_key",
+    regex:
+      /\b(sk-[a-zA-Z0-9]{20,})|(key-[a-zA-Z0-9]{20,})|(api[_-]?key[=:]\s*['"]?\w{10,})/i,
+    description: "API密钥",
+  },
   // 密码字段
-  { name: "password", regex: /(?:password|passwd|pwd|secret)\s*[:=]\s*['"]?\S+['"]?/i, description: "密码信息" },
+  {
+    name: "password",
+    regex: /(?:password|passwd|pwd|secret)\s*[:=]\s*['"]?\S+['"]?/i,
+    description: "密码信息",
+  },
   // 家庭住址（中文）
-  { name: "cn_address", regex: /(?:省|市|区|县|街道|路|号|栋|单元|室).{3,30}(?:省|市|区|县)/, description: "中国地址" },
+  {
+    name: "cn_address",
+    regex: /(?:省|市|区|县|街道|路|号|栋|单元|室).{3,30}(?:省|市|区|县)/,
+    description: "中国地址",
+  },
   // 车牌号
-  { name: "cn_plate", regex: /\b[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤川青藏琼宁][A-Z][A-HJ-NP-Z0-9]{4,5}[A-HJ-NP-Z0-9挂学警港澳]\b/, description: "中国车牌号" },
+  {
+    name: "cn_plate",
+    regex:
+      /\b[京津沪渝冀豫云辽黑湘皖鲁新苏浙赣鄂桂甘晋蒙陕吉闽贵粤川青藏琼宁][A-Z][A-HJ-NP-Z0-9]{4,5}[A-HJ-NP-Z0-9挂学警港澳]\b/,
+    description: "中国车牌号",
+  },
 ];
 
 // ---- 内容安全注入检测（简化版，复用 content-safety 模式） ----
@@ -108,7 +146,10 @@ export class AgentGuardService {
     _args: Record<string, unknown>,
   ): { allowed: boolean; reason?: string } {
     // 黑名单优先
-    if (this.config.deniedTools.length > 0 && this.config.deniedTools.includes(toolName)) {
+    if (
+      this.config.deniedTools.length > 0 &&
+      this.config.deniedTools.includes(toolName)
+    ) {
       return {
         allowed: false,
         reason: `工具 "${toolName}" 已被管理员禁用`,
@@ -116,7 +157,10 @@ export class AgentGuardService {
     }
 
     // 白名单（非空时才生效）
-    if (this.config.allowedTools.length > 0 && !this.config.allowedTools.includes(toolName)) {
+    if (
+      this.config.allowedTools.length > 0 &&
+      !this.config.allowedTools.includes(toolName)
+    ) {
       return {
         allowed: false,
         reason: `工具 "${toolName}" 不在允许列表中。可用工具：${this.config.allowedTools.join(", ")}`,
@@ -177,7 +221,10 @@ export class AgentGuardService {
     model: string,
   ): number {
     const rate = this.getModelRate(model);
-    return (promptTokens / 1000) * rate.prompt + (completionTokens / 1000) * rate.completion;
+    return (
+      (promptTokens / 1000) * rate.prompt +
+      (completionTokens / 1000) * rate.completion
+    );
   }
 
   /**
@@ -189,8 +236,13 @@ export class AgentGuardService {
     estimatedPromptTokens: number,
     estimatedCompletionTokens: number = 0,
   ): { ok: boolean; remainingCents: number; estimatedCost: number } {
-    const estimatedCost = this.estimateCost(estimatedPromptTokens, estimatedCompletionTokens, model);
-    const remainingCents = this.config.maxCostCents - costCentsUsed - estimatedCost;
+    const estimatedCost = this.estimateCost(
+      estimatedPromptTokens,
+      estimatedCompletionTokens,
+      model,
+    );
+    const remainingCents =
+      this.config.maxCostCents - costCentsUsed - estimatedCost;
     return {
       ok: remainingCents > 0,
       remainingCents,
@@ -203,7 +255,11 @@ export class AgentGuardService {
   /**
    * 扫描内容中的敏感信息。
    */
-  scanForPII(content: string): { hasPII: boolean; findings: string[]; maskedContent: string } {
+  scanForPII(content: string): {
+    hasPII: boolean;
+    findings: string[];
+    maskedContent: string;
+  } {
     if (!this.config.piiDetectionEnabled) {
       return { hasPII: false, findings: [], maskedContent: content };
     }
@@ -248,7 +304,10 @@ export class AgentGuardService {
     for (const pattern of CONTENT_SAFETY_PATTERNS) {
       if (pattern.test(content)) {
         const reason = `检测到提示注入模式: ${pattern.source}`;
-        logger.warn({ pattern: pattern.source }, "Content safety violation in agent");
+        logger.warn(
+          { pattern: pattern.source },
+          "Content safety violation in agent",
+        );
         return { safe: false, reason };
       }
     }
@@ -348,7 +407,10 @@ export class AgentGuardService {
    */
   getBudgetSummary(tokensUsed: number, costCentsUsed: number, model: string) {
     const tokenRemaining = Math.max(0, this.config.maxTokens - tokensUsed);
-    const costRemaining = Math.max(0, (this.config.maxCostCents - costCentsUsed) / 100);
+    const costRemaining = Math.max(
+      0,
+      (this.config.maxCostCents - costCentsUsed) / 100,
+    );
 
     return {
       tokens: {
@@ -361,7 +423,9 @@ export class AgentGuardService {
         usedCents: costCentsUsed,
         limitCents: this.config.maxCostCents,
         remainingDollars: costRemaining,
-        percentUsed: Math.round((costCentsUsed / this.config.maxCostCents) * 100),
+        percentUsed: Math.round(
+          (costCentsUsed / this.config.maxCostCents) * 100,
+        ),
       },
       model,
       rate: this.getModelRate(model),

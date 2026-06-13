@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  extractCardBlocks,
-  hasUnclosedFence,
-} from "../card-parser";
+import { extractCardBlocks, hasUnclosedFence } from "../card-parser";
 import type { ContentBlock } from "@agentforge/shared-types";
 
 /** Helper: assert block has data field (exclude TextBlock) */
@@ -121,7 +118,7 @@ print("hello")
     const result = extractCardBlocks(input);
 
     expect(result.blocks).toHaveLength(0);
-    expect(result.cleanMarkdown).toContain('```python');
+    expect(result.cleanMarkdown).toContain("```python");
     expect(result.cleanMarkdown).toContain('print("hello")');
   });
 });
@@ -139,7 +136,7 @@ describe("hasUnclosedFence", () => {
   });
 
   it("detects unclosed order fence", () => {
-    const input = "前面文本\n```card:order\n{\"orderId\":";
+    const input = '前面文本\n```card:order\n{"orderId":';
     expect(hasUnclosedFence(input)).toBe("order");
   });
 

@@ -362,7 +362,10 @@ export class AgentService {
 
           // Fatal errors — fail immediately
           if (classified.category === "fatal") {
-            logger.error({ sessionId, error: classified.message, attempt: llmAttempt }, "LLM call fatal error");
+            logger.error(
+              { sessionId, error: classified.message, attempt: llmAttempt },
+              "LLM call fatal error",
+            );
             yield {
               type: "agent_error",
               error: `LLM fatal: ${classified.message}`,
@@ -373,10 +376,22 @@ export class AgentService {
           }
 
           // Retryable — retry if attempts remain
-          if (classified.category === "retryable" && llmAttempt < maxLlmAttempts) {
-            const delay = calculateRetryDelayForAgent(DEFAULT_LLM_RETRY, llmAttempt);
+          if (
+            classified.category === "retryable" &&
+            llmAttempt < maxLlmAttempts
+          ) {
+            const delay = calculateRetryDelayForAgent(
+              DEFAULT_LLM_RETRY,
+              llmAttempt,
+            );
             logger.warn(
-              { sessionId, attempt: llmAttempt, maxAttempts: maxLlmAttempts, delayMs: delay, error: classified.message },
+              {
+                sessionId,
+                attempt: llmAttempt,
+                maxAttempts: maxLlmAttempts,
+                delayMs: delay,
+                error: classified.message,
+              },
               "LLM call retryable error, retrying",
             );
             await this.delay(delay);
@@ -385,7 +400,12 @@ export class AgentService {
 
           // Degradable or out of retries — log and degrade
           logger.warn(
-            { sessionId, attempt: llmAttempt, category: classified.category, error: classified.message },
+            {
+              sessionId,
+              attempt: llmAttempt,
+              category: classified.category,
+              error: classified.message,
+            },
             "LLM call degraded after attempts exhausted",
           );
         }
@@ -609,9 +629,7 @@ export class AgentService {
           const compResult = this.compressor.compress(scratchpad);
           if (compResult.compressedCount > 0) {
             compressedSummary = compResult.summary;
-            keptStepNumbers = new Set(
-              compResult.keptSteps.map((s) => s.step),
-            );
+            keptStepNumbers = new Set(compResult.keptSteps.map((s) => s.step));
           }
           yield {
             type: "agent_guard_block",
@@ -662,9 +680,7 @@ export class AgentService {
           const compResult = this.compressor.compress(scratchpad);
           if (compResult.compressedCount > 0) {
             compressedSummary = compResult.summary;
-            keptStepNumbers = new Set(
-              compResult.keptSteps.map((s) => s.step),
-            );
+            keptStepNumbers = new Set(compResult.keptSteps.map((s) => s.step));
           }
         }
       } else if (decision.action === "ask_user") {
@@ -1087,7 +1103,11 @@ export class AgentService {
         if (llmAttempt > 1) {
           llmResponse = "";
           agentDecision = null;
-          yield { type: "agent_clear_stream", message_id: streamMsgId, step: totalSteps };
+          yield {
+            type: "agent_clear_stream",
+            message_id: streamMsgId,
+            step: totalSteps,
+          };
         }
 
         try {
@@ -1150,8 +1170,15 @@ export class AgentService {
           lastLlmError = classified.message;
 
           if (classified.category === "fatal") {
-            logger.error({ sessionId, error: classified.message, attempt: llmAttempt }, "LLM call fatal error (continue loop)");
-            yield { type: "agent_error", error: `LLM fatal: ${classified.message}`, step: totalSteps };
+            logger.error(
+              { sessionId, error: classified.message, attempt: llmAttempt },
+              "LLM call fatal error (continue loop)",
+            );
+            yield {
+              type: "agent_error",
+              error: `LLM fatal: ${classified.message}`,
+              step: totalSteps,
+            };
             await this.saveSession(
               this.sessionRecord(sessionId, conversationId, task),
               scratchpad,
@@ -1161,10 +1188,22 @@ export class AgentService {
             return;
           }
 
-          if (classified.category === "retryable" && llmAttempt < maxLlmAttempts) {
-            const delay = calculateRetryDelayForAgent(DEFAULT_LLM_RETRY, llmAttempt);
+          if (
+            classified.category === "retryable" &&
+            llmAttempt < maxLlmAttempts
+          ) {
+            const delay = calculateRetryDelayForAgent(
+              DEFAULT_LLM_RETRY,
+              llmAttempt,
+            );
             logger.warn(
-              { sessionId, attempt: llmAttempt, maxAttempts: maxLlmAttempts, delayMs: delay, error: classified.message },
+              {
+                sessionId,
+                attempt: llmAttempt,
+                maxAttempts: maxLlmAttempts,
+                delayMs: delay,
+                error: classified.message,
+              },
               "LLM call retryable error in continue loop, retrying",
             );
             await this.delay(delay);
@@ -1172,7 +1211,12 @@ export class AgentService {
           }
 
           logger.warn(
-            { sessionId, attempt: llmAttempt, category: classified.category, error: classified.message },
+            {
+              sessionId,
+              attempt: llmAttempt,
+              category: classified.category,
+              error: classified.message,
+            },
             "LLM call degraded in continue loop",
           );
         }
@@ -1358,9 +1402,7 @@ export class AgentService {
           const cResult = this.compressor.compress(scratchpad);
           if (cResult.compressedCount > 0) {
             compressedSummary = cResult.summary;
-            keptStepNumbers = new Set(
-              cResult.keptSteps.map((s) => s.step),
-            );
+            keptStepNumbers = new Set(cResult.keptSteps.map((s) => s.step));
           }
         }
       } else if (decision.action === "ask_user") {
@@ -1369,9 +1411,7 @@ export class AgentService {
         const cResultPause = this.compressor.compress(scratchpad);
         if (cResultPause.compressedCount > 0) {
           compressedSummary = cResultPause.summary;
-          keptStepNumbers = new Set(
-            cResultPause.keptSteps.map((s) => s.step),
-          );
+          keptStepNumbers = new Set(cResultPause.keptSteps.map((s) => s.step));
         }
         await this.saveSession(
           this.sessionRecord(sessionId, conversationId, task),
@@ -1420,9 +1460,7 @@ export class AgentService {
           compressedSummary,
           `\n\n## 保留的关键步骤`,
         );
-        const keptSteps = scratchpad.filter((s) =>
-          keptStepNumbers.has(s.step),
-        );
+        const keptSteps = scratchpad.filter((s) => keptStepNumbers.has(s.step));
         for (const step of keptSteps) {
           parts.push(this.formatStepForContext(step));
         }
@@ -1606,7 +1644,8 @@ export class AgentService {
         conversationMessages.push({
           role: "tool",
           tool_call_id:
-            conversationMessages[conversationMessages.length - 1].tool_calls![0].id,
+            conversationMessages[conversationMessages.length - 1].tool_calls![0]
+              .id,
           content: finalResult,
         });
 
@@ -1627,9 +1666,18 @@ export class AgentService {
 
         // Retryable or degradable — retry if attempts remain
         if (attempts < DEFAULT_TOOL_RETRY.maxAttempts - 1) {
-          const delay = calculateRetryDelayForAgent(DEFAULT_TOOL_RETRY, attempts + 1);
+          const delay = calculateRetryDelayForAgent(
+            DEFAULT_TOOL_RETRY,
+            attempts + 1,
+          );
           logger.warn(
-            { tool: toolName, attempt: attempts + 1, delayMs: delay, error: classified.message, sessionId },
+            {
+              tool: toolName,
+              attempt: attempts + 1,
+              delayMs: delay,
+              error: classified.message,
+              sessionId,
+            },
             "Tool execution retry",
           );
           await this.delay(delay);
@@ -1643,8 +1691,16 @@ export class AgentService {
       "Tool execution degraded after retries exhausted",
     );
 
-    const classifiedFinal = classifyError(new Error(lastError), "tool", toolName);
-    const degradationMsg = buildDegradationMessage(classifiedFinal, toolName, attempts);
+    const classifiedFinal = classifyError(
+      new Error(lastError),
+      "tool",
+      toolName,
+    );
+    const degradationMsg = buildDegradationMessage(
+      classifiedFinal,
+      toolName,
+      attempts,
+    );
     const alternatives = getAlternativeTools(toolName);
 
     // Record the degradation message as the tool result

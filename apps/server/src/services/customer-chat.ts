@@ -34,7 +34,10 @@ import type {
   RouteAgent,
   KnowledgeChunkResult,
 } from "./customer-chat/types.js";
-import { SORRY_TEMPLATE, type ChatResponse } from "./customer-chat/validation.js";
+import {
+  SORRY_TEMPLATE,
+  type ChatResponse,
+} from "./customer-chat/validation.js";
 
 // Re-export for backward compatibility with existing tests
 export {
@@ -76,7 +79,8 @@ interface ConversationalRule {
 
 const CONVERSATIONAL_RULES: ConversationalRule[] = [
   {
-    pattern: /^(你好|hi|hello|嗨|您好|早上好|下午好|晚上好|在吗|在不在)[\s!！。.,，]*$/,
+    pattern:
+      /^(你好|hi|hello|嗨|您好|早上好|下午好|晚上好|在吗|在不在)[\s!！。.,，]*$/,
     response: {
       answer:
         "您好！欢迎来到 AgentForge 智能客服中心 😊 请问有什么可以帮助您的？",
@@ -84,7 +88,8 @@ const CONVERSATIONAL_RULES: ConversationalRule[] = [
     },
   },
   {
-    pattern: /^(谢谢|感谢|多谢|谢谢你|谢谢您|thanks|thank you|3q)[\s!！。.,，]*$/,
+    pattern:
+      /^(谢谢|感谢|多谢|谢谢你|谢谢您|thanks|thank you|3q)[\s!！。.,，]*$/,
     response: {
       answer:
         "不客气！很高兴能帮到您。如果后续还有任何问题，随时联系我。祝您生活愉快！",

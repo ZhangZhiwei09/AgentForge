@@ -143,9 +143,7 @@ export function validateBusinessResponse(
       /(退货|退款|换货|物流|快递|发货|运费)/,
       /(会员|积分|等级|优惠券|折扣)/,
     ];
-    const hasFactualClaims = factualIndicators.some((p) =>
-      p.test(data.answer),
-    );
+    const hasFactualClaims = factualIndicators.some((p) => p.test(data.answer));
     if (hasFactualClaims) {
       return {
         valid: false,

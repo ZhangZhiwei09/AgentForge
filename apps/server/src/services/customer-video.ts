@@ -234,9 +234,7 @@ export class CustomerVideoService {
   async close(): Promise<void> {
     this.abortController?.abort();
 
-    const durationSec = Math.round(
-      (Date.now() - this.sessionStartTime) / 1000,
-    );
+    const durationSec = Math.round((Date.now() - this.sessionStartTime) / 1000);
 
     try {
       await prisma.videoSession.upsert({
@@ -396,8 +394,7 @@ export class CustomerVideoService {
       if (signal.aborted) return;
 
       // Step 2: Knowledge Base Search (NEW — inherited from CustomerChatService)
-      const { context: knowledgeContext } =
-        await this.fetchKnowledge(userText);
+      const { context: knowledgeContext } = await this.fetchKnowledge(userText);
 
       // Step 3: Build multimodal message with video frames
       const hasFrames =
@@ -419,7 +416,8 @@ export class CustomerVideoService {
       // Build system prompt with knowledge context
       const systemPrompt = CUSTOMER_SERVICE_PROMPT.replace(
         "{knowledge_context}",
-        knowledgeContext || "\n\n（暂无知识库参考资料，请引导用户联系人工客服。）",
+        knowledgeContext ||
+          "\n\n（暂无知识库参考资料，请引导用户联系人工客服。）",
       );
 
       // Resolve conversation for history loading
@@ -439,7 +437,10 @@ export class CustomerVideoService {
           | string
           | Array<
               | { type: "text"; text: string }
-              | { type: "image_url"; image_url: { url: string; detail?: string } }
+              | {
+                  type: "image_url";
+                  image_url: { url: string; detail?: string };
+                }
             >;
       }> = [];
 

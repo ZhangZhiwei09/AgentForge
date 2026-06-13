@@ -33,9 +33,7 @@ export function useCustomerChatStream() {
   const streamingRef = useRef(false);
   const [currentMeta, setCurrentMeta] = useState<StreamMeta | null>(null);
   const [sessionId, setSessionId] = useState<string>(() => {
-    return (
-      localStorage.getItem("customer_chat_session_id") || generateUUID()
-    );
+    return localStorage.getItem("customer_chat_session_id") || generateUUID();
   });
   const abortRef = useRef<AbortController | null>(null);
 

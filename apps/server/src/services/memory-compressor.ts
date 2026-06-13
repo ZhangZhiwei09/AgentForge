@@ -270,18 +270,14 @@ export class MemoryCompressor {
     const recoveryKeywords = ["修复", "纠正", "重试", "替代", "降级", "错误"];
     const analysisText = step.analysis + step.plan;
     return (
-      recoveryKeywords.some((kw) => analysisText.includes(kw)) ||
-      !!step.error
+      recoveryKeywords.some((kw) => analysisText.includes(kw)) || !!step.error
     );
   }
 
   /**
    * 生成规则摘要（中文）。
    */
-  private generateSummary(
-    compressed: ScoredStep[],
-    keptCount: number,
-  ): string {
+  private generateSummary(compressed: ScoredStep[], keptCount: number): string {
     if (compressed.length === 0) return "";
 
     const stepNumbers = compressed.map((s) => `第${s.step.step}步`).join("、");

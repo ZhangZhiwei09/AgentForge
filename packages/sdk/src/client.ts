@@ -223,10 +223,14 @@ export class AgentForgeClient {
   }
 
   async listProjects(): Promise<{ projects: AppProjectDTO[]; count: number }> {
-    return this.request<{ projects: AppProjectDTO[]; count: number }>("/api/projects");
+    return this.request<{ projects: AppProjectDTO[]; count: number }>(
+      "/api/projects",
+    );
   }
 
-  async getProject(id: string): Promise<AppProjectDTO & { files: ProjectFileDTO[] }> {
+  async getProject(
+    id: string,
+  ): Promise<AppProjectDTO & { files: ProjectFileDTO[] }> {
     return this.request<AppProjectDTO & { files: ProjectFileDTO[] }>(
       `/api/projects/${id}`,
     );
@@ -250,11 +254,14 @@ export class AgentForgeClient {
     projectId: string,
     input: GenerateAppRequest,
   ): Promise<Response> {
-    const res = await fetch(`${this.baseUrl}/api/projects/${projectId}/generate`, {
-      method: "POST",
-      headers: this.authHeaders(),
-      body: JSON.stringify(input),
-    });
+    const res = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/generate`,
+      {
+        method: "POST",
+        headers: this.authHeaders(),
+        body: JSON.stringify(input),
+      },
+    );
     if (!res.ok) {
       const error = await res.json().catch(() => ({ detail: res.statusText }));
       throw new Error(error.detail ?? `HTTP ${res.status}`);
@@ -262,7 +269,9 @@ export class AgentForgeClient {
     return res; // Returns Response for SSE streaming
   }
 
-  async listProjectFiles(id: string): Promise<{ files: ProjectFileDTO[]; count: number }> {
+  async listProjectFiles(
+    id: string,
+  ): Promise<{ files: ProjectFileDTO[]; count: number }> {
     return this.request<{ files: ProjectFileDTO[]; count: number }>(
       `/api/projects/${id}/files`,
     );

@@ -366,7 +366,9 @@ function formatPolicyKnowledge(chunks: KnowledgeChunkResult[]): string {
     lines.push("> 以下信息来自知识库，仅供参考：\n");
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
-      lines.push(`**${chunk!.docTitle}** (相关度: ${(chunk!.score * 100).toFixed(0)}%)\n`);
+      lines.push(
+        `**${chunk!.docTitle}** (相关度: ${(chunk!.score * 100).toFixed(0)}%)\n`,
+      );
       lines.push(chunk!.content);
       if (i < chunks.length - 1) lines.push("\n---\n");
     }
@@ -438,7 +440,11 @@ async function callLLMWithRetry(
       let citationReport: CitationReport | undefined;
 
       // 对成功的解析结果运行 Citation 引证校验
-      if (parsed && knowledgeChunks.length > 0 && parsed.answer !== SORRY_TEMPLATE) {
+      if (
+        parsed &&
+        knowledgeChunks.length > 0 &&
+        parsed.answer !== SORRY_TEMPLATE
+      ) {
         try {
           citationReport = await citationVerifier.verify(
             parsed.answer,
@@ -485,9 +491,7 @@ async function callLLMWithRetry(
 
   // ── 备选模型降级（1 次） ──
   const allProviders = listProviders();
-  const fallbackProvider = allProviders.find(
-    (p) => p.type !== primaryProvider,
-  );
+  const fallbackProvider = allProviders.find((p) => p.type !== primaryProvider);
   if (fallbackProvider) {
     const fallbackModel = fallbackProvider.models[0]?.id || primaryModel;
     try {
@@ -508,7 +512,11 @@ async function callLLMWithRetry(
 
       const parsed = parseChatResponse(rawText);
       let citationReport: CitationReport | undefined;
-      if (parsed && knowledgeChunks.length > 0 && parsed.answer !== SORRY_TEMPLATE) {
+      if (
+        parsed &&
+        knowledgeChunks.length > 0 &&
+        parsed.answer !== SORRY_TEMPLATE
+      ) {
         try {
           citationReport = await citationVerifier.verify(
             parsed.answer,
@@ -600,9 +608,7 @@ export async function fetchKnowledge(userMessage: string): Promise<{
 
     if (!results.length) return { context: "", results: [] };
 
-    const lines = [
-      "【知识库参考资料 —— 以下每条数据均来自知识库，不可修改】",
-    ];
+    const lines = ["【知识库参考资料 —— 以下每条数据均来自知识库，不可修改】"];
     const scoredResults: KnowledgeChunkResult[] = [];
     const seenContent = new Set<string>();
 
@@ -650,7 +656,10 @@ export async function injectMemories(
     const relevant = memories.filter((m) => m.score > 0.3);
     if (relevant.length > 0) {
       const memoryText = relevant.map((m) => `- ${m.content}`).join("\n");
-      return [MEMORY_PROMPT_PREFIX + memoryText, relevant.map((m) => m.content)];
+      return [
+        MEMORY_PROMPT_PREFIX + memoryText,
+        relevant.map((m) => m.content),
+      ];
     }
   } catch (e) {
     logger.warn(e, "Customer memory injection failed");

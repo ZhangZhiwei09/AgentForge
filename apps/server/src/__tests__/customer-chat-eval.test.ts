@@ -211,9 +211,8 @@ describe("确定性上下文协议", () => {
 // ═══════════════════════════════════════════════════
 describe("Citation 引证校验", () => {
   it("无 KB chunk 时应返回空引证报告", async () => {
-    const { CitationVerifier } = await import(
-      "../services/customer-chat/citation-verifier.js"
-    );
+    const { CitationVerifier } =
+      await import("../services/customer-chat/citation-verifier.js");
     const verifier = new CitationVerifier();
     const report = await verifier.verify("退货期限为7天。", []);
     expect(report.coverageRate).toBe(0);
@@ -222,9 +221,8 @@ describe("Citation 引证校验", () => {
   });
 
   it("应检测事实性句子中的数字和业务关键词", async () => {
-    const { CitationVerifier } = await import(
-      "../services/customer-chat/citation-verifier.js"
-    );
+    const { CitationVerifier } =
+      await import("../services/customer-chat/citation-verifier.js");
     const verifier = new CitationVerifier();
     const kbChunks = [
       "退换货政策：自签收之日起7天内可申请无理由退货，商品需保持完好不影响二次销售。退回运费由买方承担。",
@@ -241,9 +239,8 @@ describe("Citation 引证校验", () => {
   });
 
   it("与 KB 高度匹配的回复应获得较高覆盖率", async () => {
-    const { CitationVerifier } = await import(
-      "../services/customer-chat/citation-verifier.js"
-    );
+    const { CitationVerifier } =
+      await import("../services/customer-chat/citation-verifier.js");
     const verifier = new CitationVerifier();
     const kbChunks = [
       "退换货政策：自签收之日起7天内可申请无理由退货，商品需保持完好不影响二次销售。",
@@ -258,14 +255,12 @@ describe("Citation 引证校验", () => {
   });
 
   it("embedding provider 不可用时应优雅降级到 keyword fallback", async () => {
-    const { CitationVerifier } = await import(
-      "../services/customer-chat/citation-verifier.js"
-    );
+    const { CitationVerifier } =
+      await import("../services/customer-chat/citation-verifier.js");
     const verifier = new CitationVerifier();
-    const report = await verifier.verify(
-      "退货需要7天内申请，商品必须完好。",
-      ["退货政策：7天无理由退货需保证商品完好不影响二次销售。"],
-    );
+    const report = await verifier.verify("退货需要7天内申请，商品必须完好。", [
+      "退货政策：7天无理由退货需保证商品完好不影响二次销售。",
+    ]);
     expect(report.level).toBeDefined();
     expect(report.sentences.length).toBeGreaterThan(0);
     expect(report.coverageRate).toBeGreaterThanOrEqual(0);
@@ -392,7 +387,8 @@ describe("改动前后对比", () => {
     validation: {
       before: "无结构化校验，仅后置 LLM 核验（不可靠）",
       mid: "5层校验管线（格式→Schema→禁止词→KB关键词命中率→固定话术）",
-      after: "5层校验 + Citation 逐句语义引证（格式→Schema→禁止词→语义引证→固定话术）",
+      after:
+        "5层校验 + Citation 逐句语义引证（格式→Schema→禁止词→语义引证→固定话术）",
     },
     retry: {
       before: "无重试机制",

@@ -134,7 +134,10 @@ function getEmptyPreview(): string {
 </html>`;
 }
 
-function getReactPreviewPlaceholder(componentCount: number, mainFile: string): string {
+function getReactPreviewPlaceholder(
+  componentCount: number,
+  mainFile: string,
+): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>

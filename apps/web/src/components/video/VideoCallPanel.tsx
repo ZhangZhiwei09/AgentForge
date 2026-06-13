@@ -8,7 +8,15 @@
 //   4. WebSocket receives: transcript, vision_context, response_text, audio (MP3), done
 //   5. AudioContext decodes and plays TTS MP3 chunks
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Video, VideoOff, Mic, MicOff, PhoneOff, Eye, EyeOff } from "lucide-react";
+import {
+  Video,
+  VideoOff,
+  Mic,
+  MicOff,
+  PhoneOff,
+  Eye,
+  EyeOff,
+} from "lucide-react";
 import { useChatStore, type VideoStatus } from "../../stores/chat";
 
 // ---- Constants ----
@@ -132,14 +140,16 @@ export function VideoCallPanel() {
           // Play TTS audio (base64 MP3)
           const audioData = base64ToArrayBuffer(msg.data);
           if (audioCtxRef.current && audioData) {
-            audioCtxRef.current.decodeAudioData(audioData, (buffer) => {
-              const source = audioCtxRef.current!.createBufferSource();
-              source.buffer = buffer;
-              source.connect(audioCtxRef.current!.destination);
-              source.start(0);
-            }).catch(() => {
-              // Audio decode failed — non-critical
-            });
+            audioCtxRef.current
+              .decodeAudioData(audioData, (buffer) => {
+                const source = audioCtxRef.current!.createBufferSource();
+                source.buffer = buffer;
+                source.connect(audioCtxRef.current!.destination);
+                source.start(0);
+              })
+              .catch(() => {
+                // Audio decode failed — non-critical
+              });
           }
           break;
         }
@@ -216,14 +226,16 @@ export function VideoCallPanel() {
         setIsCallActive(true);
         setVideoActive(true);
         // Send start_video
-        ws.send(JSON.stringify({
-          type: "start_video",
-          config: {
-            width: VIDEO_WIDTH,
-            height: VIDEO_HEIGHT,
-            fps: Math.round(1000 / FRAME_CAPTURE_INTERVAL_MS),
-          },
-        }));
+        ws.send(
+          JSON.stringify({
+            type: "start_video",
+            config: {
+              width: VIDEO_WIDTH,
+              height: VIDEO_HEIGHT,
+              fps: Math.round(1000 / FRAME_CAPTURE_INTERVAL_MS),
+            },
+          }),
+        );
       };
 
       ws.onmessage = (event) => {
@@ -310,7 +322,6 @@ export function VideoCallPanel() {
           );
         }
       }, FRAME_CAPTURE_INTERVAL_MS);
-
     } catch (err: unknown) {
       const msg =
         err instanceof Error ? err.message : "Camera/mic access denied";
@@ -380,9 +391,7 @@ export function VideoCallPanel() {
             isCallActive ? "bg-green-400 animate-pulse" : "bg-gray-500"
           }`}
         />
-        <span
-          className={`text-xs font-medium ${STATUS_COLORS[videoStatus]}`}
-        >
+        <span className={`text-xs font-medium ${STATUS_COLORS[videoStatus]}`}>
           {STATUS_LABELS[videoStatus]}
         </span>
         {videoVisionContext && (
@@ -433,9 +442,18 @@ export function VideoCallPanel() {
           <div className="absolute bottom-2 right-2 bg-blue-600/80 rounded-lg px-3 py-1.5 text-xs">
             <div className="flex items-center gap-1.5">
               <div className="flex gap-0.5">
-                <span className="w-1 h-3 bg-white rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-1 h-3 bg-white rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-1 h-3 bg-white rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                <span
+                  className="w-1 h-3 bg-white rounded-full animate-bounce"
+                  style={{ animationDelay: "0ms" }}
+                />
+                <span
+                  className="w-1 h-3 bg-white rounded-full animate-bounce"
+                  style={{ animationDelay: "150ms" }}
+                />
+                <span
+                  className="w-1 h-3 bg-white rounded-full animate-bounce"
+                  style={{ animationDelay: "300ms" }}
+                />
               </div>
               AI Speaking...
             </div>
@@ -581,7 +599,8 @@ export function VideoCallPanel() {
       {isCallActive && isVisionEnabled && (
         <div className="p-2 border-t border-gray-700 text-xs text-gray-500 flex items-center gap-2">
           <Eye className="w-3 h-3 text-purple-400" />
-          AI can see your video · Frame capture: every {FRAME_CAPTURE_INTERVAL_MS / 1000}s
+          AI can see your video · Frame capture: every{" "}
+          {FRAME_CAPTURE_INTERVAL_MS / 1000}s
         </div>
       )}
     </div>

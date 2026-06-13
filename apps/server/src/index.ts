@@ -98,23 +98,26 @@ async function main() {
 // ---- WebSocket Upgrade Handler (server-level, no Hono response cycle) ----
 
 async function setupWebSocketUpgrades(httpServer: Server): Promise<void> {
-  httpServer.on("upgrade", (request: IncomingMessage, socket: Socket, head: Buffer) => {
-    const url = new URL(
-      request.url || "/",
-      `http://${request.headers.host || "localhost"}`,
-    );
+  httpServer.on(
+    "upgrade",
+    (request: IncomingMessage, socket: Socket, head: Buffer) => {
+      const url = new URL(
+        request.url || "/",
+        `http://${request.headers.host || "localhost"}`,
+      );
 
-    // ---- /api/customer-chat/video/stream ----
-    if (url.pathname === "/api/customer-chat/video/stream") {
-      handleCustomerVideoUpgrade(request, socket, head, url);
-      return;
-    }
+      // ---- /api/customer-chat/video/stream ----
+      if (url.pathname === "/api/customer-chat/video/stream") {
+        handleCustomerVideoUpgrade(request, socket, head, url);
+        return;
+      }
 
-    // Other WebSocket paths (/api/voice/stream, /api/video/stream) are
-    // handled by their respective Hono routes. Destroy the socket so
-    // the Hono handler can pick it up via the normal request flow.
-    socket.destroy();
-  });
+      // Other WebSocket paths (/api/voice/stream, /api/video/stream) are
+      // handled by their respective Hono routes. Destroy the socket so
+      // the Hono handler can pick it up via the normal request flow.
+      socket.destroy();
+    },
+  );
 }
 
 async function handleCustomerVideoUpgrade(
@@ -124,9 +127,7 @@ async function handleCustomerVideoUpgrade(
   url: URL,
 ): Promise<void> {
   const { WebSocketServer } = await import("ws");
-  const { CustomerVideoService } = await import(
-    "./services/customer-video.js"
-  );
+  const { CustomerVideoService } = await import("./services/customer-video.js");
   const { logger: log } = await import("@agentforge/logger");
 
   const sessionId = url.searchParams.get("session_id") || null;

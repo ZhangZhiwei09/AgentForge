@@ -109,7 +109,14 @@ const SEED_ORDERS: Order[] = [
     orderId: "ORD-2024-001234",
     userId: "user_demo_001",
     status: "shipped",
-    items: [{ name: "无线蓝牙耳机 Pro", sku: "SKU-A1001", quantity: 1, unitPrice: 299.0 }],
+    items: [
+      {
+        name: "无线蓝牙耳机 Pro",
+        sku: "SKU-A1001",
+        quantity: 1,
+        unitPrice: 299.0,
+      },
+    ],
     subtotal: 299.0,
     shippingFee: 0,
     discount: 0,
@@ -122,9 +129,24 @@ const SEED_ORDERS: Order[] = [
       destination: "北京",
       estimatedDelivery: "2026-06-15",
       history: [
-        { time: "2026-06-13 14:30", location: "上海分拣中心", status: "arrived_at_hub", description: "快件到达上海分拣中心" },
-        { time: "2026-06-12 22:00", location: "深圳转运中心", status: "departed", description: "快件已离开深圳转运中心" },
-        { time: "2026-06-12 10:15", location: "深圳福田网点", status: "picked_up", description: "商家已发货，快递员已揽收" },
+        {
+          time: "2026-06-13 14:30",
+          location: "上海分拣中心",
+          status: "arrived_at_hub",
+          description: "快件到达上海分拣中心",
+        },
+        {
+          time: "2026-06-12 22:00",
+          location: "深圳转运中心",
+          status: "departed",
+          description: "快件已离开深圳转运中心",
+        },
+        {
+          time: "2026-06-12 10:15",
+          location: "深圳福田网点",
+          status: "picked_up",
+          description: "商家已发货，快递员已揽收",
+        },
       ],
     },
     createdAt: "2026-06-10",
@@ -135,7 +157,12 @@ const SEED_ORDERS: Order[] = [
     userId: "user_demo_001",
     status: "out_for_delivery",
     items: [
-      { name: "有机绿茶礼盒装", sku: "SKU-T2003", quantity: 2, unitPrice: 128.0 },
+      {
+        name: "有机绿茶礼盒装",
+        sku: "SKU-T2003",
+        quantity: 2,
+        unitPrice: 128.0,
+      },
       { name: "陶瓷茶杯套装", sku: "SKU-H3010", quantity: 1, unitPrice: 89.0 },
     ],
     subtotal: 345.0,
@@ -150,9 +177,24 @@ const SEED_ORDERS: Order[] = [
       destination: "北京",
       estimatedDelivery: "2026-06-14",
       history: [
-        { time: "2026-06-13 09:30", location: "北京朝阳配送站", status: "out_for_delivery", description: "快递员正在派送中" },
-        { time: "2026-06-13 06:00", location: "北京分拣中心", status: "arrived_at_hub", description: "快件到达北京分拣中心" },
-        { time: "2026-06-12 15:00", location: "杭州转运中心", status: "departed", description: "快件离开杭州" },
+        {
+          time: "2026-06-13 09:30",
+          location: "北京朝阳配送站",
+          status: "out_for_delivery",
+          description: "快递员正在派送中",
+        },
+        {
+          time: "2026-06-13 06:00",
+          location: "北京分拣中心",
+          status: "arrived_at_hub",
+          description: "快件到达北京分拣中心",
+        },
+        {
+          time: "2026-06-12 15:00",
+          location: "杭州转运中心",
+          status: "departed",
+          description: "快件离开杭州",
+        },
       ],
     },
     createdAt: "2026-06-09",
@@ -162,7 +204,14 @@ const SEED_ORDERS: Order[] = [
     orderId: "ORD-2024-001345",
     userId: "user_demo_001",
     status: "delivered",
-    items: [{ name: "夏季轻薄防晒霜 SPF50+", sku: "SKU-B5007", quantity: 1, unitPrice: 159.0 }],
+    items: [
+      {
+        name: "夏季轻薄防晒霜 SPF50+",
+        sku: "SKU-B5007",
+        quantity: 1,
+        unitPrice: 159.0,
+      },
+    ],
     subtotal: 159.0,
     shippingFee: 0,
     discount: 0,
@@ -175,9 +224,24 @@ const SEED_ORDERS: Order[] = [
       destination: "北京",
       estimatedDelivery: "2026-06-11",
       history: [
-        { time: "2026-06-11 11:20", location: "北京", status: "delivered", description: "快件已签收" },
-        { time: "2026-06-11 08:00", location: "北京配送站", status: "out_for_delivery", description: "快递员派送中" },
-        { time: "2026-06-10 20:00", location: "广州转运中心", status: "departed", description: "快件离开广州" },
+        {
+          time: "2026-06-11 11:20",
+          location: "北京",
+          status: "delivered",
+          description: "快件已签收",
+        },
+        {
+          time: "2026-06-11 08:00",
+          location: "北京配送站",
+          status: "out_for_delivery",
+          description: "快递员派送中",
+        },
+        {
+          time: "2026-06-10 20:00",
+          location: "广州转运中心",
+          status: "departed",
+          description: "快件离开广州",
+        },
       ],
     },
     createdAt: "2026-06-07",
@@ -188,7 +252,12 @@ const SEED_ORDERS: Order[] = [
     userId: "user_demo_001",
     status: "processing",
     items: [
-      { name: "机械键盘 Cherry轴", sku: "SKU-C6002", quantity: 1, unitPrice: 499.0 },
+      {
+        name: "机械键盘 Cherry轴",
+        sku: "SKU-C6002",
+        quantity: 1,
+        unitPrice: 499.0,
+      },
       { name: "鼠标垫超大号", sku: "SKU-C6010", quantity: 2, unitPrice: 39.0 },
     ],
     subtotal: 577.0,
@@ -203,7 +272,12 @@ const SEED_ORDERS: Order[] = [
       destination: "北京",
       estimatedDelivery: "2026-06-17",
       history: [
-        { time: "2026-06-13 08:00", location: "深圳", status: "processing", description: "订单已确认，仓库配货中" },
+        {
+          time: "2026-06-13 08:00",
+          location: "深圳",
+          status: "processing",
+          description: "订单已确认，仓库配货中",
+        },
       ],
     },
     createdAt: "2026-06-13",
@@ -213,7 +287,14 @@ const SEED_ORDERS: Order[] = [
     orderId: "ORD-2024-001450",
     userId: "user_demo_001",
     status: "pending_payment",
-    items: [{ name: "冬季羽绒服 男款", sku: "SKU-F8003", quantity: 1, unitPrice: 899.0 }],
+    items: [
+      {
+        name: "冬季羽绒服 男款",
+        sku: "SKU-F8003",
+        quantity: 1,
+        unitPrice: 899.0,
+      },
+    ],
     subtotal: 899.0,
     shippingFee: 0,
     discount: 100.0,
@@ -235,7 +316,14 @@ const SEED_ORDERS: Order[] = [
     orderId: "ORD-2024-001490",
     userId: "user_demo_001",
     status: "cancelled",
-    items: [{ name: "手机壳 iPhone 15 Pro", sku: "SKU-M9001", quantity: 1, unitPrice: 49.0 }],
+    items: [
+      {
+        name: "手机壳 iPhone 15 Pro",
+        sku: "SKU-M9001",
+        quantity: 1,
+        unitPrice: 49.0,
+      },
+    ],
     subtotal: 49.0,
     shippingFee: 10.0,
     discount: 0,
@@ -248,7 +336,12 @@ const SEED_ORDERS: Order[] = [
       destination: "北京",
       estimatedDelivery: "",
       history: [
-        { time: "2026-06-08 10:00", location: "上海", status: "cancelled", description: "用户取消订单" },
+        {
+          time: "2026-06-08 10:00",
+          location: "上海",
+          status: "cancelled",
+          description: "用户取消订单",
+        },
       ],
     },
     createdAt: "2026-06-07",
@@ -258,7 +351,14 @@ const SEED_ORDERS: Order[] = [
     orderId: "ORD-2024-001520",
     userId: "user_demo_001",
     status: "refunded",
-    items: [{ name: "智能手表 运动版", sku: "SKU-W7001", quantity: 1, unitPrice: 1299.0 }],
+    items: [
+      {
+        name: "智能手表 运动版",
+        sku: "SKU-W7001",
+        quantity: 1,
+        unitPrice: 1299.0,
+      },
+    ],
     subtotal: 1299.0,
     shippingFee: 0,
     discount: 0,
@@ -271,9 +371,24 @@ const SEED_ORDERS: Order[] = [
       destination: "北京",
       estimatedDelivery: "2026-06-05",
       history: [
-        { time: "2026-06-10", location: "北京", status: "refunded", description: "退款已完成，¥1299.00退回原支付方式" },
-        { time: "2026-06-08", location: "北京仓库", status: "return_received", description: "退货商品已签收，质检中" },
-        { time: "2026-06-05", location: "北京", status: "delivered", description: "订单已签收" },
+        {
+          time: "2026-06-10",
+          location: "北京",
+          status: "refunded",
+          description: "退款已完成，¥1299.00退回原支付方式",
+        },
+        {
+          time: "2026-06-08",
+          location: "北京仓库",
+          status: "return_received",
+          description: "退货商品已签收，质检中",
+        },
+        {
+          time: "2026-06-05",
+          location: "北京",
+          status: "delivered",
+          description: "订单已签收",
+        },
       ],
     },
     createdAt: "2026-06-03",
@@ -283,7 +398,14 @@ const SEED_ORDERS: Order[] = [
     orderId: "ORD-2024-001560",
     userId: "user_demo_002",
     status: "in_transit",
-    items: [{ name: "家用空气炸锅 5L", sku: "SKU-H4005", quantity: 1, unitPrice: 399.0 }],
+    items: [
+      {
+        name: "家用空气炸锅 5L",
+        sku: "SKU-H4005",
+        quantity: 1,
+        unitPrice: 399.0,
+      },
+    ],
     subtotal: 399.0,
     shippingFee: 0,
     discount: 0,
@@ -296,8 +418,18 @@ const SEED_ORDERS: Order[] = [
       destination: "上海",
       estimatedDelivery: "2026-06-16",
       history: [
-        { time: "2026-06-13 12:00", location: "武汉中转站", status: "in_transit", description: "快件在运输中" },
-        { time: "2026-06-12 18:00", location: "佛山转运中心", status: "departed", description: "快件离开佛山" },
+        {
+          time: "2026-06-13 12:00",
+          location: "武汉中转站",
+          status: "in_transit",
+          description: "快件在运输中",
+        },
+        {
+          time: "2026-06-12 18:00",
+          location: "佛山转运中心",
+          status: "departed",
+          description: "快件离开佛山",
+        },
       ],
     },
     createdAt: "2026-06-11",
@@ -308,8 +440,18 @@ const SEED_ORDERS: Order[] = [
     userId: "user_demo_002",
     status: "delivered",
     items: [
-      { name: "猫粮 成猫 5kg", sku: "SKU-P3002", quantity: 2, unitPrice: 199.0 },
-      { name: "猫砂 豆腐猫砂 6L", sku: "SKU-P3008", quantity: 4, unitPrice: 29.0 },
+      {
+        name: "猫粮 成猫 5kg",
+        sku: "SKU-P3002",
+        quantity: 2,
+        unitPrice: 199.0,
+      },
+      {
+        name: "猫砂 豆腐猫砂 6L",
+        sku: "SKU-P3008",
+        quantity: 4,
+        unitPrice: 29.0,
+      },
     ],
     subtotal: 514.0,
     shippingFee: 30.0,
@@ -323,8 +465,18 @@ const SEED_ORDERS: Order[] = [
       destination: "上海",
       estimatedDelivery: "2026-06-12",
       history: [
-        { time: "2026-06-12 16:00", location: "上海", status: "delivered", description: "快件已签收（快递柜）" },
-        { time: "2026-06-12 09:00", location: "上海配送站", status: "out_for_delivery", description: "快递员派送中" },
+        {
+          time: "2026-06-12 16:00",
+          location: "上海",
+          status: "delivered",
+          description: "快件已签收（快递柜）",
+        },
+        {
+          time: "2026-06-12 09:00",
+          location: "上海配送站",
+          status: "out_for_delivery",
+          description: "快递员派送中",
+        },
       ],
     },
     createdAt: "2026-06-10",
@@ -334,7 +486,14 @@ const SEED_ORDERS: Order[] = [
     orderId: "ORD-2024-001650",
     userId: "user_demo_003",
     status: "processing",
-    items: [{ name: "办公椅 人体工学", sku: "SKU-O1005", quantity: 1, unitPrice: 1599.0 }],
+    items: [
+      {
+        name: "办公椅 人体工学",
+        sku: "SKU-O1005",
+        quantity: 1,
+        unitPrice: 1599.0,
+      },
+    ],
     subtotal: 1599.0,
     shippingFee: 50.0,
     discount: 200.0,
@@ -347,7 +506,12 @@ const SEED_ORDERS: Order[] = [
       destination: "广州",
       estimatedDelivery: "2026-06-18",
       history: [
-        { time: "2026-06-13", location: "佛山仓库", status: "processing", description: "大件商品出库准备中" },
+        {
+          time: "2026-06-13",
+          location: "佛山仓库",
+          status: "processing",
+          description: "大件商品出库准备中",
+        },
       ],
     },
     createdAt: "2026-06-12",
@@ -357,7 +521,14 @@ const SEED_ORDERS: Order[] = [
     orderId: "ORD-2024-001700",
     userId: "user_demo_003",
     status: "shipped",
-    items: [{ name: "瑜伽垫 加厚防滑 6mm", sku: "SKU-Y2001", quantity: 1, unitPrice: 89.0 }],
+    items: [
+      {
+        name: "瑜伽垫 加厚防滑 6mm",
+        sku: "SKU-Y2001",
+        quantity: 1,
+        unitPrice: 89.0,
+      },
+    ],
     subtotal: 89.0,
     shippingFee: 0,
     discount: 0,
@@ -370,8 +541,18 @@ const SEED_ORDERS: Order[] = [
       destination: "广州",
       estimatedDelivery: "2026-06-14",
       history: [
-        { time: "2026-06-13 06:00", location: "金华转运中心", status: "departed", description: "快件离开金华" },
-        { time: "2026-06-12 20:00", location: "义乌网点", status: "picked_up", description: "商家已发货" },
+        {
+          time: "2026-06-13 06:00",
+          location: "金华转运中心",
+          status: "departed",
+          description: "快件离开金华",
+        },
+        {
+          time: "2026-06-12 20:00",
+          location: "义乌网点",
+          status: "picked_up",
+          description: "商家已发货",
+        },
       ],
     },
     createdAt: "2026-06-12",
@@ -382,8 +563,18 @@ const SEED_ORDERS: Order[] = [
     userId: "user_demo_001",
     status: "delivered",
     items: [
-      { name: "螺蛳粉 正宗柳州味 300g×6袋", sku: "SKU-F1006", quantity: 1, unitPrice: 59.0 },
-      { name: "酸辣粉 重庆口味 240g×4袋", sku: "SKU-F1010", quantity: 1, unitPrice: 39.0 },
+      {
+        name: "螺蛳粉 正宗柳州味 300g×6袋",
+        sku: "SKU-F1006",
+        quantity: 1,
+        unitPrice: 59.0,
+      },
+      {
+        name: "酸辣粉 重庆口味 240g×4袋",
+        sku: "SKU-F1010",
+        quantity: 1,
+        unitPrice: 39.0,
+      },
     ],
     subtotal: 98.0,
     shippingFee: 0,
@@ -397,8 +588,18 @@ const SEED_ORDERS: Order[] = [
       destination: "北京",
       estimatedDelivery: "2026-06-09",
       history: [
-        { time: "2026-06-09 14:00", location: "北京", status: "delivered", description: "快件已签收" },
-        { time: "2026-06-08 08:00", location: "柳州转运中心", status: "departed", description: "快件离开柳州" },
+        {
+          time: "2026-06-09 14:00",
+          location: "北京",
+          status: "delivered",
+          description: "快件已签收",
+        },
+        {
+          time: "2026-06-08 08:00",
+          location: "柳州转运中心",
+          status: "departed",
+          description: "快件离开柳州",
+        },
       ],
     },
     createdAt: "2026-06-06",
@@ -418,8 +619,14 @@ const SEED_POLICIES: ReturnPolicy[] = [
     ],
     refundTimeline: "收到退货商品并质检通过后，1-3个工作日退款到原支付方式",
     returnWindow: "7天",
-    shippingResponsibility: "非质量问题退货，退回运费由买方承担；质量问题退货，运费由卖方承担",
-    exceptions: ["食品（开封后）", "内衣/泳衣（卫生原因）", "定制商品", "虚拟商品/充值"],
+    shippingResponsibility:
+      "非质量问题退货，退回运费由买方承担；质量问题退货，运费由卖方承担",
+    exceptions: [
+      "食品（开封后）",
+      "内衣/泳衣（卫生原因）",
+      "定制商品",
+      "虚拟商品/充值",
+    ],
   },
   {
     category: "电子产品",
@@ -433,7 +640,11 @@ const SEED_POLICIES: ReturnPolicy[] = [
     refundTimeline: "质检通过后1-3个工作日退款",
     returnWindow: "7天（无理由）/ 15天（质量换货）",
     shippingResponsibility: "质量问题免运费，非质量问题买方承担",
-    exceptions: ["已激活的手机/平板", "已拆封的耳机（卫生原因）", "软件/游戏激活码"],
+    exceptions: [
+      "已激活的手机/平板",
+      "已拆封的耳机（卫生原因）",
+      "软件/游戏激活码",
+    ],
   },
   {
     category: "服装",
@@ -487,17 +698,25 @@ export class OrderService {
 
     try {
       await fs.mkdir(DATA_DIR, { recursive: true });
-    } catch { /* directory exists */ }
+    } catch {
+      /* directory exists */
+    }
 
     // 加载订单
     try {
       const orderData = await fs.readFile(ORDERS_FILE, "utf-8");
       this.orders = JSON.parse(orderData);
-      logger.info({ count: this.orders.length }, "OrderService: loaded orders from file");
+      logger.info(
+        { count: this.orders.length },
+        "OrderService: loaded orders from file",
+      );
     } catch {
       this.orders = SEED_ORDERS;
       await this.persistOrders();
-      logger.info({ count: this.orders.length }, "OrderService: initialized seed orders");
+      logger.info(
+        { count: this.orders.length },
+        "OrderService: initialized seed orders",
+      );
     }
 
     // 加载工单
@@ -513,7 +732,11 @@ export class OrderService {
 
   private async persistOrders(): Promise<void> {
     try {
-      await fs.writeFile(ORDERS_FILE, JSON.stringify(this.orders, null, 2), "utf-8");
+      await fs.writeFile(
+        ORDERS_FILE,
+        JSON.stringify(this.orders, null, 2),
+        "utf-8",
+      );
     } catch (e) {
       logger.warn(e, "OrderService: failed to persist orders");
     }
@@ -521,7 +744,11 @@ export class OrderService {
 
   private async persistTickets(): Promise<void> {
     try {
-      await fs.writeFile(TICKETS_FILE, JSON.stringify(this.tickets, null, 2), "utf-8");
+      await fs.writeFile(
+        TICKETS_FILE,
+        JSON.stringify(this.tickets, null, 2),
+        "utf-8",
+      );
     } catch (e) {
       logger.warn(e, "OrderService: failed to persist tickets");
     }
@@ -626,17 +853,18 @@ export class OrderService {
 
     const category = productCategory || "通用";
     const policy =
-      this.policies.find(
-        (p) => p.category === category,
-      ) || this.policies[0];
+      this.policies.find((p) => p.category === category) || this.policies[0];
 
     let reasonNote = "";
     if (reason === "质量问题") {
-      reasonNote = "质量问题退货免运费，请保留问题商品照片作为凭证。符合质量问题的商品可申请换货或退款。";
+      reasonNote =
+        "质量问题退货免运费，请保留问题商品照片作为凭证。符合质量问题的商品可申请换货或退款。";
     } else if (reason === "发错货") {
-      reasonNote = "发错货由我方承担全部运费，请提供收到的商品照片。我们将安排正确的商品补发或全额退款。";
+      reasonNote =
+        "发错货由我方承担全部运费，请提供收到的商品照片。我们将安排正确的商品补发或全额退款。";
     } else if (reason === "不喜欢" || reason === "不想要了") {
-      reasonNote = "非质量问题的退货需自行承担退回运费。购买时赠送的退换运费险可报销首重费用。";
+      reasonNote =
+        "非质量问题的退货需自行承担退回运费。购买时赠送的退换运费险可报销首重费用。";
     } else if (reason) {
       reasonNote = `关于"${reason}"的退货申请，将根据具体情况进行审核。`;
     } else {
@@ -684,16 +912,16 @@ export class OrderService {
   /**
    * 获取工单列表
    */
-  async getTickets(
-    userId?: string,
-  ): Promise<SupportTicket[]> {
+  async getTickets(userId?: string): Promise<SupportTicket[]> {
     await this.ensureLoaded();
     if (userId) {
       return this.tickets
         .filter((t) => t.userId === userId)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     }
-    return [...this.tickets].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    return [...this.tickets].sort((a, b) =>
+      b.createdAt.localeCompare(a.createdAt),
+    );
   }
 
   // ── 工具方法 ──

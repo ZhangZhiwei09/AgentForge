@@ -1,7 +1,11 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppProjectStore } from "@/stores/app-project";
-import type { AppProjectDTO, AppFilePlan, AppGenStreamEvent } from "@agentforge/shared-types";
+import type {
+  AppProjectDTO,
+  AppFilePlan,
+  AppGenStreamEvent,
+} from "@agentforge/shared-types";
 
 export function NewProjectPage() {
   const navigate = useNavigate();
@@ -43,7 +47,9 @@ export function NewProjectPage() {
       });
 
       if (!response.ok) {
-        const err = await response.json().catch(() => ({ detail: "Unknown error" }));
+        const err = await response
+          .json()
+          .catch(() => ({ detail: "Unknown error" }));
         throw new Error(err.detail || `HTTP ${response.status}`);
       }
 

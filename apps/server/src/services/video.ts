@@ -168,9 +168,7 @@ export class VideoSessionService {
   async close(): Promise<void> {
     this.abortController?.abort();
 
-    const durationSec = Math.round(
-      (Date.now() - this.sessionStartTime) / 1000,
-    );
+    const durationSec = Math.round((Date.now() - this.sessionStartTime) / 1000);
 
     try {
       await prisma.videoSession.upsert({
@@ -339,9 +337,8 @@ export class VideoSessionService {
       // Send vision context to client (what the AI sees)
       if (hasFrames) {
         const frameCount = this.videoFrames.length;
-        const latestTimestamp = this.videoFrames[
-          this.videoFrames.length - 1
-        ].timestamp;
+        const latestTimestamp =
+          this.videoFrames[this.videoFrames.length - 1].timestamp;
         this.send({
           type: "vision_context",
           description: `正在分析 ${frameCount} 个视频帧（最新: ${new Date(latestTimestamp).toISOString()}）`,
@@ -364,7 +361,15 @@ export class VideoSessionService {
       // Build messages array
       const messages: Array<{
         role: "user" | "assistant";
-        content: string | Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string; detail?: string } }>;
+        content:
+          | string
+          | Array<
+              | { type: "text"; text: string }
+              | {
+                  type: "image_url";
+                  image_url: { url: string; detail?: string };
+                }
+            >;
       }> = [];
 
       // Add recent history (chronological order)

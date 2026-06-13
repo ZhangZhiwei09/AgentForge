@@ -38,7 +38,11 @@ describe("getAlternativeTools", () => {
 
 describe("buildDegradationMessage", () => {
   it("builds Chinese degradation message with alternatives", () => {
-    const failure = classifyError(new Error("Connection timeout"), "tool", "http_request");
+    const failure = classifyError(
+      new Error("Connection timeout"),
+      "tool",
+      "http_request",
+    );
     const msg = buildDegradationMessage(failure, "http_request", 2);
 
     expect(msg).toContain("[工具执行失败]");
@@ -50,7 +54,11 @@ describe("buildDegradationMessage", () => {
   });
 
   it("builds message without retry count when 0", () => {
-    const failure = classifyError(new Error("Circuit breaker open"), "tool", "db_query");
+    const failure = classifyError(
+      new Error("Circuit breaker open"),
+      "tool",
+      "db_query",
+    );
     const msg = buildDegradationMessage(failure, "db_query", 0);
 
     expect(msg).not.toContain("已重试");
@@ -58,7 +66,11 @@ describe("buildDegradationMessage", () => {
   });
 
   it("includes fallback instructions when no alternatives", () => {
-    const failure = classifyError(new Error("Some error"), "tool", "get_current_time");
+    const failure = classifyError(
+      new Error("Some error"),
+      "tool",
+      "get_current_time",
+    );
     const msg = buildDegradationMessage(failure, "get_current_time");
 
     expect(msg).toContain("调整调用参数后重试");

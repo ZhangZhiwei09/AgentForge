@@ -194,7 +194,10 @@ describe("MemoryCompressor", () => {
 
     it("keeps high-importance steps (score >= threshold)", () => {
       const steps = [
-        makeStep(1, "tool_call", { tool: "web_search", result: "Critical data" }),
+        makeStep(1, "tool_call", {
+          tool: "web_search",
+          result: "Critical data",
+        }),
         makeStep(2, "tool_call", { tool: "calculator", result: "42" }),
         makeStep(3, "tool_call", { tool: "calculator", result: "84" }),
         makeStep(4, "tool_call", { tool: "get_current_time", result: "12:00" }),

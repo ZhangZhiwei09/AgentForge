@@ -11,7 +11,13 @@ import type {
 type PanelMode = "debug" | "memory" | "knowledge" | "agent" | "voice";
 
 export type VoiceStatus = "idle" | "listening" | "processing" | "speaking";
-export type VideoStatus = "idle" | "connecting" | "connected" | "listening" | "processing" | "speaking";
+export type VideoStatus =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "listening"
+  | "processing"
+  | "speaking";
 
 export interface PendingApproval {
   approvalId: string;

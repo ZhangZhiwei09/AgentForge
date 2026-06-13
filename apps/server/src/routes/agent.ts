@@ -52,8 +52,14 @@ agentRoutes.post(
   "/api/agent/run",
   zValidator("json", agentRunSchema),
   async (c) => {
-    const { conversation_id, task, model, max_iterations, tools, guard_config } =
-      c.req.valid("json");
+    const {
+      conversation_id,
+      task,
+      model,
+      max_iterations,
+      tools,
+      guard_config,
+    } = c.req.valid("json");
 
     // Map snake_case to camelCase for guard service
     const guardConfig = guard_config

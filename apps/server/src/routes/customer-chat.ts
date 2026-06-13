@@ -420,7 +420,10 @@ customerChatRoutes.get("/api/customer-chat/faq/:docId", async (c) => {
       status: doc.status,
     });
   } catch (err) {
-    logger.error({ docId, error: (err as Error)?.message }, "FAQ detail fetch error");
+    logger.error(
+      { docId, error: (err as Error)?.message },
+      "FAQ detail fetch error",
+    );
     return c.json({ detail: "获取文档失败" }, 500);
   }
 });

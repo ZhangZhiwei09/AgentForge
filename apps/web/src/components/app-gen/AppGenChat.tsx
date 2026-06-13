@@ -1,7 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAppProjectStore } from "@/stores/app-project";
-import type { AppProjectDTO, AppFilePlan, AppGenStreamEvent } from "@agentforge/shared-types";
+import type {
+  AppProjectDTO,
+  AppFilePlan,
+  AppGenStreamEvent,
+} from "@agentforge/shared-types";
 
 interface AppGenChatProps {
   projectId: string;
@@ -112,7 +116,9 @@ export function AppGenChat({ projectId }: AppGenChatProps) {
         {chatMessages.length === 0 && (
           <div className="text-center text-gray-400 mt-8">
             <div className="text-4xl mb-3">🦊</div>
-            <div className="text-sm font-medium mb-1">Describe your app idea</div>
+            <div className="text-sm font-medium mb-1">
+              Describe your app idea
+            </div>
             <div className="text-xs">
               AI will generate the complete code for you
             </div>
@@ -122,15 +128,15 @@ export function AppGenChat({ projectId }: AppGenChatProps) {
           <div
             key={i}
             className={`p-2 rounded-lg text-sm ${
-              msg.role === "user"
-                ? "bg-blue-50 ml-4"
-                : "bg-gray-50 mr-4"
+              msg.role === "user" ? "bg-blue-50 ml-4" : "bg-gray-50 mr-4"
             }`}
           >
             <div className="text-xs font-medium text-gray-500 mb-1">
               {msg.role === "user" ? "You" : "CodeGen AI"}
             </div>
-            <div className="whitespace-pre-wrap text-gray-800">{msg.content}</div>
+            <div className="whitespace-pre-wrap text-gray-800">
+              {msg.content}
+            </div>
           </div>
         ))}
         {isGenerating && (

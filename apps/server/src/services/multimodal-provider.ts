@@ -289,9 +289,7 @@ function initMultimodalProviders(): void {
   initialized = true;
 }
 
-export function getMultimodalProvider(
-  name?: string,
-): MultimodalLLMProvider {
+export function getMultimodalProvider(name?: string): MultimodalLLMProvider {
   initMultimodalProviders();
   const n = name || "openai";
   if (!multimodalProviders[n]) {
@@ -320,9 +318,7 @@ export function buildVisionMessage(
   imageBase64List: string[],
   detail: "low" | "high" | "auto" = "auto",
 ): MultimodalMessage {
-  const content: MultimodalContent[] = [
-    { type: "text", text },
-  ];
+  const content: MultimodalContent[] = [{ type: "text", text }];
 
   for (const img of imageBase64List) {
     content.push({

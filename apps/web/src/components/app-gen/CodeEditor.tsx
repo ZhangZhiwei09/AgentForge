@@ -67,7 +67,9 @@ export function CodeEditor() {
                 : "text-gray-600 hover:bg-gray-100"
             }`}
           >
-            <span className="text-gray-400">{getFileIcon(file.language as ProjectLanguage)}</span>
+            <span className="text-gray-400">
+              {getFileIcon(file.language as ProjectLanguage)}
+            </span>
             <span>{file.path.split("/").pop()}</span>
           </button>
         ))}

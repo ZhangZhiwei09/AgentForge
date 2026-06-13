@@ -92,10 +92,10 @@ function isRetryable(msg: string): boolean {
     /fetch failed/i,
     /socket hang up/i,
     // HTTP 状态码
-    /\b429\b/,          // Too Many Requests
-    /\b502\b/,          // Bad Gateway
-    /\b503\b/,          // Service Unavailable
-    /\b504\b/,          // Gateway Timeout
+    /\b429\b/, // Too Many Requests
+    /\b502\b/, // Bad Gateway
+    /\b503\b/, // Service Unavailable
+    /\b504\b/, // Gateway Timeout
     // 限流
     /rate limit/i,
     /too many requests/i,
@@ -147,11 +147,7 @@ function isFatal(msg: string): boolean {
   return patterns.some((p) => p.test(msg));
 }
 
-function isDegradable(
-  msg: string,
-  source: string,
-  toolName?: string,
-): boolean {
+function isDegradable(msg: string, source: string, toolName?: string): boolean {
   // 工具执行错误（非网络）→ 可降级
   if (source === "tool" && toolName) return true;
 
@@ -176,7 +172,11 @@ function isDegradable(
 function detectRetryableReason(msg: string): string {
   if (/rate limit|too many requests|429/i.test(msg)) return "rate_limit";
   if (/timed?[_\s]?out|ETIMEDOUT/i.test(msg)) return "timeout";
-  if (/ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed/i.test(msg))
+  if (
+    /ECONNRESET|ECONNREFUSED|ENOTFOUND|EAI_AGAIN|socket hang up|fetch failed/i.test(
+      msg,
+    )
+  )
     return "network";
   if (/50[23]/i.test(msg)) return "server_error";
   if (/quota exceeded/i.test(msg)) return "quota";

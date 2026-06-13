@@ -13,7 +13,16 @@
 //   - Anonymous: no auth token needed, uses session_id instead of conversation_id
 //   - Auto-starts on mount, cleanup on unmount
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Video, VideoOff, Mic, MicOff, PhoneOff, Eye, EyeOff, X } from "lucide-react";
+import {
+  Video,
+  VideoOff,
+  Mic,
+  MicOff,
+  PhoneOff,
+  Eye,
+  EyeOff,
+  X,
+} from "lucide-react";
 
 // ---- Constants ----
 
@@ -65,14 +74,19 @@ function getCustomerVideoWsUrl(sessionId: string): string {
 
 // ---- Component ----
 
-export function CustomerVideoCall({ sessionId, onClose }: CustomerVideoCallProps) {
+export function CustomerVideoCall({
+  sessionId,
+  onClose,
+}: CustomerVideoCallProps) {
   const [status, setStatus] = useState<VideoStatus>("idle");
   const [isCallActive, setIsCallActive] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(false);
   const [isVisionEnabled, setIsVisionEnabled] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [transcript, setTranscript] = useState<Array<{ role: string; content: string }>>([]);
+  const [transcript, setTranscript] = useState<
+    Array<{ role: string; content: string }>
+  >([]);
   const [visionContext, setVisionContext] = useState("");
 
   const [hasVideo, setHasVideo] = useState(true);
@@ -134,7 +148,10 @@ export function CustomerVideoCall({ sessionId, onClose }: CustomerVideoCallProps
           break;
 
         case "transcript":
-          setTranscript((prev) => [...prev, { role: "user", content: msg.text }]);
+          setTranscript((prev) => [
+            ...prev,
+            { role: "user", content: msg.text },
+          ]);
           break;
 
         case "vision_context":
@@ -302,7 +319,10 @@ export function CustomerVideoCall({ sessionId, onClose }: CustomerVideoCallProps
           const inputData = e.inputBuffer.getChannelData(0);
           const pcmBuffer = new Int16Array(inputData.length);
           for (let i = 0; i < inputData.length; i++) {
-            pcmBuffer[i] = Math.max(-32768, Math.min(32767, inputData[i] * 32768));
+            pcmBuffer[i] = Math.max(
+              -32768,
+              Math.min(32767, inputData[i] * 32768),
+            );
           }
           const base64 = arrayBufferToBase64(pcmBuffer.buffer as ArrayBuffer);
           ws.send(JSON.stringify({ type: "audio", data: base64 }));
@@ -312,7 +332,12 @@ export function CustomerVideoCall({ sessionId, onClose }: CustomerVideoCallProps
       // Start video frame capture (only if video is available)
       if (videoAvailable) {
         frameTimerRef.current = setInterval(() => {
-          if (isVideoOff || !ws || ws.readyState !== WebSocket.OPEN || !isVisionEnabled) {
+          if (
+            isVideoOff ||
+            !ws ||
+            ws.readyState !== WebSocket.OPEN ||
+            !isVisionEnabled
+          ) {
             return;
           }
 
@@ -465,9 +490,18 @@ export function CustomerVideoCall({ sessionId, onClose }: CustomerVideoCallProps
           <div className="absolute bottom-2 right-2 bg-blue-600/80 rounded-lg px-3 py-1.5 text-xs">
             <div className="flex items-center gap-1.5">
               <div className="flex gap-0.5">
-                <span className="w-1 h-3 bg-white rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
-                <span className="w-1 h-3 bg-white rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
-                <span className="w-1 h-3 bg-white rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+                <span
+                  className="w-1 h-3 bg-white rounded-full animate-bounce"
+                  style={{ animationDelay: "0ms" }}
+                />
+                <span
+                  className="w-1 h-3 bg-white rounded-full animate-bounce"
+                  style={{ animationDelay: "150ms" }}
+                />
+                <span
+                  className="w-1 h-3 bg-white rounded-full animate-bounce"
+                  style={{ animationDelay: "300ms" }}
+                />
               </div>
               AI 正在回复...
             </div>
@@ -497,27 +531,43 @@ export function CustomerVideoCall({ sessionId, onClose }: CustomerVideoCallProps
                 }`}
                 title={isVisionEnabled ? "视觉: 开" : "视觉: 关"}
               >
-                {isVisionEnabled ? <Eye className="w-5 h-5 sm:w-4 sm:h-4" /> : <EyeOff className="w-5 h-5 sm:w-4 sm:h-4" />}
+                {isVisionEnabled ? (
+                  <Eye className="w-5 h-5 sm:w-4 sm:h-4" />
+                ) : (
+                  <EyeOff className="w-5 h-5 sm:w-4 sm:h-4" />
+                )}
               </button>
 
               <button
                 onClick={toggleVideo}
                 className={`p-2.5 sm:p-2 rounded-lg transition-colors active:scale-95 ${
-                  !isVideoOff ? "bg-blue-600 hover:bg-blue-700" : "bg-gray-700 hover:bg-gray-600"
+                  !isVideoOff
+                    ? "bg-blue-600 hover:bg-blue-700"
+                    : "bg-gray-700 hover:bg-gray-600"
                 }`}
                 title={isVideoOff ? "开启视频" : "关闭视频"}
               >
-                {isVideoOff ? <VideoOff className="w-5 h-5 sm:w-4 sm:h-4" /> : <Video className="w-5 h-5 sm:w-4 sm:h-4" />}
+                {isVideoOff ? (
+                  <VideoOff className="w-5 h-5 sm:w-4 sm:h-4" />
+                ) : (
+                  <Video className="w-5 h-5 sm:w-4 sm:h-4" />
+                )}
               </button>
 
               <button
                 onClick={toggleMute}
                 className={`p-2.5 sm:p-2 rounded-lg transition-colors active:scale-95 ${
-                  !isMuted ? "bg-blue-600 hover:bg-blue-700" : "bg-red-600 hover:bg-red-700"
+                  !isMuted
+                    ? "bg-blue-600 hover:bg-blue-700"
+                    : "bg-red-600 hover:bg-red-700"
                 }`}
                 title={isMuted ? "取消静音" : "静音"}
               >
-                {isMuted ? <MicOff className="w-5 h-5 sm:w-4 sm:h-4" /> : <Mic className="w-5 h-5 sm:w-4 sm:h-4" />}
+                {isMuted ? (
+                  <MicOff className="w-5 h-5 sm:w-4 sm:h-4" />
+                ) : (
+                  <Mic className="w-5 h-5 sm:w-4 sm:h-4" />
+                )}
               </button>
 
               {status !== "speaking" ? (
@@ -569,7 +619,11 @@ export function CustomerVideoCall({ sessionId, onClose }: CustomerVideoCallProps
             }`}
           >
             <span className="font-semibold text-gray-400">
-              {entry.role === "user" ? "你" : entry.role === "system" ? "系统" : "AI 客服"}
+              {entry.role === "user"
+                ? "你"
+                : entry.role === "system"
+                  ? "系统"
+                  : "AI 客服"}
               :
             </span>{" "}
             {entry.content}
@@ -582,7 +636,8 @@ export function CustomerVideoCall({ sessionId, onClose }: CustomerVideoCallProps
       {isCallActive && isVisionEnabled && (
         <div className="p-2 border-t border-gray-700 text-xs text-gray-500 flex items-center gap-2">
           <Eye className="w-3 h-3 text-purple-400" />
-          AI 可以看见您的视频画面 · 每 {FRAME_CAPTURE_INTERVAL_MS / 1000}s 捕捉一帧
+          AI 可以看见您的视频画面 · 每 {FRAME_CAPTURE_INTERVAL_MS / 1000}s
+          捕捉一帧
         </div>
       )}
     </div>

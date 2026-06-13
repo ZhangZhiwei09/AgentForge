@@ -49,8 +49,13 @@ export class SmallTalkAgent implements RouteAgent {
   readonly route = "SMALL_TALK" as const;
 
   async *execute(context: RouteContext): AsyncGenerator<RouteStreamEvent> {
-    const { resolvedModel, providerName, userMessage, sessionId, assistantMsgId } =
-      context;
+    const {
+      resolvedModel,
+      providerName,
+      userMessage,
+      sessionId,
+      assistantMsgId,
+    } = context;
 
     // 发送 meta
     yield {
@@ -72,9 +77,7 @@ export class SmallTalkAgent implements RouteAgent {
 
     try {
       const provider = getProvider(providerName);
-      const messages: ChatMessage[] = [
-        { role: "user", content: userMessage },
-      ];
+      const messages: ChatMessage[] = [{ role: "user", content: userMessage }];
 
       const result = await provider.chatSync(
         messages,
@@ -91,9 +94,7 @@ export class SmallTalkAgent implements RouteAgent {
         suggestions = parsed.suggestions;
       } else {
         // JSON 解析失败 → 使用原始文本
-        answer =
-          result.content.trim() ||
-          "您好！有什么可以帮助您的吗？";
+        answer = result.content.trim() || "您好！有什么可以帮助您的吗？";
       }
     } catch (e) {
       logger.warn(e, "SmallTalkAgent LLM call failed, using fallback");
