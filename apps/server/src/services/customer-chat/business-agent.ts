@@ -33,6 +33,10 @@ import {
   parseChatResponse,
   type ChatResponse,
 } from "./validation.js";
+import {
+  getCitationVerifier,
+  type CitationReport,
+} from "./citation-verifier.js";
 
 // ── 阈值门控配置 ──
 
@@ -295,6 +299,7 @@ async function callLLMWithRetry(
   };
 
   const temperatures = [0.3, 0.1, 0.0];
+  const citationVerifier = getCitationVerifier();
 
   // ── 主模型重试（3 次） ──
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -308,12 +313,40 @@ async function callLLMWithRetry(
       );
       evalRecord.rawResponse = rawText;
 
-      const validation = validateBusinessResponse(rawText, knowledgeChunks);
+      // 先解析以获取 answer 文本
+      const parsed = parseChatResponse(rawText);
+      let citationReport: CitationReport | undefined;
+
+      // 对成功的解析结果运行 Citation 引证校验
+      if (parsed && knowledgeChunks.length > 0 && parsed.answer !== SORRY_TEMPLATE) {
+        try {
+          citationReport = await citationVerifier.verify(
+            parsed.answer,
+            knowledgeChunks,
+          );
+          evalRecord.citation = {
+            level: citationReport.level,
+            coverageRate: citationReport.coverageRate,
+            avgScore: citationReport.avgScore,
+            uncitedCount: citationReport.sentences.filter(
+              (s) => s.isFactual && s.status === "uncited",
+            ).length,
+          };
+        } catch {
+          // citation 校验失败不影响主流程
+        }
+      }
+
+      const validation = validateBusinessResponse(
+        rawText,
+        knowledgeChunks,
+        citationReport,
+      );
+
       if (validation.valid) {
         if (validation.errors.length > 0) {
           evalRecord.validationErrors = validation.errors;
         }
-        const parsed = parseChatResponse(rawText);
         evalRecord.finalOutput = parsed?.answer || "";
         return { response: parsed!, evalRecord };
       }
@@ -353,12 +386,37 @@ async function callLLMWithRetry(
       evalRecord.modelUsed = `${fallbackProvider.type}:${fallbackModel}`;
       evalRecord.fallbackUsed = true;
 
-      const validation = validateBusinessResponse(rawText, knowledgeChunks);
+      const parsed = parseChatResponse(rawText);
+      let citationReport: CitationReport | undefined;
+      if (parsed && knowledgeChunks.length > 0 && parsed.answer !== SORRY_TEMPLATE) {
+        try {
+          citationReport = await citationVerifier.verify(
+            parsed.answer,
+            knowledgeChunks,
+          );
+          evalRecord.citation = {
+            level: citationReport.level,
+            coverageRate: citationReport.coverageRate,
+            avgScore: citationReport.avgScore,
+            uncitedCount: citationReport.sentences.filter(
+              (s) => s.isFactual && s.status === "uncited",
+            ).length,
+          };
+        } catch {
+          // citation 校验失败不影响主流程
+        }
+      }
+
+      const validation = validateBusinessResponse(
+        rawText,
+        knowledgeChunks,
+        citationReport,
+      );
+
       if (validation.valid) {
         if (validation.errors.length > 0) {
           evalRecord.validationErrors = validation.errors;
         }
-        const parsed = parseChatResponse(rawText);
         evalRecord.finalOutput = parsed?.answer || "";
         return { response: parsed!, evalRecord };
       }

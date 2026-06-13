@@ -100,4 +100,11 @@ export interface EvalRecord {
   modelUsed: string;
   fallbackUsed: boolean;
   route?: RouteName;
+  /** Citation 引证分析（L4 升级后新增） */
+  citation?: {
+    level: string;
+    coverageRate: number;
+    avgScore: number;
+    uncitedCount: number;
+  };
 }

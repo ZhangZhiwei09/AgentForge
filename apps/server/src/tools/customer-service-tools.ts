@@ -1,9 +1,17 @@
 // 客服工具集 —— 用于 TOOL 路径的 Agent 调用
-// 初期提供 stub 实现，返回合理假数据供 LLM 合成回复
-// 后续可接入真实 OrderService / TicketService / ShippingService
+//
+// 接入 OrderService 提供真实的模拟数据查询能力：
+//   - lookup_order: 按订单号查询订单状态、商品、物流
+//   - check_shipping_status: 按运单号/订单号查询物流详情（含时间线）
+//   - check_return_policy: 按商品类目和退货原因查询退换货政策
+//   - create_support_ticket: 创建客服工单并持久化到文件
+//
+// 所有工具通过 OrderService 单例操作，数据持久化到 data/orders.json 和 data/tickets.json
 
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
+import { getOrderService } from "../services/customer-chat/order-service.js";
+import { logger } from "@agentforge/logger";
 
 // ═══════════════════════════════════════════════════════
 // 1. lookup_order —— 按订单号查询订单状态
@@ -14,13 +22,13 @@ const lookupOrderDef: ToolDefinition = {
   function: {
     name: "lookup_order",
     description:
-      "查询订单状态。用户需要提供订单号来查询订单的当前状态、物流信息等。",
+      "查询订单状态和详情。需要提供订单号（格式如 ORD-2024-001234），返回订单当前状态、商品列表、金额、物流单号等信息。",
     parameters: {
       type: "object",
       properties: {
         order_id: {
           type: "string",
-          description: "订单号，例如 'ORD-2024-001234'",
+          description: "订单号，格式为 ORD-YYYY-NNNNNN，例如 ORD-2024-001234",
         },
       },
       required: ["order_id"],
@@ -31,29 +39,63 @@ const lookupOrderDef: ToolDefinition = {
 async function lookupOrderExecute(
   args: Record<string, unknown>,
 ): Promise<string> {
-  const orderId = (args.order_id as string) || "未知订单";
+  const orderId = (args.order_id as string) || "";
+  if (!orderId) {
+    return JSON.stringify({ error: "请提供订单号" });
+  }
 
-  // Stub: 返回模拟订单数据
-  const stubOrders: Record<string, unknown> = {
-    "ORD-2024-001234": {
-      order_id: "ORD-2024-001234",
-      status: "已发货",
-      items: [{ name: "商品A", quantity: 1, price: 299.0 }],
-      total: 299.0,
-      shipping: { carrier: "顺丰快递", tracking_no: "SF1234567890" },
-      estimated_delivery: "2026-06-15",
-      created_at: "2026-06-10",
-    },
-  };
+  try {
+    const service = getOrderService();
+    const order = await service.lookupOrder(orderId);
 
-  const order =
-    stubOrders[orderId] || {
-      order_id: orderId,
-      status: "未查询到",
-      message: `订单 ${orderId} 未找到，请检查订单号是否正确。`,
-    };
+    if (!order) {
+      return JSON.stringify(
+        {
+          found: false,
+          order_id: orderId,
+          message: `订单 ${orderId} 未找到。请检查订单号是否正确。可尝试的格式：ORD-2024-001234。`,
+          suggestion: "如果您不确定订单号，可以尝试提供快递单号查询物流。",
+        },
+        null,
+        2,
+      );
+    }
 
-  return JSON.stringify(order, null, 2);
+    return JSON.stringify(
+      {
+        found: true,
+        order_id: order.orderId,
+        status: service.statusLabel(order.status),
+        items: order.items.map((i) => ({
+          name: i.name,
+          quantity: i.quantity,
+          unit_price: i.unitPrice,
+          subtotal: i.quantity * i.unitPrice,
+        })),
+        payment: {
+          method: order.paymentMethod || "未指定",
+          subtotal: order.subtotal,
+          shipping_fee: order.shippingFee,
+          discount: order.discount,
+          total: order.total,
+        },
+        shipping: {
+          carrier: order.shipping.carrier || "待分配",
+          tracking_no: order.shipping.trackingNo || "暂无",
+          estimated_delivery: order.shipping.estimatedDelivery || "待确定",
+        },
+        created_at: order.createdAt,
+        notes: order.notes || null,
+      },
+      null,
+      2,
+    );
+  } catch (e) {
+    logger.error(e, "lookup_order failed");
+    return JSON.stringify({
+      error: "订单查询服务暂时不可用，请稍后再试或转接人工客服。",
+    });
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -65,18 +107,22 @@ const createSupportTicketDef: ToolDefinition = {
   function: {
     name: "create_support_ticket",
     description:
-      "为客户创建客服工单。当问题无法立刻解决或客户要求投诉/升级时使用。",
+      "为客户创建客服工单。当问题无法立刻解决、客户要求投诉/升级、或需要售后团队跟进时使用。工单创建后会被持久化保存。",
     parameters: {
       type: "object",
       properties: {
         summary: {
           type: "string",
-          description: "问题摘要，简要描述客户遇到的问题",
+          description: "问题摘要，用一两句话描述客户遇到的具体问题和诉求",
         },
         priority: {
           type: "string",
           enum: ["normal", "urgent"],
-          description: "工单优先级：normal（普通）或 urgent（紧急）",
+          description: "工单优先级：normal（普通，24小时响应）或 urgent（紧急，1小时响应）",
+        },
+        order_id: {
+          type: "string",
+          description: "关联的订单号（如果有），例如 ORD-2024-001234",
         },
       },
       required: ["summary"],
@@ -88,24 +134,36 @@ async function createSupportTicketExecute(
   args: Record<string, unknown>,
 ): Promise<string> {
   const summary = (args.summary as string) || "未提供摘要";
-  const priority = (args.priority as string) || "normal";
-  const ticketId = `TK-${Date.now().toString(36).toUpperCase()}`;
+  const priority = (args.priority as "normal" | "urgent") || "normal";
+  const orderId = (args.order_id as string) || undefined;
 
-  return JSON.stringify(
-    {
-      ticket_id: ticketId,
-      status: "已创建",
-      priority,
-      summary,
-      created_at: new Date().toISOString(),
-      message:
-        priority === "urgent"
-          ? "工单已标记为紧急，客服团队将在 1 小时内响应。"
-          : "工单已创建，客服团队将在 24 小时内响应。",
-    },
-    null,
-    2,
-  );
+  try {
+    const service = getOrderService();
+    const ticket = await service.createTicket({ summary, priority, orderId });
+
+    return JSON.stringify(
+      {
+        ticket_id: ticket.ticketId,
+        status: "已创建",
+        priority: ticket.priority,
+        summary: ticket.summary,
+        order_id: ticket.orderId || null,
+        created_at: ticket.createdAt,
+        response_time:
+          priority === "urgent"
+            ? "工单已标记为紧急，客服团队将在 1 小时内响应处理。"
+            : "工单已创建，客服团队将在 24 小时内响应处理。",
+        tracking_tip: `您可以通过工单号 ${ticket.ticketId} 查询处理进度。`,
+      },
+      null,
+      2,
+    );
+  } catch (e) {
+    logger.error(e, "create_support_ticket failed");
+    return JSON.stringify({
+      error: "工单创建服务暂时不可用，请稍后再试。如有紧急问题，请拨打客服热线：400-XXX-XXXX。",
+    });
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -117,17 +175,17 @@ const checkReturnPolicyDef: ToolDefinition = {
   function: {
     name: "check_return_policy",
     description:
-      "查询退换货政策。可以根据商品类别或退货原因查询具体的退货规则。",
+      "查询退换货政策。可以根据商品类别（电子产品、服装、食品等）和退货原因（质量问题、不喜欢等）查询适用的退货规则、条件、退款时间和运费承担方。",
     parameters: {
       type: "object",
       properties: {
         product_category: {
           type: "string",
-          description: "商品类别，例如 '电子产品'、'服装'、'食品'",
+          description: "商品类别，可选：通用、电子产品、服装、食品",
         },
         reason: {
           type: "string",
-          description: "退货原因，例如 '质量问题'、'不喜欢'、'发错货'",
+          description: "退货原因，如：质量问题、发错货、不喜欢、不想要了",
         },
       },
       required: [],
@@ -139,30 +197,32 @@ async function checkReturnPolicyExecute(
   args: Record<string, unknown>,
 ): Promise<string> {
   const category = (args.product_category as string) || "通用";
-  const reason = (args.reason as string) || "未指定";
+  const reason = (args.reason as string) || undefined;
 
-  // Stub: 返回通用退货政策
-  return JSON.stringify(
-    {
-      policy: "7天无理由退货",
-      conditions: [
-        "商品完好，不影响二次销售",
-        "保留原包装和配件",
-        "非特殊商品（食品、内衣等开封后不可退）",
-      ],
-      refund_timeline: "收到退货后 1-3 个工作日退款到原支付方式",
-      category_note:
-        category !== "通用"
-          ? `${category}类商品适用标准退货政策`
-          : "通用退货政策适用于大部分商品",
-      reason_note:
-        reason === "质量问题"
-          ? "质量问题退货免运费，请保留问题照片"
-          : "非质量问题退货需自行承担运费",
-    },
-    null,
-    2,
-  );
+  try {
+    const service = getOrderService();
+    const policy = await service.getReturnPolicy(category, reason);
+
+    return JSON.stringify(
+      {
+        category: policy.category,
+        policy: policy.policy,
+        return_window: policy.returnWindow,
+        conditions: policy.conditions,
+        refund_timeline: policy.refundTimeline,
+        shipping_responsibility: policy.shippingResponsibility,
+        exceptions: policy.exceptions,
+        reason_note: policy.reasonNote,
+      },
+      null,
+      2,
+    );
+  } catch (e) {
+    logger.error(e, "check_return_policy failed");
+    return JSON.stringify({
+      error: "退换货政策查询暂时不可用，请稍后再试。",
+    });
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -174,17 +234,17 @@ const checkShippingStatusDef: ToolDefinition = {
   function: {
     name: "check_shipping_status",
     description:
-      "查询物流配送状态。根据运单号查询快递的当前位置和预计送达时间。",
+      "查询物流配送状态。输入运单号（如 SF1234567890）或订单号（如 ORD-2024-001234），返回当前物流状态、位置、运输历史和预计送达时间。",
     parameters: {
       type: "object",
       properties: {
         tracking_number: {
           type: "string",
-          description: "快递单号",
+          description: "快递单号，如 SF1234567890",
         },
         order_id: {
           type: "string",
-          description: "订单号（如果没有运单号，可通过订单号关联查询）",
+          description: "订单号（如果没有运单号，可通过订单号关联查询），如 ORD-2024-001234",
         },
       },
       required: [],
@@ -195,26 +255,47 @@ const checkShippingStatusDef: ToolDefinition = {
 async function checkShippingStatusExecute(
   args: Record<string, unknown>,
 ): Promise<string> {
-  const trackingNo = (args.tracking_number as string) || "未知";
+  const trackingNo = (args.tracking_number as string) || "";
   const orderId = (args.order_id as string) || "";
+  const query = trackingNo || orderId;
 
-  // Stub: 返回模拟物流数据
-  return JSON.stringify(
-    {
-      tracking_number: trackingNo || `关联订单 ${orderId}`,
-      status: "运输中",
-      current_location: "上海分拣中心",
-      estimated_delivery: "2026-06-15",
-      history: [
-        { time: "2026-06-13 08:30", status: "到达上海分拣中心" },
-        { time: "2026-06-12 20:00", status: "离开深圳转运中心" },
-        { time: "2026-06-12 10:00", status: "商家已发货" },
-      ],
-      note: "以上为模拟物流数据，实际以快递公司官网为准",
-    },
-    null,
-    2,
-  );
+  if (!query) {
+    return JSON.stringify({
+      error: "请提供运单号或订单号以查询物流信息。",
+    });
+  }
+
+  try {
+    const service = getOrderService();
+    const result = await service.getShippingStatus(query);
+
+    if (!result.found) {
+      return JSON.stringify(result, null, 2);
+    }
+
+    return JSON.stringify(
+      {
+        found: true,
+        order_id: result.orderId,
+        carrier: result.carrier,
+        tracking_no: result.trackingNo,
+        current_status: result.status,
+        estimated_delivery: result.estimatedDelivery,
+        history: result.history?.map((h) => ({
+          time: h.time,
+          location: h.location,
+          description: h.description,
+        })),
+      },
+      null,
+      2,
+    );
+  } catch (e) {
+    logger.error(e, "check_shipping_status failed");
+    return JSON.stringify({
+      error: "物流查询服务暂时不可用，请稍后再试。",
+    });
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -236,7 +317,7 @@ export const customerServiceTools: RegisteredTool[] = [
     execute: createSupportTicketExecute,
     riskLevel: "mutation",
     timeout: 30_000,
-    requireApproval: false, // 用户通过 HUMAN 路由已隐式确认
+    requireApproval: true, // 创建工单需用户确认（非 HUMAN 路由，安全加固）
     category: "customer_service",
     parallelizable: false,
   },
