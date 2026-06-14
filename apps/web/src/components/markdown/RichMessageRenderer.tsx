@@ -1,10 +1,12 @@
 // ── 富消息渲染器 ──
 // 将 Markdown 文本中的卡片围栏提取为 React 组件，剩余文本经 MarkdownRenderer 渲染
-// 流式过程中：仅渲染文本（卡片需等待 closing fence 到达后才渲染）
+//
+// 流式增强：检测到未闭合的 ```card:type 时，立即渲染骨架卡片，
+// 随着 LLM 输出更多 JSON 字段，卡片渐进式填充。
 
 import { useMemo } from "react";
 import { MarkdownRenderer } from "./MarkdownRenderer";
-import { extractCardBlocks, hasUnclosedFence } from "./card-parser";
+import { extractCardBlocks, hasUnclosedFence, tryParseStreamingCard } from "./card-parser";
 import { OrderCard } from "./cards/OrderCard";
 import { PolicyCard } from "./cards/PolicyCard";
 import { ActionCard } from "./cards/ActionCard";
@@ -13,38 +15,127 @@ import type { ContentBlock } from "@agentforge/shared-types";
 
 interface Props {
   content: string;
-  /** 是否正在流式接收中。流式过程中不渲染卡片（避免半截 JSON 错误） */
+  /** 是否正在流式接收中 */
   isStreaming?: boolean;
 }
 
 export function RichMessageRenderer({ content, isStreaming }: Props) {
+  // 流式过程中：尝试渐进解析未闭合的卡片围栏
+  const streamingCard = useMemo(() => {
+    if (!isStreaming) return null;
+    return tryParseStreamingCard(content);
+  }, [content, isStreaming]);
+
   const { cleanMarkdown, blocks } = useMemo(() => {
-    // 流式过程中：只做 Markdown 渲染，不解析卡片
+    // 流式过程中如果有正在构建的卡片，跳过完整解析（避免半截 JSON 错误）
+    if (streamingCard && !streamingCard.isComplete) {
+      // 切除原始卡片围栏文本，只渲染前置文本 + 骨架卡片
+      const beforeFence = content.slice(0, streamingCard.fenceStartIndex);
+      const afterFence = content.slice(
+        streamingCard.fenceStartIndex + streamingCard.fenceLength,
+      );
+      return { cleanMarkdown: (beforeFence + afterFence).trim(), blocks: [] };
+    }
+
+    // 流式结束或围栏已闭合：正常解析
     if (isStreaming && hasUnclosedFence(content)) {
       return { cleanMarkdown: content, blocks: [] };
     }
     return extractCardBlocks(content);
-  }, [content, isStreaming]);
+  }, [content, isStreaming, streamingCard]);
 
-  // 无卡片块时直接用 MarkdownRenderer
-  if (blocks.length === 0) {
-    return <MarkdownRenderer content={content} />;
+  // 流式 + 正在构建卡片：渲染文本 + 骨架卡片
+  if (streamingCard && !streamingCard.isComplete) {
+    return (
+      <div className="space-y-3">
+        {cleanMarkdown && (
+          <MarkdownRenderer content={cleanMarkdown} />
+        )}
+        {renderStreamingCard(streamingCard)}
+      </div>
+    );
   }
 
-  // 有卡片块时：交错的文本 + 卡片
-  return (
-    <div className="space-y-3">
-      {/* 在卡片之间的文本段 */}
-      {renderInterleaved(cleanMarkdown, blocks)}
-    </div>
-  );
+  // 流式 + 完整卡片已解析
+  if (blocks.length > 0) {
+    return (
+      <div className="space-y-3">
+        {renderInterleaved(cleanMarkdown, blocks)}
+      </div>
+    );
+  }
+
+  // 无卡片块时直接用 MarkdownRenderer
+  return <MarkdownRenderer content={content} />;
+}
+
+/**
+ * 渲染正在流式构建中的卡片（骨架 + 部分数据）
+ */
+function renderStreamingCard(
+  streaming: ReturnType<typeof tryParseStreamingCard>,
+): React.ReactNode {
+  if (!streaming) return null;
+
+  const { type, partialData } = streaming;
+  const key = `streaming-card`;
+
+  // 将部分数据包装为 ContentBlock 传给卡片组件
+  // 卡片组件通过 isStreaming prop 显示骨架
+  switch (type) {
+    case "order":
+      return (
+        <OrderCard
+          key={key}
+          data={partialData as any}
+          isStreaming={true}
+        />
+      );
+    case "policy":
+      return (
+        <PolicyCard
+          key={key}
+          data={partialData as any}
+          isStreaming={true}
+        />
+      );
+    case "action":
+      return (
+        <ActionCard
+          key={key}
+          data={partialData as any}
+          isStreaming={true}
+        />
+      );
+    case "status":
+      return (
+        <StatusCard
+          key={key}
+          data={partialData as any}
+          isStreaming={true}
+        />
+      );
+    case "table":
+      // 表格回退到 Markdown 渲染（部分行）
+      if (partialData.headers && partialData.rows) {
+        return (
+          <MarkdownRenderer
+            key={key}
+            content={buildTableMarkdown(
+              partialData.headers as string[],
+              partialData.rows as string[][],
+            )}
+          />
+        );
+      }
+      return null;
+    default:
+      return null;
+  }
 }
 
 /**
  * 将纯净 Markdown 文本按卡片位置切分，并在对应位置插入卡片组件
- *
- * 简化实现：先渲染纯 Markdown，再逐一追加卡片
- * 对于流式场景，卡片总是在文本末尾出现，这种简化足够用
  */
 function renderInterleaved(
   cleanMarkdown: string,
@@ -52,12 +143,10 @@ function renderInterleaved(
 ) {
   const elements: React.ReactNode[] = [];
 
-  // 渲染文本（如果还有内容）
   if (cleanMarkdown) {
     elements.push(<MarkdownRenderer key="text-main" content={cleanMarkdown} />);
   }
 
-  // 渲染每个卡片
   blocks.forEach(({ block }, i) => {
     elements.push(renderBlock(block, `card-${i}`));
   });
@@ -79,7 +168,6 @@ function renderBlock(block: ContentBlock, key: string): React.ReactNode {
     case "status_card":
       return <StatusCard key={key} data={block.data} />;
     case "table":
-      // 表格型卡片用 Markdown 渲染回退
       return (
         <MarkdownRenderer
           key={key}

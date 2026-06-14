@@ -133,7 +133,9 @@ const AGENT_DECIDE_TOOL: ToolDefinition = {
 // ReAct prompt adapted for tool calling — instructs LLM to call agent_decide
 const REACT_PROMPT_WITH_TOOLS =
   react_system_prompt.content +
-  "\n\n重要：你必须调用 agent_decide 函数来报告你的决策，而不是输出原始 JSON 文本。";
+  "\n\n重要：你必须调用 agent_decide 函数来报告你的决策，而不是输出原始 JSON 文本。" +
+  "\n\n注意：不要输出 ```card:xxx 格式的围栏代码块。系统会自动从工具返回的数据中提取结构化卡片展示给用户。" +
+  "\n你只需用自然语言 + Markdown 格式（表格、列表等）向用户解释结果即可。";
 
 export class AgentService {
   private compressor = new MemoryCompressor();
@@ -254,6 +256,10 @@ export class AgentService {
     let finalContent = "";
     let totalSteps = 0;
 
+    // Track whether tools have been used — once they have, switch to respond-only mode
+    // where the LLM outputs clean Markdown directly (no JSON wrapping) for real streaming
+    let respondOnly = false;
+
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       totalSteps = iteration + 1;
       logger.debug(
@@ -262,11 +268,20 @@ export class AgentService {
       );
 
       // 9a. Build messages for this iteration
+      // In respond-only mode: simple prompt, no tools — LLM streams clean Markdown
+      const iterationSystemPrompt = respondOnly
+        ? "你是一个乐于助人的 AI 客服助手。请根据上面的工具返回数据，用中文直接回复用户。" +
+          "\n使用 Markdown 格式组织回答（表格、列表等），简洁专业。" +
+          "\n不要输出 JSON 结构或代码围栏，只输出给用户看的自然语言内容。"
+        : systemPrompt;
+
+      const iterationTools = respondOnly ? undefined : toolDefs;
+
       const iterationMessages: ChatMessage[] = [
         {
           role: "system",
           content: this.buildIterationContext(
-            systemPrompt,
+            iterationSystemPrompt,
             task,
             scratchpad,
             totalSteps,
@@ -281,6 +296,11 @@ export class AgentService {
       const streamMsgId = randomUUID();
       let llmResponse = "";
       let agentDecision: AgentStep | null = null; // set if LLM calls agent_decide
+      let nativeToolCalls: Array<{
+        name: string;
+        args: Record<string, unknown>;
+        result: string;
+      }> = []; // track native tool calls for ReAct loop continuation
       let llmAttempt = 0;
       const maxLlmAttempts = DEFAULT_LLM_RETRY.maxAttempts;
       let llmSucceeded = false;
@@ -292,6 +312,7 @@ export class AgentService {
         if (llmAttempt > 1) {
           llmResponse = "";
           agentDecision = null;
+          nativeToolCalls = [];
           yield {
             type: "agent_clear_stream",
             message_id: streamMsgId,
@@ -306,7 +327,7 @@ export class AgentService {
             undefined, // system prompt is in messages
             undefined, // temperature
             undefined, // maxTokens
-            toolDefs,
+            iterationTools,
           )) {
             if (chunk.type === "token" && chunk.content) {
               llmResponse += chunk.content;
@@ -346,6 +367,11 @@ export class AgentService {
                   sessionId,
                   totalSteps,
                 );
+                nativeToolCalls.push({
+                  name: tc.name,
+                  args,
+                  result: toolResult,
+                });
                 yield {
                   type: "agent_observe",
                   step: totalSteps,
@@ -431,8 +457,110 @@ export class AgentService {
         continue;
       }
 
+      // 9b-continued. If LLM called native tools (not agent_decide), feed results back and continue ReAct loop
+      if (nativeToolCalls.length > 0) {
+        // Clear any streamed text (the LLM's "let me look that up" preamble)
+        if (llmResponse.trim().length > 0) {
+          yield {
+            type: "agent_clear_stream",
+            message_id: streamMsgId,
+            step: totalSteps,
+          };
+        }
+
+        // Save assistant message with tool calls
+        await prisma.message.create({
+          data: {
+            id: streamMsgId,
+            conversationId,
+            role: "assistant",
+            content: JSON.stringify({
+              tool_calls: nativeToolCalls.map((tc) => ({
+                name: tc.name,
+                arguments: tc.args,
+              })),
+            }),
+            model: resolvedModel,
+          },
+        });
+
+        // Feed tool results back as user messages for next iteration
+        for (const tc of nativeToolCalls) {
+          conversationMessages.push({
+            role: "user",
+            content: `[工具返回] ${tc.name}: ${tc.result}`,
+          });
+        }
+
+        // Record steps in scratchpad
+        for (const tc of nativeToolCalls) {
+          scratchpad.push({
+            step: totalSteps,
+            observation: `调用了工具 ${tc.name}`,
+            analysis: `工具 ${tc.name} 返回了数据`,
+            plan: "查看工具返回的数据并生成用户回复",
+            decision: {
+              action: "tool_call",
+              tool: tc.name,
+              args: tc.args,
+              reason: "LLM通过原生tool calling直接调用",
+            },
+            result: tc.result,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        // Switch to respond-only mode for next iteration (LLM will output clean Markdown)
+        respondOnly = true;
+
+        // Continue to next ReAct iteration so LLM can use the tool result
+        continue;
+      }
+
+      // 9b-respondOnly. If in respond-only mode, the LLM output is clean Markdown
+      // No decision parsing needed — streamed tokens are the final answer
+      if (respondOnly) {
+        finalContent = llmResponse;
+
+        // Save assistant message
+        await prisma.message.create({
+          data: {
+            id: streamMsgId,
+            conversationId,
+            role: "assistant",
+            content: finalContent,
+            model: resolvedModel,
+          },
+        });
+
+        yield {
+          type: "agent_respond",
+          content: finalContent,
+          summary: "Agent completed (respond-only)",
+          message_id: streamMsgId,
+        };
+
+        await this.saveSession(
+          sessionRecord,
+          scratchpad,
+          "completed",
+          "Task completed",
+          compressedSummary,
+        );
+
+        yield {
+          type: "agent_done",
+          total_steps: totalSteps,
+          final_summary: "Task completed",
+          session_id: sessionId,
+        };
+        return;
+      }
+
       // 9c. Parse decision — prefer native tool calling, fall back to JSON text
       const step = agentDecision || this.parseStep(llmResponse, totalSteps);
+      // Track whether decision was parsed from raw text (vs agent_decide tool call)
+      const parsedFromText = agentDecision === null && step !== null;
       if (!step) {
         logger.warn(
           { sessionId, response: llmResponse.slice(0, 200) },
@@ -486,7 +614,17 @@ export class AgentService {
 
       if (decision.action === "respond") {
         // Agent decides task is complete — content was already streamed
-        // as agent_token events during the LLM call (real streaming)
+        // as agent_token events during the LLM call
+        // If the decision was parsed from raw text (not agent_decide), clear the
+        // streamed JSON text before sending the clean response
+        if (parsedFromText) {
+          yield {
+            type: "agent_clear_stream",
+            message_id: streamMsgId,
+            step: totalSteps,
+          };
+        }
+
         yield {
           type: "agent_act",
           step: totalSteps,

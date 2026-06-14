@@ -44,6 +44,7 @@ export class ToolAgent implements RouteAgent {
     let suggestions: string[] = [];
     const contentBlocks: ContentBlock[] = [];
     let accumulatedContent = "";
+    let pastTools = false; // set true after first tool call — switches to real streaming
 
     try {
       // 动态导入 AgentService（避免循环依赖）
@@ -51,8 +52,12 @@ export class ToolAgent implements RouteAgent {
 
       const agentService = new AgentService();
 
-      // 构建客服任务描述
-      const task = `用户询问：${userMessage}\n\n请使用可用工具帮助用户解决问题。回答要简洁、专业、友好。如果工具返回了数据，请用自然语言向用户解释结果。`;
+      // 构建客服任务描述（不要求 LLM 输出卡片 fence —— 服务端自动提取）
+      const task = `用户询问：${userMessage}
+
+请使用可用工具帮助用户解决问题。回答要简洁、专业、友好。
+如果工具返回了数据，请直接用自然语言 + Markdown 表格或列表向用户解释结果。
+不要输出 \`\`\`card:xxx 围栏代码块，系统会自动处理结构化数据展示。`;
 
       // 运行 Agent ReAct 循环（限制迭代次数 + 客服工具集）
       const events = agentService.run(conversationId, task, {
@@ -72,28 +77,51 @@ export class ToolAgent implements RouteAgent {
       });
 
       // 映射 agent 事件 → customer-chat SSE 事件
+      //
+      // 流式策略：
+      // - 工具调用前：agent_token 缓存（前置废话，等工具调用时清掉）
+      // - 工具调用后：agent.ts 切换到 respond-only 模式，LLM 直接输出纯 Markdown
+      //   → agent_token 直接转发给前端，利用 LLM 原生网络延迟实现真打字机
 
       for await (const event of events) {
         switch (event.type) {
           case "agent_token":
             if ("content" in event) {
-              accumulatedContent += event.content;
+              const token = event.content as string;
+              if (pastTools) {
+                // respond-only 阶段：LLM 输出的是纯 Markdown，直接转发
+                accumulatedContent += token;
+                yield {
+                  type: "token",
+                  content: token,
+                  message_id: assistantMsgId,
+                };
+              } else {
+                // 工具调用前：缓存（可能是前置废话或 JSON 决策文本）
+                accumulatedContent += token;
+              }
+            }
+            break;
+
+          case "agent_clear_stream":
+            accumulatedContent = "";
+            pastTools = true;
+            break;
+
+          case "agent_observe":
+            // 工具执行完毕 → 后续 LLM token 是纯 Markdown，开始转发
+            pastTools = true;
+            if ("result" in event && event.result) {
+              const card = tryExtractCard(event.result as string);
+              if (card) {
+                contentBlocks.push(card);
+              }
             }
             break;
 
           case "agent_respond":
             if ("content" in event) {
               finalAnswer = event.content as string;
-            }
-            break;
-
-          case "agent_observe":
-            // 尝试从工具结果中提取结构化卡片数据
-            if ("result" in event && event.result) {
-              const card = tryExtractCard(event.result as string);
-              if (card) {
-                contentBlocks.push(card);
-              }
             }
             break;
 
@@ -116,12 +144,10 @@ export class ToolAgent implements RouteAgent {
         }
       }
 
-      // 如果 Agent 没有通过 agent_respond 设置答案，使用累积内容
       if (!finalAnswer && accumulatedContent) {
         finalAnswer = accumulatedContent;
       }
 
-      // 如果仍然没有答案
       if (!finalAnswer) {
         finalAnswer =
           "抱歉，暂时无法处理您的请求。请尝试重新描述您的问题，或转接人工客服获取帮助。";
@@ -133,7 +159,7 @@ export class ToolAgent implements RouteAgent {
         "抱歉，系统暂时无法处理您的请求，请稍后再试或联系人工客服。";
     }
 
-    // ── 发送 content_block 事件（在文本 token 之前） ──
+    // ── 先发送 content_block（卡片），前端接收后立即渲染 ──
     for (const block of contentBlocks) {
       yield {
         type: "content_block",
@@ -142,32 +168,32 @@ export class ToolAgent implements RouteAgent {
       };
     }
 
-    // ── 向后兼容：如果通过 content_block 发送了卡片，不再在文本中追加 fence（避免前端双重渲染） ──
-    // ── 如果 content_block 未发送（旧客户端），卡片数据已在 finalAnswer 中（由 Agent LLM 生成 fence） ──
-    let answerText = finalAnswer;
-    if (contentBlocks.length === 0) {
-      // 没有 content_block 事件 → 卡片信息只能通过文本 fence 传递
-      // 但 ToolAgent 已通过 content_block 发送，此处无需追加
+    // ── 补充输出：如果 agent_respond 有尚未流式发送的内容，补齐 ──
+    // 正常情况（respond-only 路径）下 token 已全部实时转发，此处无需额外输出
+    if (finalAnswer && !pastTools) {
+      // fallback: agent 没有进入 respond-only 模式（如纯 agent_respond 路径）
+      // 此时 accumulatedContent 可能包含 JSON 文本，优先使用 finalAnswer
+      const cleaned = cleanRepeatedAnswer(finalAnswer);
+      if (cleaned && cleaned !== accumulatedContent) {
+        for (const char of cleaned) {
+          yield {
+            type: "token",
+            content: char,
+            message_id: assistantMsgId,
+          };
+        }
+      }
+    } else if (!finalAnswer && accumulatedContent && !pastTools) {
+      // 最后的兜底：没有任何 respond，输出缓存
+      for (const char of accumulatedContent) {
+        yield {
+          type: "token",
+          content: char,
+          message_id: assistantMsgId,
+        };
+      }
     }
-
-    // 清理重复前缀：agent 有时会在部分 token 流之后在 agent_respond 中重复开头
-    // 如果 finalAnswer 和 accumulatedContent 有共同前缀，使用较完整的版本
-    if (finalAnswer && accumulatedContent) {
-      // 使用 finalAnswer（agent_respond 通常是完整的最终回答）
-      // 但需要清理可能的重复
-      answerText = cleanRepeatedAnswer(finalAnswer);
-    } else if (!answerText && accumulatedContent) {
-      answerText = accumulatedContent;
-    }
-
-    // 逐字符流式输出最终答案
-    for (const char of answerText) {
-      yield {
-        type: "token",
-        content: char,
-        message_id: assistantMsgId,
-      };
-    }
+    // pastTools=true 时 token 已实时转发，无需额外输出
 
     // 发送 done
     yield {
@@ -195,32 +221,73 @@ function tryExtractCard(result: string): ContentBlock | null {
     // 尝试解析 JSON（工具结果可能是 JSON 字符串）
     const data = JSON.parse(result.trim());
 
+    // 规范化字段：同时支持 camelCase 和 snake_case
+    const norm = {
+      orderId: data.orderId ?? data.order_id,
+      status: data.status ?? data.current_status,
+      statusLabel: data.statusLabel ?? data.status_label,
+      items: data.items,
+      total: data.total,
+      carrier: data.carrier,
+      trackingNo: data.trackingNo ?? data.tracking_no,
+      estimatedDelivery: data.estimatedDelivery ?? data.estimated_delivery,
+      createdAt: data.createdAt ?? data.created_at,
+      history: data.history,
+      category: data.category,
+      policy: data.policy,
+      conditions: data.conditions,
+      title: data.title ?? data.policy,
+      refundTimeline: data.refundTimeline ?? data.refund_timeline,
+      returnWindow: data.returnWindow ?? data.return_window,
+      exceptions: data.exceptions,
+      // 支付和物流嵌套字段
+      payment: data.payment,
+      shipping: data.shipping,
+    };
+
     // lookup_order 结果 → OrderCard
-    if (data.orderId && data.status) {
+    if (norm.orderId && norm.status) {
+      // 总计优先从 payment.total 提取（snake_case 工具输出），fallback 到顶层
+      const total =
+        Number(norm.payment?.total ?? norm.total ?? 0);
+      // carrier/trackingNo 优先从 shipping 嵌套提取
+      const carrier =
+        (norm.shipping?.carrier as string) || norm.carrier || undefined;
+      const trackingNo =
+        (norm.shipping?.tracking_no as string) ||
+        (norm.shipping?.trackingNo as string) ||
+        norm.trackingNo ||
+        undefined;
+      const estimatedDelivery =
+        (norm.shipping?.estimated_delivery as string) ||
+        (norm.shipping?.estimatedDelivery as string) ||
+        norm.estimatedDelivery ||
+        undefined;
+
       return {
         type: "order_card",
         data: {
-          orderId: data.orderId,
-          status: data.status,
-          statusLabel: data.statusLabel ?? data.status,
-          items: (data.items ?? []).map((item: Record<string, unknown>) => ({
+          orderId: String(norm.orderId),
+          status: String(norm.status),
+          statusLabel: String(norm.statusLabel ?? norm.status),
+          items: (norm.items ?? []).map((item: Record<string, unknown>) => ({
             name: String(item.name ?? ""),
             quantity: Number(item.quantity ?? 1),
-            price: Number(item.unitPrice ?? item.price ?? 0),
+            price: Number(item.unit_price ?? item.unitPrice ?? item.price ?? 0),
           })),
-          total: Number(data.total ?? 0),
-          carrier: data.carrier as string | undefined,
-          trackingNo: data.trackingNo as string | undefined,
-          estimatedDelivery: data.estimatedDelivery as string | undefined,
-          createdAt: String(data.createdAt ?? data.created_at ?? ""),
+          total,
+          carrier,
+          trackingNo,
+          estimatedDelivery,
+          createdAt: String(norm.createdAt ?? ""),
         },
       };
     }
 
     // check_shipping_status 结果 → StatusCard
-    if (data.trackingNo || (data.carrier && data.status)) {
-      const steps = Array.isArray(data.history)
-        ? data.history.map(
+    if (norm.trackingNo || (norm.carrier && norm.status)) {
+      const steps = Array.isArray(norm.history)
+        ? norm.history.map(
             (h: Record<string, unknown>, i: number, arr: unknown[]) => ({
               label: String(h.status ?? h.description ?? ""),
               status:
@@ -233,28 +300,28 @@ function tryExtractCard(result: string): ContentBlock | null {
       return {
         type: "status_card",
         data: {
-          title: `物流追踪 · ${data.trackingNo ?? data.carrier ?? ""}`,
+          title: `物流追踪 · ${norm.trackingNo ?? norm.carrier ?? ""}`,
           status: "in_progress",
           steps,
-          message: data.statusLabel ?? data.status ?? "",
+          message: String(norm.statusLabel ?? norm.status ?? ""),
         },
       };
     }
 
     // check_return_policy 结果 → PolicyCard
-    if (data.category || data.policy || data.conditions) {
+    if (norm.category || norm.policy || norm.conditions) {
       return {
         type: "policy_card",
         data: {
-          category: String(data.category ?? "退换货政策"),
-          title: String(data.title ?? data.policy ?? ""),
-          conditions: Array.isArray(data.conditions)
-            ? data.conditions.map(String)
+          category: String(norm.category ?? "退换货政策"),
+          title: String(norm.title ?? ""),
+          conditions: Array.isArray(norm.conditions)
+            ? norm.conditions.map(String)
             : [],
-          refundTimeline: data.refundTimeline as string | undefined,
-          returnWindow: data.returnWindow as string | undefined,
-          exceptions: Array.isArray(data.exceptions)
-            ? data.exceptions.map(String)
+          refundTimeline: norm.refundTimeline as string | undefined,
+          returnWindow: norm.returnWindow as string | undefined,
+          exceptions: Array.isArray(norm.exceptions)
+            ? norm.exceptions.map(String)
             : undefined,
         },
       };

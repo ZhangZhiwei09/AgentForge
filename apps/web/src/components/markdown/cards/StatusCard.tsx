@@ -1,5 +1,6 @@
 // ── 状态/进度卡片 ──
 // 展示多步骤进度指示器（如物流追踪、工单处理进度等）
+// 支持流式渐进渲染：未到达的步骤显示骨架
 
 import { Check, Clock, AlertCircle, Loader2 } from "lucide-react";
 import type { StatusCardData } from "@agentforge/shared-types";
@@ -21,72 +22,114 @@ const STEP_COLORS: Record<string, string> = {
 
 interface Props {
   data: StatusCardData;
+  /** 流式构建中：未到达的字段显示骨架 */
+  isStreaming?: boolean;
 }
 
-export function StatusCard({ data }: Props) {
+function Skeleton({ className = "" }: { className?: string }) {
+  return (
+    <span className={`inline-block animate-pulse rounded bg-gray-200 ${className}`}>
+      &nbsp;
+    </span>
+  );
+}
+
+export function StatusCard({ data, isStreaming }: Props) {
+  const hasTitle = !!data.title;
+  const hasMessage = !!data.message;
+  const hasSteps = data.steps && data.steps.length > 0;
+
   return (
     <div className="my-2 rounded-xl border border-[hsl(var(--border))] bg-white shadow-sm overflow-hidden">
       {/* 头部：标题 + 状态 */}
       <div className="flex items-center justify-between px-4 py-3 bg-gray-50/50">
-        <span className="text-sm font-semibold text-gray-800">
-          {data.title}
-        </span>
+        {hasTitle ? (
+          <span className="text-sm font-semibold text-gray-800">
+            {data.title}
+          </span>
+        ) : (
+          <Skeleton className="w-48 h-5" />
+        )}
         <span className="flex items-center gap-1.5 text-xs text-gray-500">
-          {STATUS_ICONS[data.status]}
-          {data.message}
+          {STATUS_ICONS[data.status] ?? STATUS_ICONS.pending}
+          {hasMessage ? (
+            data.message
+          ) : (
+            <Skeleton className="w-20 h-3" />
+          )}
         </span>
       </div>
 
       {/* 步骤列表 */}
-      {data.steps && data.steps.length > 0 && (
+      {(hasSteps || isStreaming) && (
         <div className="px-4 py-3 space-y-0">
-          {data.steps.map((step, i) => {
-            const isLast = i === data.steps!.length - 1;
-            const colors = STEP_COLORS[step.status] ?? STEP_COLORS.wait;
+          {hasSteps ? (
+            data.steps!.map((step, i) => {
+              const isLast = i === data.steps!.length - 1;
+              const colors = STEP_COLORS[step.status] ?? STEP_COLORS.wait;
 
-            return (
-              <div key={i} className="flex items-start gap-3">
-                {/* 步骤指示器（圆点 + 连接线） */}
-                <div className="flex flex-col items-center">
-                  <div
-                    className={`flex h-6 w-6 items-center justify-center rounded-full border-2 text-[10px] font-bold ${colors}`}
-                  >
-                    {step.status === "done" ? (
-                      <Check className="h-3 w-3" />
-                    ) : step.status === "active" ? (
-                      <Loader2 className="h-3 w-3 animate-spin" />
-                    ) : step.status === "error" ? (
-                      <AlertCircle className="h-3 w-3" />
-                    ) : (
-                      i + 1
+              return (
+                <div key={i} className="flex items-start gap-3">
+                  <div className="flex flex-col items-center">
+                    <div
+                      className={`flex h-6 w-6 items-center justify-center rounded-full border-2 text-[10px] font-bold ${colors}`}
+                    >
+                      {step.status === "done" ? (
+                        <Check className="h-3 w-3" />
+                      ) : step.status === "active" ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : step.status === "error" ? (
+                        <AlertCircle className="h-3 w-3" />
+                      ) : (
+                        i + 1
+                      )}
+                    </div>
+                    {!isLast && (
+                      <div
+                        className={`h-full min-h-[20px] w-0.5 ${
+                          step.status === "done" ? "bg-green-300" : "bg-gray-200"
+                        }`}
+                      />
                     )}
                   </div>
-                  {!isLast && (
-                    <div
-                      className={`h-full min-h-[20px] w-0.5 ${
-                        step.status === "done" ? "bg-green-300" : "bg-gray-200"
+                  <div className="pb-4">
+                    <p
+                      className={`text-xs font-medium ${
+                        step.status === "wait" ? "text-gray-400" : "text-gray-700"
                       }`}
-                    />
-                  )}
-                </div>
-                {/* 步骤文字 */}
-                <div className="pb-4">
-                  <p
-                    className={`text-xs font-medium ${
-                      step.status === "wait" ? "text-gray-400" : "text-gray-700"
-                    }`}
-                  >
-                    {step.label}
-                  </p>
-                  {step.description && (
-                    <p className="text-[11px] text-gray-400 mt-0.5">
-                      {step.description}
+                    >
+                      {step.label}
                     </p>
-                  )}
+                    {step.description && (
+                      <p className="text-[11px] text-gray-400 mt-0.5">
+                        {step.description}
+                      </p>
+                    )}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })
+          ) : (
+            /* 骨架步骤占位 */
+            <>
+              {[1, 2, 3].map((_, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <div className="flex flex-col items-center">
+                    <div className="flex h-6 w-6 items-center justify-center rounded-full border-2 border-gray-200 text-gray-300 text-[10px]">
+                      {i + 1}
+                    </div>
+                    {i < 2 && (
+                      <div className="h-full min-h-[20px] w-0.5 bg-gray-200" />
+                    )}
+                  </div>
+                  <div className="pb-4">
+                    <Skeleton className="w-32 h-3 mb-1" />
+                    <Skeleton className="w-24 h-2" />
+                  </div>
+                </div>
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>
