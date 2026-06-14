@@ -29,7 +29,12 @@ const DEFAULT_CS_TOOLS = [
 // observing  : 工具返回结果，Agent 消化数据（agent_observe）
 // responding : Agent 显式声明开始组织最终回复（agent_responding）
 // finished   : 完整生命周期结束（agent_done）
-type AgentPhase = "planning" | "executing" | "observing" | "responding" | "finished";
+type AgentPhase =
+  | "planning"
+  | "executing"
+  | "observing"
+  | "responding"
+  | "finished";
 
 // ── 输出生命周期（只描述流式交付进度，与 Agent 业务阶段解耦） ──
 //
@@ -44,8 +49,8 @@ interface OutputState {
 
 // ── 响应内容（分离正常内容和兜底内容，消除覆盖歧义） ──
 interface ResponseEnvelope {
-  finalContent?: string;     // 来自 agent_respond
-  fallbackContent?: string;  // 来自 agent_error / sanitize 失败
+  finalContent?: string; // 来自 agent_respond
+  fallbackContent?: string; // 来自 agent_error / sanitize 失败
 }
 
 // ═══════════════════════════════════════════════════════
@@ -106,7 +111,8 @@ export class ToolAgent implements RouteAgent {
 
       // ── 工具列表：Router 推荐优先，为空时使用默认全量工具集 ──
       // 始终追加 search_knowledge_base 作为兜底（Router 可能漏推荐 KB 检索）
-      const rawHints = toolHints && toolHints.length > 0 ? toolHints : DEFAULT_CS_TOOLS;
+      const rawHints =
+        toolHints && toolHints.length > 0 ? toolHints : DEFAULT_CS_TOOLS;
       const enabledTools = rawHints.includes("search_knowledge_base")
         ? rawHints
         : [...rawHints, "search_knowledge_base"];
@@ -243,10 +249,7 @@ export class ToolAgent implements RouteAgent {
       }
 
       // ── ReAct 迭代指标埋点 ──
-      csReActIterations.observe(
-        { agent_type: "tool_agent" },
-        iterationCount,
-      );
+      csReActIterations.observe({ agent_type: "tool_agent" }, iterationCount);
 
       // ── 安全网：检测并清除泄漏的 ReAct JSON ──
       if (finalAnswer) {
@@ -289,10 +292,10 @@ export class ToolAgent implements RouteAgent {
     // 判断依据：最终回复是否已完成交付（不依赖 phase，不依赖 flowState）
     if (!outputState.responseCompleted) {
       const content =
-        envelope.finalContent
-        ?? envelope.fallbackContent
-        ?? sanitizeReActJSON(accumulatedContent)
-        ?? "抱歉，暂时无法处理您的请求，请稍后再试或联系人工客服。";
+        envelope.finalContent ??
+        envelope.fallbackContent ??
+        sanitizeReActJSON(accumulatedContent) ??
+        "抱歉，暂时无法处理您的请求，请稍后再试或联系人工客服。";
 
       for (const char of content) {
         yield {
