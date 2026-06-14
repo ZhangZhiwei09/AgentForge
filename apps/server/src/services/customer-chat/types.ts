@@ -6,7 +6,7 @@ import type { ContentBlock } from "@agentforge/shared-types";
 
 // ── 路由分类 ──
 
-export type RouteName = "SAFETY" | "SMALL_TALK" | "BUSINESS" | "TOOL" | "HUMAN";
+export type RouteName = "SAFETY" | "SMALL_TALK" | "TOOL" | "HUMAN";
 
 export interface RouterDecision {
   route: RouteName;

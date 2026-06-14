@@ -19,7 +19,7 @@ import { MemoryEngine } from "./memory-engine.js";
 import { QueryRouter } from "./customer-chat/router.js";
 import { SafetyAgent } from "./customer-chat/safety-agent.js";
 import { SmallTalkAgent } from "./customer-chat/smalltalk-agent.js";
-import { BusinessAgent } from "./customer-chat/business-agent.js";
+
 import {
   fetchKnowledge,
   injectMemories,
@@ -114,7 +114,6 @@ export class CustomerChatService {
   private router: QueryRouter;
   private safetyAgent: SafetyAgent;
   private smallTalkAgent: SmallTalkAgent;
-  private businessAgent: BusinessAgent;
   private toolAgent: ToolAgent;
   private humanAgent: HumanAgent;
 
@@ -123,7 +122,6 @@ export class CustomerChatService {
     this.router = new QueryRouter(modelId);
     this.safetyAgent = new SafetyAgent();
     this.smallTalkAgent = new SmallTalkAgent();
-    this.businessAgent = new BusinessAgent(modelId);
     this.toolAgent = new ToolAgent();
     this.humanAgent = new HumanAgent();
   }
@@ -170,15 +168,16 @@ export class CustomerChatService {
     return null;
   }
 
-  // ── Agent 路由表 ──
+  // ── Agent 路由表 —— Rule First + LLM Fallback 架构 ──
+  // SAFETY / HUMAN: 规则命中直接处理
+  // SMALL_TALK: 简单 LLM 响应
+  // TOOL: 统一 Agent，有全部工具（RAG + 订单 + 物流 + 退货 + 工单）
   private resolveAgent(route: RouteName): RouteAgent {
     switch (route) {
       case "SAFETY":
         return this.safetyAgent;
       case "SMALL_TALK":
         return this.smallTalkAgent;
-      case "BUSINESS":
-        return this.businessAgent;
       case "TOOL":
         return this.toolAgent;
       case "HUMAN":
@@ -297,21 +296,15 @@ export class CustomerChatService {
       intent,
     };
 
-    // ── 5. BUSINESS 路径预加载（其他路径不需要 KB） ──
-    if (decision.route === "BUSINESS") {
-      const { context: kbCtx, results: kbResults } =
-        await fetchKnowledge(userMessage);
-      context.knowledgeContext = kbCtx;
-      context.knowledgeResults = kbResults;
-      context.kbChunks = kbResults.map((r) => r.content);
+    // ── 5. KB 预加载（统一 Agent 架构：不再预加载，Agent 按需调用 search_knowledge_base 工具） ──
 
-      const [memCtx, mems] = await injectMemories(
-        userMessage,
-        conversation.sessionId,
-      );
-      context.memoryContext = memCtx;
-      context.injectedMemories = mems;
-    }
+    // ── 5b. Memory 注入（所有路由通用） ──
+    const [memCtx, mems] = await injectMemories(
+      userMessage,
+      conversation.sessionId,
+    );
+    context.memoryContext = memCtx;
+    context.injectedMemories = mems;
 
     // ── 6. 分发到对应 Agent，收集 answer ──
     const agent = this.resolveAgent(decision.route);

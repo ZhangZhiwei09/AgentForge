@@ -64,6 +64,7 @@ export class ToolAgent implements RouteAgent {
         model: resolvedModel,
         maxIterations: 5,
         tools: [
+          "search_knowledge_base",
           "lookup_order",
           "create_support_ticket",
           "check_return_policy",

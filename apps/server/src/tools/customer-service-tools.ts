@@ -302,10 +302,82 @@ async function checkShippingStatusExecute(
 }
 
 // ═══════════════════════════════════════════════════════
+// 5. search_knowledge_base —— RAG 知识库检索
+// ═══════════════════════════════════════════════════════
+
+const searchKnowledgeBaseDef: ToolDefinition = {
+  type: "function",
+  function: {
+    name: "search_knowledge_base",
+    description:
+      "搜索客服知识库，获取退换货政策、物流说明、会员权益、支付方式等业务相关信息。" +
+      "当用户询问政策类问题（退货规则、配送时间、会员等级等）且当前没有订单上下文时使用此工具。",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "搜索查询语句，使用用户问题的核心关键词",
+        },
+      },
+      required: ["query"],
+    },
+  },
+};
+
+async function searchKnowledgeBaseExecute(
+  args: Record<string, unknown>,
+): Promise<string> {
+  const query = (args.query as string) || "";
+  if (!query.trim()) {
+    return JSON.stringify({ error: "请提供搜索查询" });
+  }
+
+  try {
+    // 动态导入 KnowledgeService（避免循环依赖）
+    const { KnowledgeService } = await import("../services/knowledge.js");
+    const service = new KnowledgeService();
+    const results = await service.search(query, null, 5);
+
+    if (!results || results.length === 0) {
+      return JSON.stringify({
+        query,
+        found: false,
+        message: "未找到相关知识库内容，请基于通用知识回答用户。",
+      });
+    }
+
+    return JSON.stringify({
+      query,
+      found: true,
+      results: results.map((r: { content: string; score: number; docTitle?: string }) => ({
+        content: r.content,
+        score: Math.round(r.score * 100) / 100,
+        source: r.docTitle || "知识库",
+      })),
+    });
+  } catch (e) {
+    logger.error(e, "search_knowledge_base failed");
+    return JSON.stringify({
+      error: "知识库搜索暂时不可用，请基于通用知识回答用户。",
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════
 // 工具注册列表
 // ═══════════════════════════════════════════════════════
 
 export const customerServiceTools: RegisteredTool[] = [
+  {
+    definition: searchKnowledgeBaseDef,
+    execute: searchKnowledgeBaseExecute,
+    riskLevel: "read_only",
+    timeout: 10_000,
+    requireApproval: false,
+    category: "customer_service",
+    parallelizable: false,
+  },
   {
     definition: lookupOrderDef,
     execute: lookupOrderExecute,

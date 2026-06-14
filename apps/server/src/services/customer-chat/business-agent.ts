@@ -105,7 +105,7 @@ const CUSTOMER_USER_ID = "00000000-0000-0000-0000-000000000002";
 // ═══════════════════════════════════════════════════════
 
 export class BusinessAgent implements RouteAgent {
-  readonly route = "BUSINESS" as const;
+  readonly route = "TOOL" as const; // 已统一到 TOOL 路由
   private modelId: string | null;
 
   constructor(modelId?: string | null) {
@@ -176,7 +176,7 @@ export class BusinessAgent implements RouteAgent {
       retryCount: 0,
       modelUsed: `${providerName}:${resolvedModel}`,
       fallbackUsed: false,
-      route: "BUSINESS",
+      route: "TOOL",
     };
 
     try {
@@ -209,7 +209,7 @@ export class BusinessAgent implements RouteAgent {
       intent,
       within_service_hours: withinServiceHours,
       memory_count: injectedMemories.length,
-      route: "BUSINESS",
+      route: "TOOL",
     };
 
     // ── 逐字符流式输出 answer ──
@@ -236,7 +236,7 @@ export class BusinessAgent implements RouteAgent {
       },
       validated: evalRecord.validationErrors.length === 0,
       fallback_used: evalRecord.fallbackUsed,
-      route: "BUSINESS",
+      route: "TOOL",
     };
   }
 
@@ -262,7 +262,7 @@ export class BusinessAgent implements RouteAgent {
       intent,
       within_service_hours: withinHours,
       memory_count: memoryCount,
-      route: "BUSINESS",
+      route: "TOOL",
     };
 
     for (const char of response.answer) {
@@ -281,7 +281,7 @@ export class BusinessAgent implements RouteAgent {
       memory: { injected: memoryCount, extracted: 0 },
       validated: true,
       fallback_used: fallbackUsed,
-      route: "BUSINESS",
+      route: "TOOL",
     };
   }
 }
