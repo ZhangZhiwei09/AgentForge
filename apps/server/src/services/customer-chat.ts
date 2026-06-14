@@ -123,7 +123,11 @@ export class CustomerChatService {
 
   // 会话级并发控制：同一 sessionId 的请求串行化，防止竞态条件
   // 使用 Promise 链式串行化而非阻塞式互斥锁，避免饿死 Node 事件循环
+  //
+  // 内存安全：Map 上限 MAX_SESSION_LOCKS 条，超出时淘汰最旧的 entry（LRU 语义）。
+  // 正常路径下 finally 块会清理，上限仅在异常泄漏时触发（如客户端断连后锁未释放）。
   private static sessionLocks = new Map<string, Promise<void>>();
+  private static readonly MAX_SESSION_LOCKS = 1000;
 
   constructor(modelId?: string | null) {
     this.modelId = modelId || null;
@@ -132,6 +136,14 @@ export class CustomerChatService {
     this.smallTalkAgent = new SmallTalkAgent();
     this.toolAgent = new ToolAgent();
     this.humanAgent = new HumanAgent();
+
+    // 强类型路由注册表：确保每个 RouteName 都有对应 Agent 实现
+    this.agentRegistry = {
+      SAFETY: this.safetyAgent,
+      SMALL_TALK: this.smallTalkAgent,
+      TOOL: this.toolAgent,
+      HUMAN: this.humanAgent,
+    };
   }
 
   // ── 会话管理 ──
@@ -180,17 +192,18 @@ export class CustomerChatService {
   // SAFETY / HUMAN: 规则命中直接处理
   // SMALL_TALK: 简单 LLM 响应
   // TOOL: 统一 Agent，有全部工具（RAG + 订单 + 物流 + 退货 + 工单）
+  //
+  // 使用 Record 强类型注册表替代 switch，确保每个 RouteName 都有对应的 Agent
+  private readonly agentRegistry: Record<RouteName, RouteAgent>;
+
   private resolveAgent(route: RouteName): RouteAgent {
-    switch (route) {
-      case "SAFETY":
-        return this.safetyAgent;
-      case "SMALL_TALK":
-        return this.smallTalkAgent;
-      case "TOOL":
-        return this.toolAgent;
-      case "HUMAN":
-        return this.humanAgent;
+    const agent = this.agentRegistry[route];
+    if (!agent) {
+      // 防御性编程：如果 RouteName 扩展了新值但忘记注册，这里会明确报错
+      // 而不是静默返回 undefined 导致 NPE
+      throw new Error(`[CustomerChatService] 未注册的 RouteAgent: ${route}`);
     }
+    return agent;
   }
 
   // ═══════════════════════════════════════════════════════
@@ -211,6 +224,24 @@ export class CustomerChatService {
     const currentLock = new Promise<void>((resolve) => {
       releaseLock = resolve;
     });
+
+    // 防御性淘汰：Map 超过上限时逐出最旧的 entry（防止异常泄漏导致 OOM）
+    if (
+      CustomerChatService.sessionLocks.size >=
+      CustomerChatService.MAX_SESSION_LOCKS
+    ) {
+      const firstKey = CustomerChatService.sessionLocks.keys().next().value;
+      if (firstKey !== undefined) {
+        CustomerChatService.sessionLocks.delete(firstKey);
+        logger.warn(
+          {
+            evictedKey: firstKey,
+            mapSize: CustomerChatService.sessionLocks.size,
+          },
+          "Session lock map exceeded limit, evicted oldest entry",
+        );
+      }
+    }
     CustomerChatService.sessionLocks.set(lockKey, currentLock);
 
     // 等待前一个同 session 的请求完成

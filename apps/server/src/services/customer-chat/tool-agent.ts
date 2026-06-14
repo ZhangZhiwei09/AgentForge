@@ -331,48 +331,41 @@ export class ToolAgent implements RouteAgent {
  */
 function tryExtractCard(result: string): ContentBlock | null {
   try {
-    // 尝试解析 JSON（工具结果可能是 JSON 字符串）
     const data = JSON.parse(result.trim());
 
-    // 规范化字段：同时支持 camelCase 和 snake_case
+    // 规范化字段：snake_case 为主（所有工具已统一输出格式），camelCase 为防御性 fallback
+    // 仅 LLM 生成的非标准 JSON 可能使用 camelCase
     const norm = {
-      orderId: data.orderId ?? data.order_id,
+      orderId: data.order_id ?? data.orderId,
       status: data.status ?? data.current_status,
-      statusLabel: data.statusLabel ?? data.status_label,
+      statusLabel: data.status_label ?? data.statusLabel,
       items: data.items,
       total: data.total,
       carrier: data.carrier,
-      trackingNo: data.trackingNo ?? data.tracking_no,
-      estimatedDelivery: data.estimatedDelivery ?? data.estimated_delivery,
-      createdAt: data.createdAt ?? data.created_at,
+      trackingNo: data.tracking_no ?? data.trackingNo,
+      estimatedDelivery: data.estimated_delivery ?? data.estimatedDelivery,
+      createdAt: data.created_at ?? data.createdAt,
       history: data.history,
       category: data.category,
       policy: data.policy,
       conditions: data.conditions,
       title: data.title ?? data.policy,
-      refundTimeline: data.refundTimeline ?? data.refund_timeline,
-      returnWindow: data.returnWindow ?? data.return_window,
+      refundTimeline: data.refund_timeline ?? data.refundTimeline,
+      returnWindow: data.return_window ?? data.returnWindow,
       exceptions: data.exceptions,
-      // 支付和物流嵌套字段
       payment: data.payment,
       shipping: data.shipping,
     };
 
     // lookup_order 结果 → OrderCard
     if (norm.orderId && norm.status) {
-      // 总计优先从 payment.total 提取（snake_case 工具输出），fallback 到顶层
       const total = Number(norm.payment?.total ?? norm.total ?? 0);
-      // carrier/trackingNo 优先从 shipping 嵌套提取
       const carrier =
         (norm.shipping?.carrier as string) || norm.carrier || undefined;
       const trackingNo =
-        (norm.shipping?.tracking_no as string) ||
-        (norm.shipping?.trackingNo as string) ||
-        norm.trackingNo ||
-        undefined;
+        (norm.shipping?.tracking_no as string) || norm.trackingNo || undefined;
       const estimatedDelivery =
         (norm.shipping?.estimated_delivery as string) ||
-        (norm.shipping?.estimatedDelivery as string) ||
         norm.estimatedDelivery ||
         undefined;
 

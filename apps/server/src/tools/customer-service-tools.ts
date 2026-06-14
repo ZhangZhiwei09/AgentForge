@@ -371,12 +371,12 @@ async function searchKnowledgeBaseExecute(
     const reranked = deduped.slice(0, 5);
 
     // 3. Threshold: 最高分低于 0.5 → 不返回（避免低质量信息）
-    const topScore = reranked[0]?.score ?? 0;
-    if (topScore < 0.5) {
+    const top_score = reranked[0]?.score ?? 0;
+    if (top_score < 0.5) {
       return JSON.stringify({
         query,
         found: false,
-        topScore,
+        top_score,
         message:
           "知识库中未找到高相关度内容。请基于通用知识回答，并告知用户此信息可能需要人工核实。",
       });
@@ -384,13 +384,13 @@ async function searchKnowledgeBaseExecute(
 
     // 4. 质量标记
     const qualityLabel =
-      topScore >= 0.8 ? "high" : topScore >= 0.65 ? "medium" : "low";
+      top_score >= 0.8 ? "high" : top_score >= 0.65 ? "medium" : "low";
 
     return JSON.stringify({
       query,
       found: true,
       quality: qualityLabel,
-      topScore,
+      top_score,
       results: reranked.map((r) => ({
         content: r.content,
         score: r.score,

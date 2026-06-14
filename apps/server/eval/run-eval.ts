@@ -6,11 +6,17 @@ import * as dotenv from "dotenv";
 import * as path from "path";
 import * as fs from "fs";
 import OpenAI from "openai";
-import { z } from "zod";
 
-// 加载 .env
+// 加载 .env（必须在其他 import 之前，因为 server 模块可能读取 env）
 const envPath = path.resolve(import.meta.dirname || __dirname, "../.env");
 dotenv.config({ path: envPath });
+
+// ── 从主代码导入共享常量（消除重复定义）──
+import {
+  SORRY_TEMPLATE,
+  FORBIDDEN_PATTERNS,
+  ChatResponseSchema,
+} from "../src/services/customer-chat/validation.js";
 
 // ═══════════════════════════════════════════
 // 配置：从 .env 读取
@@ -21,34 +27,6 @@ const DEEPSEEK_KEY = process.env.DEEPSEEK_API_KEY || "";
 const DEEPSEEK_URL =
   process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1";
 const DEFAULT_MODEL = process.env.DEFAULT_MODEL || "deepseek-chat";
-
-// ═══════════════════════════════════════════
-// 固定话术
-// ═══════════════════════════════════════════
-const SORRY_TEMPLATE =
-  "抱歉，我目前没有找到相关信息，建议您联系人工客服获取帮助。";
-
-// ═══════════════════════════════════════════
-// Zod Schema
-// ═══════════════════════════════════════════
-const ChatResponseSchema = z.object({
-  answer: z.string().min(1).max(2000),
-  suggestions: z.array(z.string().max(50)).max(3).default([]),
-});
-
-// ═══════════════════════════════════════════
-// 禁止行为扫描
-// ═══════════════════════════════════════════
-const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
-  { pattern: /根据(我司|公司|平台)规定/g, label: "虚假权威引用" },
-  { pattern: /经查询[^，。]*[，。]/g, label: "虚假查询陈述" },
-  { pattern: /可能是(因为|由于)/g, label: "无依据推测原因" },
-  {
-    pattern: /您的(订单|物流|快递)[^，。]{0,10}(可能|应该)/g,
-    label: "推测客户信息",
-  },
-  { pattern: /建议您(自行|自己)[^，。]*[，。]/g, label: "推卸责任式建议" },
-];
 
 // ═══════════════════════════════════════════
 // System Prompt（与 customer-chat.ts 一致）

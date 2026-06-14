@@ -78,7 +78,7 @@ const INTENT_TO_ROUTE: Record<string, RouteName> = {
 // 处理高置信度模式：SAFETY 扫描 + HUMAN/TOOL/BUSINESS 快速路由
 // 这些规则弥补 LLM Router 的分类不稳定问题
 
-const SAFETY_KEYWORDS = [
+export const SAFETY_KEYWORDS = [
   // ── 原有规则：英文 prompt injection ──
   /忽略.*(指令|规则|限制|之前)/i,
   /扮演.*(角色|黑客|坏人)/i,
@@ -110,7 +110,7 @@ const SAFETY_KEYWORDS = [
   /([^\s])\1{500,}/, // 单个非空白字符重复500次以上
 ];
 
-const HUMAN_KEYWORDS = [
+export const HUMAN_KEYWORDS = [
   /转人工/,
   /找(人工|真人|客服|你们经理|你们领导)/,
   /(打|联系|给.*)(客服)?电话/,
@@ -262,7 +262,7 @@ export class QueryRouter {
    */
   private fallbackClassify(message: string): RouterDecision {
     const { intent, confidence } = intentDetector.detect(message);
-    const route = INTENT_TO_ROUTE[intent] || "BUSINESS";
+    const route: RouteName = INTENT_TO_ROUTE[intent] ?? "TOOL";
 
     return {
       route,

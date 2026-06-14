@@ -5,6 +5,10 @@
 // 所有测试不依赖 LLM，CI 环境可运行
 
 import { describe, it, expect } from "vitest";
+import {
+  SAFETY_KEYWORDS,
+  HUMAN_KEYWORDS,
+} from "../services/customer-chat/router.js";
 
 // ═══════════════════════════════════════════════════════
 // 辅助函数（从 tool-agent.ts 内联，避免循环依赖）
@@ -61,32 +65,7 @@ function sanitizeReActJSON(text: string): string | null {
 // ═══════════════════════════════════════════════════════
 
 describe("SAFETY_KEYWORDS 扩展覆盖", () => {
-  // 当前 SAFETY_KEYWORDS 规则集（与 router.ts 保持同步）
-  const SAFETY_KEYWORDS = [
-    /忽略.*(指令|规则|限制|之前)/i,
-    /扮演.*(角色|黑客|坏人)/i,
-    /(DAN|jailbreak|system\s*prompt)/i,
-    /ignore.*(instruction|rule)/i,
-    /pretend.*(you\s*are|to\s*be)/i,
-    /無視.*(指示|ルール|制限)/i,
-    /開発者.*モード/i,
-    /忽略.*(指示|規則|制限|以前)/i,
-    /(role.?(play|扮演)|cosplay|pretend\s+to\s+be)/i,
-    /你.*(现在|从现在起|以後|从此).*是.*(ChatGPT|GPT|AI|人工智能|机器人)/i,
-    /forget.*(everything|all).*(before|above|previous)/i,
-    /<\|im_start\|>/i,
-    /<\|system\|>/i,
-    /\[INST\].*\[\/?INST\]/i,
-    /(system|系统|系統)\s*:\s*(你现在|你的新|ignore|forget)/i,
-    /<\s*s\s*y\s*s\s*t\s*e\s*m\s*>/i,
-    /(base64|b64|base64_decode|atob|fromCharCode)\s*\(/i,
-    /[A-Za-z0-9+\/=]{40,}\s*(decode|解密|解码)/i,
-    /fromCharCode\s*\(/i,
-    /(我是|我是你).*(管理员|开发者|创始人|CEO|CTO|老板|经理).*(请|要求|命令|给我)/i,
-    /(give|show|reveal|tell|print).*me.*(your\s*(prompt|instructions|system|code|rules))/i,
-    /(output|print|dump|show).*(your|the).*(prompt|instructions|system\s*message)/i,
-    /([^\s])\1{500,}/,
-  ];
+  // SAFETY_KEYWORDS 从 router.ts 导入，确保测试与源码同步
 
   function isSafetyMatch(message: string): boolean {
     return SAFETY_KEYWORDS.some((p) => p.test(message));
@@ -327,41 +306,7 @@ describe("sanitizeReActJSON - ReAct JSON 泄漏防护", () => {
 // ═══════════════════════════════════════════════════════
 
 describe("QueryRouter - 关键词快速路由", () => {
-  // 内联 quickRouteScan 逻辑（与 router.ts 保持同步）
-  const SAFETY_PATTERNS = [
-    /忽略.*(指令|规则|限制|之前)/i,
-    /扮演.*(角色|黑客|坏人)/i,
-    /(DAN|jailbreak|system\s*prompt)/i,
-    /ignore.*(instruction|rule)/i,
-    /pretend.*(you\s*are|to\s*be)/i,
-    /無視.*(指示|ルール|制限)/i,
-    /開発者.*モード/i,
-    /忽略.*(指示|規則|制限|以前)/i,
-    /(role.?(play|扮演)|cosplay|pretend\s+to\s+be)/i,
-    /你.*(现在|从现在起|以後|从此).*是.*(ChatGPT|GPT|AI|人工智能|机器人)/i,
-    /forget.*(everything|all).*(before|above|previous)/i,
-    /<\|im_start\|>/i,
-    /<\|system\|>/i,
-    /\[INST\].*\[\/?INST\]/i,
-    /(system|系统|系統)\s*:\s*(你现在|你的新|ignore|forget)/i,
-    /<\s*s\s*y\s*s\s*t\s*e\s*m\s*>/i,
-    /(base64|b64|base64_decode|atob|fromCharCode)\s*\(/i,
-    /[A-Za-z0-9+\/=]{40,}\s*(decode|解密|解码)/i,
-    /fromCharCode\s*\(/i,
-    /(我是|我是你).*(管理员|开发者|创始人|CEO|CTO|老板|经理).*(请|要求|命令|给我)/i,
-    /(give|show|reveal|tell|print).*me.*(your\s*(prompt|instructions|system|code|rules))/i,
-    /(output|print|dump|show).*(your|the).*(prompt|instructions|system\s*message)/i,
-    /([^\s])\1{500,}/,
-  ];
-
-  const HUMAN_PATTERNS = [
-    /转人工/,
-    /找(人工|真人|客服|你们经理|你们领导)/,
-    /(打|联系|给.*)(客服)?电话/,
-    /我要投诉/,
-    /投诉.*(你们|客服|服务)/,
-    /叫.*(经理|领导|负责人)/,
-  ];
+  // SAFETY_KEYWORDS / HUMAN_KEYWORDS 从 router.ts 导入，确保测试与源码同步
 
   interface QuickRouteResult {
     route: string;
@@ -371,7 +316,7 @@ describe("QueryRouter - 关键词快速路由", () => {
 
   function quickRouteScan(message: string): QuickRouteResult | null {
     // SAFETY 优先
-    if (SAFETY_PATTERNS.some((p) => p.test(message))) {
+    if (SAFETY_KEYWORDS.some((p) => p.test(message))) {
       return {
         route: "SAFETY",
         confidence: 1.0,
@@ -380,7 +325,7 @@ describe("QueryRouter - 关键词快速路由", () => {
     }
 
     // HUMAN
-    if (HUMAN_PATTERNS.some((p) => p.test(message))) {
+    if (HUMAN_KEYWORDS.some((p) => p.test(message))) {
       return {
         route: "HUMAN",
         confidence: 0.95,
