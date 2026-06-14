@@ -13,6 +13,10 @@ import { prisma } from "../db.js";
 import { resolveModel } from "../providers/registry.js";
 import type { ChatMessage } from "../providers/types.js";
 import { logger } from "@agentforge/logger";
+import {
+  csRouteClassificationTotal,
+  csRouteConfidence,
+} from "../observability/metrics.js";
 import { intentDetector } from "./intent-detector.js";
 import { MemoryEngine } from "./memory-engine.js";
 
@@ -117,6 +121,10 @@ export class CustomerChatService {
   private toolAgent: ToolAgent;
   private humanAgent: HumanAgent;
 
+  // 会话级并发控制：同一 sessionId 的请求串行化，防止竞态条件
+  // 使用 Promise 链式串行化而非阻塞式互斥锁，避免饿死 Node 事件循环
+  private static sessionLocks = new Map<string, Promise<void>>();
+
   constructor(modelId?: string | null) {
     this.modelId = modelId || null;
     this.router = new QueryRouter(modelId);
@@ -193,172 +201,207 @@ export class CustomerChatService {
     sessionId: string | null,
     userMessage: string,
   ): AsyncGenerator<Record<string, unknown>> {
-    // ── 1. Session 层 ──
-    const conversation = await this.getOrCreateConversation(sessionId);
-    const [providerName, resolvedModel] = resolveModel(this.modelId);
-    const withinHours = this.isWithinServiceHours();
+    // ── 0. 会话级并发控制：同一 sessionId 的请求串行化 ──
+    const lockKey = sessionId ?? `anonymous-${randomUUID()}`;
+    const previousLock =
+      CustomerChatService.sessionLocks.get(lockKey) ?? Promise.resolve();
 
-    // 意图识别（用于日志和 fallback）
-    const { intent } = intentDetector.detect(userMessage);
-
-    // 加载历史
-    const history = await prisma.message.findMany({
-      where: { conversationId: conversation.id },
-      orderBy: { createdAt: "desc" },
-      take: MAX_HISTORY_MESSAGES,
+    // 创建当前请求的完成信号（在 finally 中 resolve）
+    let releaseLock: () => void;
+    const currentLock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
     });
-    const reversed = history.reverse();
+    CustomerChatService.sessionLocks.set(lockKey, currentLock);
 
-    // 历史消息转换为 ChatMessage[]
-    const historyMessages: ChatMessage[] = reversed.map((msg) => ({
-      role: msg.role,
-      content: msg.content,
-    }));
+    // 等待前一个同 session 的请求完成
+    await previousLock;
 
-    // 保存用户消息
-    await prisma.message.create({
-      data: {
-        id: randomUUID(),
-        conversationId: conversation.id,
-        role: "user",
-        content: userMessage,
-        model: resolvedModel,
-      },
-    });
+    try {
+      // ── 1. Session 层 ──
+      const conversation = await this.getOrCreateConversation(sessionId);
+      const [providerName, resolvedModel] = resolveModel(this.modelId);
+      const withinHours = this.isWithinServiceHours();
 
-    if (intent !== "其他咨询") {
-      try {
-        await prisma.conversation.update({
-          where: { id: conversation.id },
-          data: { intent },
-        });
-      } catch {
-        /* 字段可能未迁移 */
+      // 意图识别（用于日志和 fallback）
+      const { intent } = intentDetector.detect(userMessage);
+
+      // 加载历史
+      const history = await prisma.message.findMany({
+        where: { conversationId: conversation.id },
+        orderBy: { createdAt: "desc" },
+        take: MAX_HISTORY_MESSAGES,
+      });
+      const reversed = history.reverse();
+
+      // 历史消息转换为 ChatMessage[]
+      const historyMessages: ChatMessage[] = reversed.map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
+      // 保存用户消息
+      await prisma.message.create({
+        data: {
+          id: randomUUID(),
+          conversationId: conversation.id,
+          role: "user",
+          content: userMessage,
+          model: resolvedModel,
+        },
+      });
+
+      if (intent !== "其他咨询") {
+        try {
+          await prisma.conversation.update({
+            where: { id: conversation.id },
+            data: { intent },
+          });
+        } catch {
+          /* 字段可能未迁移 */
+        }
       }
-    }
 
-    const assistantMsgId = randomUUID();
+      const assistantMsgId = randomUUID();
 
-    // ── 2. 传统对话快速通道（零延迟） ──
-    const convMatch = this.matchConversational(userMessage);
-    if (convMatch) {
-      yield* this.streamConversationalMatch(
-        assistantMsgId,
-        conversation.sessionId,
-        resolvedModel,
-        providerName,
-        withinHours,
-        intent,
-        convMatch,
+      // ── 2. 传统对话快速通道（零延迟） ──
+      const convMatch = this.matchConversational(userMessage);
+      if (convMatch) {
+        yield* this.streamConversationalMatch(
+          assistantMsgId,
+          conversation.sessionId,
+          resolvedModel,
+          providerName,
+          withinHours,
+          intent,
+          convMatch,
+        );
+
+        // 保存助手消息
+        await prisma.message.create({
+          data: {
+            id: assistantMsgId,
+            conversationId: conversation.id,
+            role: "assistant",
+            content: convMatch.answer,
+            model: resolvedModel,
+          },
+        });
+
+        return;
+      }
+
+      // ── 3. QueryRouter 分类 ──
+      const decision = await this.router.classify(userMessage, historyMessages);
+
+      logger.info(
+        {
+          route: decision.route,
+          confidence: decision.confidence,
+          sessionId: conversation.sessionId,
+        },
+        "Router classified customer message",
       );
 
-      // 保存助手消息
-      await prisma.message.create({
-        data: {
-          id: assistantMsgId,
-          conversationId: conversation.id,
-          role: "assistant",
-          content: convMatch.answer,
-          model: resolvedModel,
-        },
-      });
-
-      return;
-    }
-
-    // ── 3. QueryRouter 分类 ──
-    const decision = await this.router.classify(userMessage, historyMessages);
-
-    logger.info(
-      {
+      // ── 路由分类指标埋点 ──
+      const source = decision.reasoning.includes("关键词命中")
+        ? "keyword"
+        : decision.reasoning.includes("fallback")
+          ? "fallback"
+          : "llm";
+      csRouteClassificationTotal.inc({
         route: decision.route,
-        confidence: decision.confidence,
-        sessionId: conversation.sessionId,
-      },
-      "Router classified customer message",
-    );
-
-    // ── 4. 构建 RouteContext（含 Intent Classifier 的工具推荐） ──
-    let context: RouteContext = {
-      conversationId: conversation.id,
-      sessionId: conversation.sessionId,
-      userMessage,
-      history: historyMessages,
-      knowledgeContext: "",
-      knowledgeResults: [],
-      kbChunks: [],
-      memoryContext: "",
-      injectedMemories: [],
-      resolvedModel,
-      providerName,
-      withinServiceHours: withinHours,
-      assistantMsgId,
-      intent,
-      toolHints: decision.tools,
-      executionHint: decision.execution_order,
-    };
-
-    // ── 5. KB 预加载（统一 Agent 架构：不再预加载，Agent 按需调用 search_knowledge_base 工具） ──
-
-    // ── 5b. Memory 注入（所有路由通用） ──
-    const [memCtx, mems] = await injectMemories(
-      userMessage,
-      conversation.sessionId,
-    );
-    context.memoryContext = memCtx;
-    context.injectedMemories = mems;
-
-    // ── 6. 分发到对应 Agent，收集 answer ──
-    const agent = this.resolveAgent(decision.route);
-    let streamedAnswer = "";
-
-    for await (const event of agent.execute(context)) {
-      if (event.type === "token") {
-        streamedAnswer += event.content;
-      }
-      yield event;
-    }
-
-    // ── 7. 保存助手消息 ──
-    if (streamedAnswer) {
-      await prisma.message.create({
-        data: {
-          id: assistantMsgId,
-          conversationId: conversation.id,
-          role: "assistant",
-          content: streamedAnswer,
-          model: resolvedModel,
-        },
+        source,
       });
-    }
+      csRouteConfidence.observe({ route: decision.route }, decision.confidence);
 
-    // ── 8. 提取记忆 ──
-    if (conversation.sessionId && streamedAnswer) {
-      try {
-        const engine = new MemoryEngine();
-        const allMessages = [
-          ...historyMessages.map((m) => ({
-            role: m.role,
-            content: m.content ?? "",
-          })),
-          { role: "user" as const, content: userMessage },
-          { role: "assistant" as const, content: streamedAnswer },
-        ];
-        const extracted = await engine.extractAndStore(
-          allMessages,
-          CUSTOMER_USER_ID,
-          conversation.id,
-          providerName,
-          conversation.sessionId,
-        );
-        if (extracted.length > 0) {
-          logger.info(
-            { count: extracted.length, sessionId: conversation.sessionId },
-            "Customer memories extracted",
-          );
+      // ── 4. 构建 RouteContext（含 Intent Classifier 的工具推荐） ──
+      let context: RouteContext = {
+        conversationId: conversation.id,
+        sessionId: conversation.sessionId,
+        userMessage,
+        history: historyMessages,
+        knowledgeContext: "",
+        knowledgeResults: [],
+        kbChunks: [],
+        memoryContext: "",
+        injectedMemories: [],
+        resolvedModel,
+        providerName,
+        withinServiceHours: withinHours,
+        assistantMsgId,
+        intent,
+        toolHints: decision.tools,
+        executionHint: decision.execution_order,
+      };
+
+      // ── 5. KB 预加载（统一 Agent 架构：不再预加载，Agent 按需调用 search_knowledge_base 工具） ──
+
+      // ── 5b. Memory 注入（所有路由通用） ──
+      const [memCtx, mems] = await injectMemories(
+        userMessage,
+        conversation.sessionId,
+      );
+      context.memoryContext = memCtx;
+      context.injectedMemories = mems;
+
+      // ── 6. 分发到对应 Agent，收集 answer ──
+      const agent = this.resolveAgent(decision.route);
+      let streamedAnswer = "";
+
+      for await (const event of agent.execute(context)) {
+        if (event.type === "token") {
+          streamedAnswer += event.content;
         }
-      } catch (e) {
-        logger.warn(e, "Customer memory extraction failed");
+        yield event;
+      }
+
+      // ── 7. 保存助手消息 ──
+      if (streamedAnswer) {
+        await prisma.message.create({
+          data: {
+            id: assistantMsgId,
+            conversationId: conversation.id,
+            role: "assistant",
+            content: streamedAnswer,
+            model: resolvedModel,
+          },
+        });
+      }
+
+      // ── 8. 提取记忆 ──
+      if (conversation.sessionId && streamedAnswer) {
+        try {
+          const engine = new MemoryEngine();
+          const allMessages = [
+            ...historyMessages.map((m) => ({
+              role: m.role,
+              content: m.content ?? "",
+            })),
+            { role: "user" as const, content: userMessage },
+            { role: "assistant" as const, content: streamedAnswer },
+          ];
+          const extracted = await engine.extractAndStore(
+            allMessages,
+            CUSTOMER_USER_ID,
+            conversation.id,
+            providerName,
+            conversation.sessionId,
+          );
+          if (extracted.length > 0) {
+            logger.info(
+              { count: extracted.length, sessionId: conversation.sessionId },
+              "Customer memories extracted",
+            );
+          }
+        } catch (e) {
+          logger.warn(e, "Customer memory extraction failed");
+        }
+      }
+    } finally {
+      // 释放会话锁：允许下一个同 sessionId 的请求进入
+      releaseLock!();
+      if (CustomerChatService.sessionLocks.get(lockKey) === currentLock) {
+        CustomerChatService.sessionLocks.delete(lockKey);
       }
     }
   }

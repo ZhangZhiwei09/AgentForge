@@ -3,6 +3,7 @@
 // 更新会话状态 + 返回转接消息
 
 import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
+import { streamTokens } from "./types.js";
 import { logger } from "@agentforge/logger";
 import { prisma } from "../../db.js";
 
@@ -77,13 +78,7 @@ export class HumanAgent implements RouteAgent {
 
     // 流式输出转接消息
     const message = getHandoffMessage(withinServiceHours);
-    for (const char of message) {
-      yield {
-        type: "token",
-        content: char,
-        message_id: assistantMsgId,
-      };
-    }
+    yield* streamTokens(message, assistantMsgId);
 
     // 发送 done
     yield {

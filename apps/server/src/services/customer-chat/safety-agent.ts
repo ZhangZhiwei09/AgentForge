@@ -3,6 +3,7 @@
 // 返回确定性拒绝消息（不调 LLM，零延迟）
 
 import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
+import { streamTokens } from "./types.js";
 
 const SAFETY_REJECT_MESSAGE =
   "抱歉，您的消息包含不安全的请求内容，无法处理。如有实际业务问题，欢迎重新描述。";
@@ -26,13 +27,7 @@ export class SafetyAgent implements RouteAgent {
     };
 
     // 逐字符流式输出拒绝消息
-    for (const char of SAFETY_REJECT_MESSAGE) {
-      yield {
-        type: "token",
-        content: char,
-        message_id: context.assistantMsgId,
-      };
-    }
+    yield* streamTokens(SAFETY_REJECT_MESSAGE, context.assistantMsgId);
 
     // 发送 done
     yield {

@@ -79,11 +79,35 @@ const INTENT_TO_ROUTE: Record<string, RouteName> = {
 // 这些规则弥补 LLM Router 的分类不稳定问题
 
 const SAFETY_KEYWORDS = [
+  // ── 原有规则：英文 prompt injection ──
   /忽略.*(指令|规则|限制|之前)/i,
   /扮演.*(角色|黑客|坏人)/i,
   /(DAN|jailbreak|system\s*prompt)/i,
   /ignore.*(instruction|rule)/i,
   /pretend.*(you\s*are|to\s*be)/i,
+  // ── 多语言攻击变体 ──
+  /無視.*(指示|ルール|制限)/i, // 日文 injection
+  /開発者.*モード/i, // 日文 "developer mode"
+  /忽略.*(指示|規則|制限|以前)/i, // 繁体中文变体
+  /(role.?(play|扮演)|cosplay|pretend\s+to\s+be)/i, // 角色扮演变体
+  /你.*(现在|从现在起|以後|从此).*是.*(ChatGPT|GPT|AI|人工智能|机器人)/i,
+  /forget.*(everything|all).*(before|above|previous)/i, // "forget everything above" 变体
+  // ── Token 窜改 / 特殊分隔符注入 ──
+  /<\|im_start\|>/i,
+  /<\|system\|>/i,
+  /\[INST\].*\[\/?INST\]/i,
+  /(system|系统|系統)\s*:\s*(你现在|你的新|ignore|forget)/i,
+  /<\s*s\s*y\s*s\s*t\s*e\s*m\s*>/i, // 空格混淆的 system 标签
+  // ── 编码混淆检测 ──
+  /(base64|b64|base64_decode|atob|fromCharCode)\s*\(/i,
+  /[A-Za-z0-9+\/=]{40,}\s*(decode|解密|解码)/i, // 长 base64 字符串 + decode 关键词
+  /fromCharCode\s*\(/i,
+  // ── 社会工程 / 权限冒充 ──
+  /(我是|我是你).*(管理员|开发者|创始人|CEO|CTO|老板|经理).*(请|要求|命令|给我)/i,
+  /(give|show|reveal|tell|print).*me.*(your\s*(prompt|instructions|system|code|rules))/i,
+  /(output|print|dump|show).*(your|the).*(prompt|instructions|system\s*message)/i,
+  // ── 重复/填充攻击（超长重复字符绕过内容安全检查） ──
+  /([^\s])\1{500,}/, // 单个非空白字符重复500次以上
 ];
 
 const HUMAN_KEYWORDS = [
