@@ -20,3 +20,7 @@ Thumbs.db
 
 # Runtime eval logs
 apps/logs/
+apps/server/logs/
+
+# Runtime data (OrderService persistence — auto-generated from seed)
+apps/server/data/
