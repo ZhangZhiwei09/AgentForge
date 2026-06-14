@@ -16,6 +16,7 @@ import {
 } from "../../providers/registry.js";
 import type { ChatMessage } from "../../providers/types.js";
 import { logger } from "@agentforge/logger";
+import { csCitationCoverage } from "../../observability/metrics.js";
 import { extractJSONFromLLMResponse } from "../../lib/json-utils.js";
 import { MemoryEngine } from "../memory-engine.js";
 import type {
@@ -104,6 +105,14 @@ const CUSTOMER_USER_ID = "00000000-0000-0000-0000-000000000002";
 // BusinessAgent
 // ═══════════════════════════════════════════════════════
 
+/**
+ * @deprecated BusinessAgent 已被 ToolAgent 取代。
+ * TOOL 路由统一使用 ToolAgent（基于 AgentService ReAct 循环 + 客服工具集）。
+ * 本文件保留仅用于独立的 fetchKnowledge() 和 injectMemories() 工具函数。
+ *
+ * 迁移日期：2026-06-13（Router 重构时）
+ * 预计移除：下个主版本迭代
+ */
 export class BusinessAgent implements RouteAgent {
   readonly route = "TOOL" as const; // 已统一到 TOOL 路由
   private modelId: string | null;
@@ -458,6 +467,11 @@ async function callLLMWithRetry(
               (s) => s.isFactual && s.status === "uncited",
             ).length,
           };
+          // ── Citation 覆盖率指标埋点 ──
+          csCitationCoverage.observe(
+            { level: citationReport.level },
+            citationReport.coverageRate,
+          );
         } catch {
           // citation 校验失败不影响主流程
         }
@@ -530,6 +544,11 @@ async function callLLMWithRetry(
               (s) => s.isFactual && s.status === "uncited",
             ).length,
           };
+          // ── Citation 覆盖率指标埋点（fallback 模型） ──
+          csCitationCoverage.observe(
+            { level: citationReport.level },
+            citationReport.coverageRate,
+          );
         } catch {
           // citation 校验失败不影响主流程
         }

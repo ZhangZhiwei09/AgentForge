@@ -13,6 +13,10 @@ import { prisma } from "../db.js";
 import { resolveModel } from "../providers/registry.js";
 import type { ChatMessage } from "../providers/types.js";
 import { logger } from "@agentforge/logger";
+import {
+  csRouteClassificationTotal,
+  csRouteConfidence,
+} from "../observability/metrics.js";
 import { intentDetector } from "./intent-detector.js";
 import { MemoryEngine } from "./memory-engine.js";
 
@@ -117,6 +121,10 @@ export class CustomerChatService {
   private toolAgent: ToolAgent;
   private humanAgent: HumanAgent;
 
+  // 会话级并发控制：同一 sessionId 的请求串行化，防止竞态条件
+  // 使用 Promise 链式串行化而非阻塞式互斥锁，避免饿死 Node 事件循环
+  private static sessionLocks = new Map<string, Promise<void>>();
+
   constructor(modelId?: string | null) {
     this.modelId = modelId || null;
     this.router = new QueryRouter(modelId);
@@ -193,6 +201,22 @@ export class CustomerChatService {
     sessionId: string | null,
     userMessage: string,
   ): AsyncGenerator<Record<string, unknown>> {
+    // ── 0. 会话级并发控制：同一 sessionId 的请求串行化 ──
+    const lockKey = sessionId ?? `anonymous-${randomUUID()}`;
+    const previousLock =
+      CustomerChatService.sessionLocks.get(lockKey) ?? Promise.resolve();
+
+    // 创建当前请求的完成信号（在 finally 中 resolve）
+    let releaseLock: () => void;
+    const currentLock = new Promise<void>((resolve) => {
+      releaseLock = resolve;
+    });
+    CustomerChatService.sessionLocks.set(lockKey, currentLock);
+
+    // 等待前一个同 session 的请求完成
+    await previousLock;
+
+    try {
     // ── 1. Session 层 ──
     const conversation = await this.getOrCreateConversation(sessionId);
     const [providerName, resolvedModel] = resolveModel(this.modelId);
@@ -278,6 +302,21 @@ export class CustomerChatService {
       "Router classified customer message",
     );
 
+    // ── 路由分类指标埋点 ──
+    const source = decision.reasoning.includes("关键词命中")
+      ? "keyword"
+      : decision.reasoning.includes("fallback")
+        ? "fallback"
+        : "llm";
+    csRouteClassificationTotal.inc({
+      route: decision.route,
+      source,
+    });
+    csRouteConfidence.observe(
+      { route: decision.route },
+      decision.confidence,
+    );
+
     // ── 4. 构建 RouteContext（含 Intent Classifier 的工具推荐） ──
     let context: RouteContext = {
       conversationId: conversation.id,
@@ -359,6 +398,13 @@ export class CustomerChatService {
         }
       } catch (e) {
         logger.warn(e, "Customer memory extraction failed");
+      }
+    }
+    } finally {
+      // 释放会话锁：允许下一个同 sessionId 的请求进入
+      releaseLock!();
+      if (CustomerChatService.sessionLocks.get(lockKey) === currentLock) {
+        CustomerChatService.sessionLocks.delete(lockKey);
       }
     }
   }

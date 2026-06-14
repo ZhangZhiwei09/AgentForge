@@ -513,6 +513,10 @@ export class AgentService {
 
         // Switch to respond-only mode for next iteration (LLM will output clean Markdown)
         respondOnly = true;
+        yield {
+          type: "agent_responding",
+          step: totalSteps,
+        };
 
         // Continue to next ReAct iteration so LLM can use the tool result
         continue;
@@ -625,6 +629,11 @@ export class AgentService {
             step: totalSteps,
           };
         }
+
+        yield {
+          type: "agent_responding",
+          step: totalSteps,
+        };
 
         yield {
           type: "agent_act",
@@ -1420,6 +1429,7 @@ export class AgentService {
       const decision = step.decision;
 
       if (decision.action === "respond") {
+        yield { type: "agent_responding", step: totalSteps };
         yield { type: "agent_act", step: totalSteps, decision };
         await prisma.message.create({
           data: {

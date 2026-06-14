@@ -6,6 +6,47 @@
 import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
 import type { ContentBlock } from "@agentforge/shared-types";
 import { logger } from "@agentforge/logger";
+import {
+  csReActIterations,
+  csToolCallsTotal,
+} from "../../observability/metrics.js";
+
+// ── 默认客服工具集（Router 未推荐工具时使用） ──
+
+const DEFAULT_CS_TOOLS = [
+  "search_knowledge_base",
+  "lookup_order",
+  "create_support_ticket",
+  "check_return_policy",
+  "check_shipping_status",
+  "get_current_time",
+];
+
+// ── Agent 业务阶段（由业务事件驱动，不由 token 驱动） ──
+//
+// planning   : 初始/思考中
+// executing  : Agent 决定调用工具（agent_decide tool_call 或 native tool call）
+// observing  : 工具返回结果，Agent 消化数据（agent_observe）
+// responding : Agent 显式声明开始组织最终回复（agent_responding）
+// finished   : 完整生命周期结束（agent_done）
+type AgentPhase = "planning" | "executing" | "observing" | "responding" | "finished";
+
+// ── 输出生命周期（只描述流式交付进度，与 Agent 业务阶段解耦） ──
+//
+// responseStarted   : agent_responding 已触发 → 开始交付最终答案
+// responseCompleted : agent_respond 已触发 或 post-processing 已完成补偿
+// visibleChars      : 已交付给用户的字符数，只增不减
+interface OutputState {
+  visibleChars: number;
+  responseStarted: boolean;
+  responseCompleted: boolean;
+}
+
+// ── 响应内容（分离正常内容和兜底内容，消除覆盖歧义） ──
+interface ResponseEnvelope {
+  finalContent?: string;     // 来自 agent_respond
+  fallbackContent?: string;  // 来自 agent_error / sanitize 失败
+}
 
 // ═══════════════════════════════════════════════════════
 // ToolAgent
@@ -46,7 +87,16 @@ export class ToolAgent implements RouteAgent {
     let suggestions: string[] = [];
     const contentBlocks: ContentBlock[] = [];
     let accumulatedContent = "";
-    let pastTools = false; // set true after first tool call — switches to real streaming
+
+    // ── 解耦的状态机 ──
+    let phase: AgentPhase = "planning";
+    const outputState: OutputState = {
+      visibleChars: 0,
+      responseStarted: false,
+      responseCompleted: false,
+    };
+    const envelope: ResponseEnvelope = {};
+    let iterationCount = 0; // ReAct 迭代计数（用于指标埋点）
 
     try {
       // 动态导入 AgentService（避免循环依赖）
@@ -54,10 +104,17 @@ export class ToolAgent implements RouteAgent {
 
       const agentService = new AgentService();
 
-      // 构建客服任务描述（含 Intent Classifier 的工具推荐 + 执行策略）
+      // ── 工具列表：Router 推荐优先，为空时使用默认全量工具集 ──
+      // 始终追加 search_knowledge_base 作为兜底（Router 可能漏推荐 KB 检索）
+      const rawHints = toolHints && toolHints.length > 0 ? toolHints : DEFAULT_CS_TOOLS;
+      const enabledTools = rawHints.includes("search_knowledge_base")
+        ? rawHints
+        : [...rawHints, "search_knowledge_base"];
+
+      // 构建客服任务描述（含执行策略提示）
       const hintsBlock =
         toolHints && toolHints.length > 0
-          ? `\n\n[系统提示] Intent Classifier 推荐使用以下工具：${toolHints.join("、")}。建议${executionHint === "sequential" ? "按顺序" : "可并行"}执行。你可根据实际情况调整。`
+          ? `\n\n[系统提示] 本场景推荐使用以下工具：${toolHints.join("、")}。建议${executionHint === "sequential" ? "按顺序" : "可并行"}执行。你可根据实际情况调整。`
           : "";
 
       const task = `用户询问：${userMessage}${hintsBlock}
@@ -66,18 +123,11 @@ export class ToolAgent implements RouteAgent {
 如果工具返回了数据，请直接用自然语言 + Markdown 表格或列表向用户解释结果。
 不要输出 \`\`\`card:xxx 围栏代码块，系统会自动处理结构化数据展示。`;
 
-      // 运行 Agent ReAct 循环（限制迭代次数 + 客服工具集）
+      // 运行 Agent ReAct 循环（使用 Router 推荐的工具列表）
       const events = agentService.run(conversationId, task, {
         model: resolvedModel,
         maxIterations: 5,
-        tools: [
-          "search_knowledge_base",
-          "lookup_order",
-          "create_support_ticket",
-          "check_return_policy",
-          "check_shipping_status",
-          "get_current_time",
-        ],
+        tools: enabledTools,
         guardConfig: {
           maxTokens: 2000,
           maxCostCents: 5, // $0.05
@@ -86,39 +136,58 @@ export class ToolAgent implements RouteAgent {
 
       // 映射 agent 事件 → customer-chat SSE 事件
       //
-      // 流式策略：
-      // - 工具调用前：agent_token 缓存（前置废话，等工具调用时清掉）
-      // - 工具调用后：agent.ts 切换到 respond-only 模式，LLM 直接输出纯 Markdown
-      //   → agent_token 直接转发给前端，利用 LLM 原生网络延迟实现真打字机
+      // 核心原则：
+      // - Phase 由业务事件驱动（agent_observe/agent_responding/agent_respond/agent_done）
+      // - OutputState 独立维护响应交付进度
+      // - agent_token 仅做输出转发，不驱动任何状态转换
 
       for await (const event of events) {
         switch (event.type) {
+          // ── Token 输出 ──
           case "agent_token":
             if ("content" in event) {
               const token = event.content as string;
-              if (pastTools) {
-                // respond-only 阶段：LLM 输出的是纯 Markdown，直接转发
+              if (phase === "responding") {
+                // Agent 已声明开始回复 → 实时流式转发
                 accumulatedContent += token;
                 yield {
                   type: "token",
                   content: token,
                   message_id: assistantMsgId,
                 };
+                outputState.visibleChars++;
               } else {
-                // 工具调用前：缓存（可能是前置废话或 JSON 决策文本）
+                // 非 responding 阶段：仅缓存（可能是前置废话或 JSON 决策文本）
                 accumulatedContent += token;
               }
             }
             break;
 
-          case "agent_clear_stream":
-            accumulatedContent = "";
-            pastTools = true;
+          // ── Agent 声明开始组织最终回复 ──
+          case "agent_responding":
+            phase = "responding";
+            outputState.responseStarted = true;
             break;
 
+          // ── 流式内容清空（清的是非最终内容：JSON/前言/重试前文本） ──
+          case "agent_clear_stream":
+            accumulatedContent = "";
+            // visibleChars 不重置：用户看到的事实不可撤销
+            // responseStarted 不重置：agent_responding 已声明回复意图
+            break;
+
+          // ── 工具执行完毕 ──
           case "agent_observe":
-            // 工具执行完毕 → 后续 LLM token 是纯 Markdown，开始转发
-            pastTools = true;
+            phase = "observing";
+            iterationCount++;
+            // 客服工具调用指标埋点
+            if ("tool" in event && event.tool) {
+              csToolCallsTotal.inc({
+                tool_name: String(event.tool),
+                status: "success",
+                route: "TOOL",
+              });
+            }
             if ("result" in event && event.result) {
               const card = tryExtractCard(event.result as string);
               if (card) {
@@ -127,24 +196,45 @@ export class ToolAgent implements RouteAgent {
             }
             break;
 
+          // ── 最终回复已生成 ──
           case "agent_respond":
             if ("content" in event) {
-              finalAnswer = event.content as string;
+              envelope.finalContent = event.content as string;
+              finalAnswer = envelope.finalContent;
+
+              // 如果内容尚未通过流式交付（如 agent_decide respond 路径）
+              // → 立即补偿输出
+              if (!outputState.responseStarted) {
+                for (const char of envelope.finalContent) {
+                  yield {
+                    type: "token",
+                    content: char,
+                    message_id: assistantMsgId,
+                  };
+                  outputState.visibleChars++;
+                }
+                outputState.responseStarted = true;
+              }
+              outputState.responseCompleted = true;
             }
             break;
 
+          // ── 错误处理（不改变 phase） ──
           case "agent_error":
             logger.warn(
               { error: "error" in event ? event.error : "unknown" },
               "ToolAgent agent error",
             );
-            if (!finalAnswer) {
-              finalAnswer =
+            // fallbackContent 不覆盖已有的值
+            if (!envelope.fallbackContent) {
+              envelope.fallbackContent =
                 "抱歉，暂时无法处理您的请求，请稍后再试或联系人工客服。";
             }
             break;
 
+          // ── Agent 生命周期结束 ──
           case "agent_done":
+            phase = "finished";
             break;
 
           default:
@@ -152,9 +242,11 @@ export class ToolAgent implements RouteAgent {
         }
       }
 
-      if (!finalAnswer && accumulatedContent) {
-        finalAnswer = accumulatedContent;
-      }
+      // ── ReAct 迭代指标埋点 ──
+      csReActIterations.observe(
+        { agent_type: "tool_agent" },
+        iterationCount,
+      );
 
       // ── 安全网：检测并清除泄漏的 ReAct JSON ──
       if (finalAnswer) {
@@ -165,23 +257,23 @@ export class ToolAgent implements RouteAgent {
             { finalAnswer: finalAnswer.slice(0, 200) },
             "ReAct JSON leaked to final answer, using fallback",
           );
-          finalAnswer =
-            "抱歉，查询未找到结果。请检查您提供的信息是否正确，或联系人工客服获取帮助。";
+          envelope.finalContent = undefined;
+          if (!envelope.fallbackContent) {
+            envelope.fallbackContent =
+              "抱歉，查询未找到结果。请检查您提供的信息是否正确，或联系人工客服获取帮助。";
+          }
           suggestions = ["转接人工客服"];
         } else {
+          envelope.finalContent = sanitized;
           finalAnswer = sanitized;
         }
       }
-
-      if (!finalAnswer) {
-        finalAnswer =
-          "抱歉，暂时无法处理您的请求。请尝试重新描述您的问题，或转接人工客服获取帮助。";
-        suggestions = ["转接人工客服"];
-      }
     } catch (e) {
       logger.error(e, "ToolAgent execution failed");
-      finalAnswer =
-        "抱歉，系统暂时无法处理您的请求，请稍后再试或联系人工客服。";
+      if (!envelope.fallbackContent) {
+        envelope.fallbackContent =
+          "抱歉，系统暂时无法处理您的请求，请稍后再试或联系人工客服。";
+      }
     }
 
     // ── 先发送 content_block（卡片），前端接收后立即渲染 ──
@@ -193,32 +285,25 @@ export class ToolAgent implements RouteAgent {
       };
     }
 
-    // ── 补充输出：如果 agent_respond 有尚未流式发送的内容，补齐 ──
-    // 正常情况（respond-only 路径）下 token 已全部实时转发，此处无需额外输出
-    if (finalAnswer && !pastTools) {
-      // fallback: agent 没有进入 respond-only 模式（如纯 agent_respond 路径）
-      // 此时 accumulatedContent 可能包含 JSON 文本，优先使用 finalAnswer
-      const cleaned = cleanRepeatedAnswer(finalAnswer);
-      if (cleaned && cleaned !== accumulatedContent) {
-        for (const char of cleaned) {
-          yield {
-            type: "token",
-            content: char,
-            message_id: assistantMsgId,
-          };
-        }
-      }
-    } else if (!finalAnswer && accumulatedContent && !pastTools) {
-      // 最后的兜底：没有任何 respond，输出缓存
-      for (const char of accumulatedContent) {
+    // ── Post-processing：唯一补偿出口 ──
+    // 判断依据：最终回复是否已完成交付（不依赖 phase，不依赖 flowState）
+    if (!outputState.responseCompleted) {
+      const content =
+        envelope.finalContent
+        ?? envelope.fallbackContent
+        ?? sanitizeReActJSON(accumulatedContent)
+        ?? "抱歉，暂时无法处理您的请求，请稍后再试或联系人工客服。";
+
+      for (const char of content) {
         yield {
           type: "token",
           content: char,
           message_id: assistantMsgId,
         };
+        outputState.visibleChars++;
       }
+      outputState.responseCompleted = true;
     }
-    // pastTools=true 时 token 已实时转发，无需额外输出
 
     // 发送 done
     yield {
@@ -364,12 +449,12 @@ function tryExtractCard(result: string): ContentBlock | null {
 function sanitizeReActJSON(text: string): string | null {
   const trimmed = text.trim();
 
-  // 检测特征：以 { 开头，且包含 observation/analysis/plan 三个关键字段
+  // 检测特征：以 { 开头，且包含 observation/analysis/plan 三个关键 JSON 字段
   const looksLikeReActJSON =
     trimmed.startsWith("{") &&
-    /\b"observation"\s*:/.test(trimmed) &&
-    /\b"analysis"\s*:/.test(trimmed) &&
-    /\b"plan"\s*:/.test(trimmed);
+    /"observation"\s*:/.test(trimmed) &&
+    /"analysis"\s*:/.test(trimmed) &&
+    /"plan"\s*:/.test(trimmed);
 
   if (!looksLikeReActJSON) return text; // 正常内容，原样返回
 
@@ -402,76 +487,4 @@ function sanitizeReActJSON(text: string): string | null {
     // JSON 解析失败——说明是半成品输出，返回 null
     return null;
   }
-}
-
-/**
- * 将 ContentBlock 转换为 Markdown fenced code block（向后兼容）
- */
-/**
- * 清理 agent 回答中的重复文本（如开头重复的问候语）
- */
-function cleanRepeatedAnswer(text: string): string {
-  // 检测前一半和后一半是否重复
-  const halfLen = Math.floor(text.length / 2);
-  const firstHalf = text.slice(0, halfLen).trim();
-  const secondHalf = text.slice(halfLen).trim();
-
-  // 如果两半基本相同，去掉后半段
-  if (firstHalf && secondHalf && firstHalf === secondHalf) {
-    return firstHalf;
-  }
-
-  // 检测句子级重复：如果前两句相同
-  const sentences = text.split(/(?<=[。！？\.\!\?])/);
-  if (sentences.length >= 4) {
-    const deduped: string[] = [];
-    for (const s of sentences) {
-      const trimmed = s.trim();
-      if (trimmed && deduped[deduped.length - 1] === trimmed) {
-        continue; // 跳过连续重复的句子
-      }
-      deduped.push(trimmed);
-    }
-    return deduped.join("");
-  }
-
-  return text;
-}
-
-/**
- * 将 ContentBlock 转换为 Markdown fenced code block（向后兼容）
- * 仅在没有 content_block SSE 事件的旧客户端中使用
- */
-function buildCardFence(block: ContentBlock): string | null {
-  let fenceType: string;
-  let data: unknown;
-
-  switch (block.type) {
-    case "order_card":
-      fenceType = "order";
-      data = block.data;
-      break;
-    case "policy_card":
-      fenceType = "policy";
-      data = block.data;
-      break;
-    case "status_card":
-      fenceType = "status";
-      data = block.data;
-      break;
-    case "action_card":
-      fenceType = "action";
-      data = block.data;
-      break;
-    case "table":
-      fenceType = "table";
-      data = block.data;
-      break;
-    default:
-      return null;
-  }
-
-  return (
-    "```card:" + fenceType + "\n" + JSON.stringify(data, null, 2) + "\n```"
-  );
 }

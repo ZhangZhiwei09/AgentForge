@@ -133,6 +133,51 @@ export const workflowSuccessRate = new Gauge({
   registers: [registry],
 });
 
+// ---- Customer Chat Metrics ----
+
+/** 客服消息路由分类统计（按路由和分类来源） */
+export const csRouteClassificationTotal = new Counter({
+  name: "cs_route_classification_total",
+  help: "Customer chat route classification count by route and source",
+  labelNames: ["route", "source"], // route = SAFETY | SMALL_TALK | TOOL | HUMAN; source = keyword | llm | fallback
+  registers: [registry],
+});
+
+/** 客服路由分类置信度分布 */
+export const csRouteConfidence = new Histogram({
+  name: "cs_route_confidence",
+  help: "Customer chat route classification confidence distribution",
+  labelNames: ["route"],
+  buckets: [0.1, 0.3, 0.5, 0.7, 0.8, 0.9, 0.95, 1.0],
+  registers: [registry],
+});
+
+/** 客服 Agent ReAct 循环迭代次数分布 */
+export const csReActIterations = new Histogram({
+  name: "cs_react_iterations",
+  help: "Customer chat Agent ReAct loop iteration count",
+  labelNames: ["agent_type"], // agent_type = tool_agent
+  buckets: [1, 2, 3, 4, 5, 7, 10],
+  registers: [registry],
+});
+
+/** 客服回复引证覆盖率（Citation Coverage） */
+export const csCitationCoverage = new Histogram({
+  name: "cs_citation_coverage",
+  help: "Customer chat response citation coverage rate",
+  labelNames: ["level"], // level = embedding | keyword_fallback
+  buckets: [0, 0.25, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+  registers: [registry],
+});
+
+/** 客服场景工具调用统计 */
+export const csToolCallsTotal = new Counter({
+  name: "cs_tool_calls_total",
+  help: "Customer chat tool execution count",
+  labelNames: ["tool_name", "status", "route"], // route = TOOL
+  registers: [registry],
+});
+
 // V9 Multi-Agent Metrics
 export const teamRunsTotal = new Counter({
   name: "team_runs_total",

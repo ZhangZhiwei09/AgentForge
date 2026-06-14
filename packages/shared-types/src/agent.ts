@@ -123,6 +123,11 @@ export interface AgentErrorEvent {
   step: number;
 }
 
+export interface AgentRespondingEvent {
+  type: "agent_responding";
+  step: number;
+}
+
 export interface AgentClearStreamEvent {
   type: "agent_clear_stream";
   message_id: string;
@@ -223,6 +228,7 @@ export type AgentStreamEvent =
   | AgentObserveEvent
   | AgentTokenEvent
   | AgentRespondEvent
+  | AgentRespondingEvent
   | AgentAskUserEvent
   | AgentClearStreamEvent
   | AgentErrorEvent

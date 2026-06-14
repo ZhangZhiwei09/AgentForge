@@ -9,6 +9,7 @@ import type { ChatMessage } from "../../providers/types.js";
 import { logger } from "@agentforge/logger";
 import { extractJSONFromLLMResponse } from "../../lib/json-utils.js";
 import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
+import { streamTokens } from "./types.js";
 
 // ── Zod Schema ──
 
@@ -102,13 +103,7 @@ export class SmallTalkAgent implements RouteAgent {
     }
 
     // 逐字符流式输出
-    for (const char of answer) {
-      yield {
-        type: "token",
-        content: char,
-        message_id: assistantMsgId,
-      };
-    }
+    yield* streamTokens(answer, assistantMsgId);
 
     // 发送 done
     yield {

@@ -437,7 +437,7 @@ export const customerServiceTools: RegisteredTool[] = [
     execute: createSupportTicketExecute,
     riskLevel: "mutation",
     timeout: 30_000,
-    requireApproval: true, // 创建工单需用户确认（非 HUMAN 路由，安全加固）
+    requireApproval: false, // 创建工单是低风险操作，客服场景无交互式审批UI，设为false避免Agent永久挂起
     category: "customer_service",
     parallelizable: false,
   },

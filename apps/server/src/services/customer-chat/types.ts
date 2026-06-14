@@ -16,7 +16,6 @@ export interface RouterDecision {
   tools?: string[];
   /** 工具执行顺序：parallel（无依赖，可并行）| sequential（按顺序，后一个依赖前一个结果） */
   execution_order?: "parallel" | "sequential";
-  suggestedTools?: string[]; // 已废弃，用 tools 替代
   escalationReason?: string; // HUMAN 路由时的升级原因
 }
 
@@ -98,6 +97,25 @@ export type RouteStreamEvent =
 export interface RouteAgent {
   readonly route: RouteName;
   execute(context: RouteContext): AsyncGenerator<RouteStreamEvent>;
+}
+
+// ── 共享工具函数 ──
+
+/**
+ * 逐字符流式输出文本为 RouteStreamEvent token 事件。
+ * 复用 SafetyAgent、SmallTalkAgent、HumanAgent 中的重复流式逻辑。
+ */
+export async function* streamTokens(
+  text: string,
+  messageId: string,
+): AsyncGenerator<RouteStreamEvent> {
+  for (const char of text) {
+    yield {
+      type: "token",
+      content: char,
+      message_id: messageId,
+    };
+  }
 }
 
 // ── Eval 日志记录 ──
