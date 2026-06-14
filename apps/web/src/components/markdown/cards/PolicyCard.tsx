@@ -13,7 +13,9 @@ interface Props {
 
 function Skeleton({ className = "" }: { className?: string }) {
   return (
-    <span className={`inline-block animate-pulse rounded bg-gray-200 ${className}`}>
+    <span
+      className={`inline-block animate-pulse rounded bg-gray-200 ${className}`}
+    >
       &nbsp;
     </span>
   );
@@ -54,7 +56,10 @@ export function PolicyCard({ data, isStreaming }: Props) {
         </p>
         {hasConditions ? (
           data.conditions.map((cond, i) => (
-            <div key={i} className="flex items-start gap-2 text-xs text-gray-700">
+            <div
+              key={i}
+              className="flex items-start gap-2 text-xs text-gray-700"
+            >
               <Check className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
               <span>{cond}</span>
             </div>

@@ -273,8 +273,7 @@ function tryExtractCard(result: string): ContentBlock | null {
     // lookup_order 结果 → OrderCard
     if (norm.orderId && norm.status) {
       // 总计优先从 payment.total 提取（snake_case 工具输出），fallback 到顶层
-      const total =
-        Number(norm.payment?.total ?? norm.total ?? 0);
+      const total = Number(norm.payment?.total ?? norm.total ?? 0);
       // carrier/trackingNo 优先从 shipping 嵌套提取
       const carrier =
         (norm.shipping?.carrier as string) || norm.carrier || undefined;

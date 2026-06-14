@@ -120,9 +120,7 @@ export function hasUnclosedFence(markdown: string): CardFenceType | null {
  *
  * 如果 JSON 完全无法解析（语法错误太严重），返回 null
  */
-export function tryParseStreamingCard(
-  markdown: string,
-): StreamingCard | null {
+export function tryParseStreamingCard(markdown: string): StreamingCard | null {
   const cardStartPattern =
     /```card:(order|policy|action|status|table)[^\S\n]*\n/g;
 
@@ -161,7 +159,11 @@ export function tryParseStreamingCard(
       partialData: {},
       isComplete: false,
       fenceStartIndex,
-      fenceLength: lastStart[0].length + (closeMatch ? closeMatch.index! + closeMatch[0].length : afterOpening.length),
+      fenceLength:
+        lastStart[0].length +
+        (closeMatch
+          ? closeMatch.index! + closeMatch[0].length
+          : afterOpening.length),
     };
   }
 
@@ -174,7 +176,9 @@ export function tryParseStreamingCard(
     fenceStartIndex,
     fenceLength:
       lastStart[0].length +
-      (closeMatch ? closeMatch.index! + closeMatch[0].length : afterOpening.length),
+      (closeMatch
+        ? closeMatch.index! + closeMatch[0].length
+        : afterOpening.length),
   };
 }
 
@@ -265,12 +269,19 @@ function repairTruncatedJSON(raw: string): string | null {
     // 尝试去掉尾部逗号/冒号后补全
     const trimmed = s.trimEnd().slice(0, -1);
     // 重新计算括号
-    let b2 = 0, k2 = 0;
+    let b2 = 0,
+      k2 = 0;
     let inStr2 = false;
     for (let i = 0; i < trimmed.length; i++) {
       const ch = trimmed[i];
-      if (ch === "\\" && inStr2) { i++; continue; }
-      if (ch === '"') { inStr2 = !inStr2; continue; }
+      if (ch === "\\" && inStr2) {
+        i++;
+        continue;
+      }
+      if (ch === '"') {
+        inStr2 = !inStr2;
+        continue;
+      }
       if (inStr2) continue;
       if (ch === "{") b2++;
       if (ch === "}") b2--;
@@ -311,7 +322,10 @@ function truncateToLastCompleteValue(raw: string): string | null {
 
   for (let i = 0; i < raw.length; i++) {
     const ch = raw[i];
-    if (ch === "\\" && inString) { i++; continue; }
+    if (ch === "\\" && inString) {
+      i++;
+      continue;
+    }
     if (ch === '"') {
       inString = !inString;
       if (!inString) {
@@ -322,7 +336,10 @@ function truncateToLastCompleteValue(raw: string): string | null {
     }
     if (inString) continue;
     if (ch === "{") depth++;
-    if (ch === "}") { depth--; cutPoints.push(i + 1); }
+    if (ch === "}") {
+      depth--;
+      cutPoints.push(i + 1);
+    }
     if (ch === "]") cutPoints.push(i + 1);
     // 数字或布尔值结束：数字后跟 , 或 }
   }
@@ -340,12 +357,19 @@ function truncateToLastCompleteValue(raw: string): string | null {
   }
 
   // 重新计算括号
-  let b2 = 0, k2 = 0;
+  let b2 = 0,
+    k2 = 0;
   let inStr2 = false;
   for (let i = 0; i < truncated.length; i++) {
     const ch = truncated[i];
-    if (ch === "\\" && inStr2) { i++; continue; }
-    if (ch === '"') { inStr2 = !inStr2; continue; }
+    if (ch === "\\" && inStr2) {
+      i++;
+      continue;
+    }
+    if (ch === '"') {
+      inStr2 = !inStr2;
+      continue;
+    }
     if (inStr2) continue;
     if (ch === "{") b2++;
     if (ch === "}") b2--;

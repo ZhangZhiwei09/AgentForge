@@ -22,7 +22,9 @@ interface Props {
 
 function Skeleton({ className = "" }: { className?: string }) {
   return (
-    <span className={`inline-block animate-pulse rounded bg-gray-200 ${className}`}>
+    <span
+      className={`inline-block animate-pulse rounded bg-gray-200 ${className}`}
+    >
       &nbsp;
     </span>
   );
@@ -48,7 +50,8 @@ export function ActionCard({ data, onAction, isStreaming }: Props) {
         {hasActions ? (
           data.actions.map((act, i) => {
             const styleClass =
-              STYLE_CLASSES[act.style ?? "secondary"] ?? STYLE_CLASSES.secondary;
+              STYLE_CLASSES[act.style ?? "secondary"] ??
+              STYLE_CLASSES.secondary;
             return (
               <button
                 key={i}

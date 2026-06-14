@@ -28,7 +28,9 @@ interface Props {
 
 function Skeleton({ className = "" }: { className?: string }) {
   return (
-    <span className={`inline-block animate-pulse rounded bg-gray-200 ${className}`}>
+    <span
+      className={`inline-block animate-pulse rounded bg-gray-200 ${className}`}
+    >
       &nbsp;
     </span>
   );
@@ -52,11 +54,7 @@ export function StatusCard({ data, isStreaming }: Props) {
         )}
         <span className="flex items-center gap-1.5 text-xs text-gray-500">
           {STATUS_ICONS[data.status] ?? STATUS_ICONS.pending}
-          {hasMessage ? (
-            data.message
-          ) : (
-            <Skeleton className="w-20 h-3" />
-          )}
+          {hasMessage ? data.message : <Skeleton className="w-20 h-3" />}
         </span>
       </div>
 
@@ -87,7 +85,9 @@ export function StatusCard({ data, isStreaming }: Props) {
                     {!isLast && (
                       <div
                         className={`h-full min-h-[20px] w-0.5 ${
-                          step.status === "done" ? "bg-green-300" : "bg-gray-200"
+                          step.status === "done"
+                            ? "bg-green-300"
+                            : "bg-gray-200"
                         }`}
                       />
                     )}
@@ -95,7 +95,9 @@ export function StatusCard({ data, isStreaming }: Props) {
                   <div className="pb-4">
                     <p
                       className={`text-xs font-medium ${
-                        step.status === "wait" ? "text-gray-400" : "text-gray-700"
+                        step.status === "wait"
+                          ? "text-gray-400"
+                          : "text-gray-700"
                       }`}
                     >
                       {step.label}

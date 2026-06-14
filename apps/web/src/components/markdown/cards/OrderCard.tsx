@@ -61,7 +61,11 @@ export function OrderCard({ data, isStreaming }: Props) {
   const hasStatus = !!(data.statusLabel || data.status);
   const hasItems = data.items && data.items.length > 0;
   const hasTotal = data.total !== undefined && data.total !== null;
-  const hasShipping = !!(data.carrier || data.trackingNo || data.estimatedDelivery);
+  const hasShipping = !!(
+    data.carrier ||
+    data.trackingNo ||
+    data.estimatedDelivery
+  );
 
   return (
     <div className="my-2 rounded-xl border border-[hsl(var(--border))] bg-white shadow-sm overflow-hidden">

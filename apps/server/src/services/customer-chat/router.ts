@@ -224,10 +224,7 @@ export class QueryRouter {
         route: result.data.route,
         confidence: result.data.confidence,
         reasoning: result.data.reasoning,
-        tools:
-          result.data.tools.length > 0
-            ? result.data.tools
-            : undefined,
+        tools: result.data.tools.length > 0 ? result.data.tools : undefined,
         execution_order: result.data.execution_order,
         escalationReason: result.data.escalation_reason || undefined,
       };

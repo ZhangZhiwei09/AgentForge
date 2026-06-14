@@ -6,7 +6,11 @@
 
 import { useMemo } from "react";
 import { MarkdownRenderer } from "./MarkdownRenderer";
-import { extractCardBlocks, hasUnclosedFence, tryParseStreamingCard } from "./card-parser";
+import {
+  extractCardBlocks,
+  hasUnclosedFence,
+  tryParseStreamingCard,
+} from "./card-parser";
 import { OrderCard } from "./cards/OrderCard";
 import { PolicyCard } from "./cards/PolicyCard";
 import { ActionCard } from "./cards/ActionCard";
@@ -48,9 +52,7 @@ export function RichMessageRenderer({ content, isStreaming }: Props) {
   if (streamingCard && !streamingCard.isComplete) {
     return (
       <div className="space-y-3">
-        {cleanMarkdown && (
-          <MarkdownRenderer content={cleanMarkdown} />
-        )}
+        {cleanMarkdown && <MarkdownRenderer content={cleanMarkdown} />}
         {renderStreamingCard(streamingCard)}
       </div>
     );
@@ -85,35 +87,19 @@ function renderStreamingCard(
   switch (type) {
     case "order":
       return (
-        <OrderCard
-          key={key}
-          data={partialData as any}
-          isStreaming={true}
-        />
+        <OrderCard key={key} data={partialData as any} isStreaming={true} />
       );
     case "policy":
       return (
-        <PolicyCard
-          key={key}
-          data={partialData as any}
-          isStreaming={true}
-        />
+        <PolicyCard key={key} data={partialData as any} isStreaming={true} />
       );
     case "action":
       return (
-        <ActionCard
-          key={key}
-          data={partialData as any}
-          isStreaming={true}
-        />
+        <ActionCard key={key} data={partialData as any} isStreaming={true} />
       );
     case "status":
       return (
-        <StatusCard
-          key={key}
-          data={partialData as any}
-          isStreaming={true}
-        />
+        <StatusCard key={key} data={partialData as any} isStreaming={true} />
       );
     case "table":
       // 表格回退到 Markdown 渲染（部分行）

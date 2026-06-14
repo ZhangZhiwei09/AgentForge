@@ -345,13 +345,15 @@ async function searchKnowledgeBaseExecute(
       return JSON.stringify({
         query,
         found: false,
-        message: "未找到相关知识库内容。请基于通用知识回答用户，并建议联系人工客服获取准确信息。",
+        message:
+          "未找到相关知识库内容。请基于通用知识回答用户，并建议联系人工客服获取准确信息。",
       });
     }
 
     // 2. Rerank: 去重 + 分数排序
     const seen = new Set<string>();
-    const deduped: Array<{ content: string; score: number; source: string }> = [];
+    const deduped: Array<{ content: string; score: number; source: string }> =
+      [];
     for (const r of rawResults) {
       const key = r.content.slice(0, 100).trim();
       if (seen.has(key)) continue;
@@ -375,12 +377,14 @@ async function searchKnowledgeBaseExecute(
         query,
         found: false,
         topScore,
-        message: "知识库中未找到高相关度内容。请基于通用知识回答，并告知用户此信息可能需要人工核实。",
+        message:
+          "知识库中未找到高相关度内容。请基于通用知识回答，并告知用户此信息可能需要人工核实。",
       });
     }
 
     // 4. 质量标记
-    const qualityLabel = topScore >= 0.8 ? "high" : topScore >= 0.65 ? "medium" : "low";
+    const qualityLabel =
+      topScore >= 0.8 ? "high" : topScore >= 0.65 ? "medium" : "low";
 
     return JSON.stringify({
       query,
@@ -392,9 +396,10 @@ async function searchKnowledgeBaseExecute(
         score: r.score,
         source: r.source,
       })),
-      note: qualityLabel === "low"
-        ? "相关度较低，建议在回复中标注'仅供参考'并建议用户联系人工核实。"
-        : undefined,
+      note:
+        qualityLabel === "low"
+          ? "相关度较低，建议在回复中标注'仅供参考'并建议用户联系人工核实。"
+          : undefined,
     });
   } catch (e) {
     logger.error(e, "search_knowledge_base failed");
