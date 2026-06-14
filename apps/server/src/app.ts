@@ -14,12 +14,15 @@ import { conversationRoutes } from "./routes/conversations.js";
 import { providerRoutes } from "./routes/providers.js";
 import { memoryRoutes } from "./routes/memories.js";
 import { customerChatRoutes } from "./routes/customer-chat.js";
+import { customerVideoRoutes } from "./routes/customer-video.js";
 import { knowledgeRoutes } from "./routes/knowledge.js";
 import { toolRoutes } from "./routes/tools.js";
 import { agentRoutes } from "./routes/agent.js";
 import { voiceRoutes } from "./routes/voice.js";
+import { videoRoutes } from "./routes/video.js";
 import { workflowRoutes } from "./routes/workflows.js";
 import { teamRoutes } from "./routes/teams.js";
+import { appProjectRoutes } from "./routes/app-project.js";
 import { registerMetricsEndpoint } from "./observability/metrics.js";
 import type { AuthUser } from "@agentforge/shared-types";
 
@@ -63,12 +66,15 @@ export async function createApp() {
   app.route("/", providerRoutes); // /api/providers
   app.route("/", memoryRoutes); // /api/memories, /api/memories/search
   app.route("/", customerChatRoutes); // /api/customer-chat
+  app.route("/", customerVideoRoutes); // /api/customer-chat/video/stream (WS)
   app.route("/", knowledgeRoutes); // /api/knowledge/*
   app.route("/", toolRoutes); // /api/tools
   app.route("/", agentRoutes); // /api/agent/*, /api/agent-sessions/*
   app.route("/", voiceRoutes); // /api/voice/*, WS /api/voice/stream
+  app.route("/", videoRoutes); // /api/video/*, WS /api/video/stream
   app.route("/", workflowRoutes); // /api/workflows/*, /api/workflows/runs/*
   app.route("/", teamRoutes); // /api/teams/*, /api/teams/runs/*
+  app.route("/", appProjectRoutes); // /api/projects/* (WeaveFox V12)
 
   // P1-1 Bull Board 监控面板 — 仅在 Redis 可用时挂载
   try {

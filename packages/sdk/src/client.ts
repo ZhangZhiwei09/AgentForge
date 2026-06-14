@@ -11,6 +11,12 @@ import type {
   ApiKeyDTO,
   CreateApiKeyResponse,
   AuthUser,
+  AppProjectDTO,
+  ProjectFileDTO,
+  AppGenRunDTO,
+  CreateProjectRequest,
+  UpdateProjectRequest,
+  GenerateAppRequest,
 } from "@agentforge/shared-types";
 import { VoiceService } from "./services/voice.js";
 
@@ -205,5 +211,101 @@ export class AgentForgeClient {
     await this.request<void>(`/api/memories/${id}`, {
       method: "DELETE",
     });
+  }
+
+  // ---- App Projects (WeaveFox V12) ----
+
+  async createProject(input: CreateProjectRequest): Promise<AppProjectDTO> {
+    return this.request<AppProjectDTO>("/api/projects", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async listProjects(): Promise<{ projects: AppProjectDTO[]; count: number }> {
+    return this.request<{ projects: AppProjectDTO[]; count: number }>(
+      "/api/projects",
+    );
+  }
+
+  async getProject(
+    id: string,
+  ): Promise<AppProjectDTO & { files: ProjectFileDTO[] }> {
+    return this.request<AppProjectDTO & { files: ProjectFileDTO[] }>(
+      `/api/projects/${id}`,
+    );
+  }
+
+  async updateProject(
+    id: string,
+    input: UpdateProjectRequest,
+  ): Promise<AppProjectDTO> {
+    return this.request<AppProjectDTO>(`/api/projects/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async deleteProject(id: string): Promise<void> {
+    await this.request<void>(`/api/projects/${id}`, { method: "DELETE" });
+  }
+
+  async generateApp(
+    projectId: string,
+    input: GenerateAppRequest,
+  ): Promise<Response> {
+    const res = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/generate`,
+      {
+        method: "POST",
+        headers: this.authHeaders(),
+        body: JSON.stringify(input),
+      },
+    );
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(error.detail ?? `HTTP ${res.status}`);
+    }
+    return res; // Returns Response for SSE streaming
+  }
+
+  async listProjectFiles(
+    id: string,
+  ): Promise<{ files: ProjectFileDTO[]; count: number }> {
+    return this.request<{ files: ProjectFileDTO[]; count: number }>(
+      `/api/projects/${id}/files`,
+    );
+  }
+
+  async getProjectFile(
+    projectId: string,
+    filePath: string,
+  ): Promise<ProjectFileDTO> {
+    return this.request<ProjectFileDTO>(
+      `/api/projects/${projectId}/files/${encodeURIComponent(filePath)}`,
+    );
+  }
+
+  async writeProjectFile(
+    projectId: string,
+    filePath: string,
+    content: string,
+    language?: string,
+  ): Promise<ProjectFileDTO> {
+    return this.request<ProjectFileDTO>(
+      `/api/projects/${projectId}/files/${encodeURIComponent(filePath)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify({ content, language }),
+      },
+    );
+  }
+
+  async listGenRuns(
+    projectId: string,
+  ): Promise<{ runs: AppGenRunDTO[]; count: number }> {
+    return this.request<{ runs: AppGenRunDTO[]; count: number }>(
+      `/api/projects/${projectId}/generations`,
+    );
   }
 }

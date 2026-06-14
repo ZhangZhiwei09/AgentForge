@@ -43,4 +43,8 @@ export const settings = {
   ttsModel: process.env.TTS_MODEL || "tts-1",
   ttsVoice: process.env.TTS_VOICE || "alloy",
   ttsSpeed: parseFloat(process.env.TTS_SPEED || "1.0"),
+  // 视频对话 Agent (V11) — 复用 openaiApiKey，使用 GPT-4o 等多模态模型
+  videoEnabled: process.env.VIDEO_ENABLED !== "false",
+  videoModel: process.env.VIDEO_MODEL || "gpt-4o-mini",
+  videoVisionFps: parseInt(process.env.VIDEO_VISION_FPS || "1", 10),
 };

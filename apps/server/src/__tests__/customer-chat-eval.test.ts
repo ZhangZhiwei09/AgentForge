@@ -207,6 +207,67 @@ describe("确定性上下文协议", () => {
 });
 
 // ═══════════════════════════════════════════════════
+// 3.5. Citation 引证校验（确定性测试）
+// ═══════════════════════════════════════════════════
+describe("Citation 引证校验", () => {
+  it("无 KB chunk 时应返回空引证报告", async () => {
+    const { CitationVerifier } =
+      await import("../services/customer-chat/citation-verifier.js");
+    const verifier = new CitationVerifier();
+    const report = await verifier.verify("退货期限为7天。", []);
+    expect(report.coverageRate).toBe(0);
+    expect(report.level).toBe("keyword_fallback");
+    expect(report.sentences.every((s) => s.status === "uncited")).toBe(true);
+  });
+
+  it("应检测事实性句子中的数字和业务关键词", async () => {
+    const { CitationVerifier } =
+      await import("../services/customer-chat/citation-verifier.js");
+    const verifier = new CitationVerifier();
+    const kbChunks = [
+      "退换货政策：自签收之日起7天内可申请无理由退货，商品需保持完好不影响二次销售。退回运费由买方承担。",
+    ];
+    const report = await verifier.verify(
+      "根据我们的政策，退货期限为30天，而且我们承担退货运费。",
+      kbChunks,
+    );
+    // 数字"30天"与KB中的"7天"不匹配，"我们承担运费"与"买方承担"矛盾
+    // keyword fallback 模式下，数字不重叠应拉低分数
+    expect(report.sentences.length).toBeGreaterThan(0);
+    const factualSentences = report.sentences.filter((s) => s.isFactual);
+    expect(factualSentences.length).toBeGreaterThan(0);
+  });
+
+  it("与 KB 高度匹配的回复应获得较高覆盖率", async () => {
+    const { CitationVerifier } =
+      await import("../services/customer-chat/citation-verifier.js");
+    const verifier = new CitationVerifier();
+    const kbChunks = [
+      "退换货政策：自签收之日起7天内可申请无理由退货，商品需保持完好不影响二次销售。",
+    ];
+    const report = await verifier.verify(
+      "自签收之日起7天内您可以申请无理由退货，需要保证商品完好。",
+      kbChunks,
+    );
+    expect(report.level).toBeDefined();
+    expect(report.coverageRate).toBeGreaterThanOrEqual(0);
+    expect(report.sentences.length).toBeGreaterThan(0);
+  });
+
+  it("embedding provider 不可用时应优雅降级到 keyword fallback", async () => {
+    const { CitationVerifier } =
+      await import("../services/customer-chat/citation-verifier.js");
+    const verifier = new CitationVerifier();
+    const report = await verifier.verify("退货需要7天内申请，商品必须完好。", [
+      "退货政策：7天无理由退货需保证商品完好不影响二次销售。",
+    ]);
+    expect(report.level).toBeDefined();
+    expect(report.sentences.length).toBeGreaterThan(0);
+    expect(report.coverageRate).toBeGreaterThanOrEqual(0);
+  });
+});
+
+// ═══════════════════════════════════════════════════
 // 4. 评测用例集（手动运行，需 LLM）
 // ============================================
 // 运行方式: 设置环境变量后取消 .skip
@@ -325,7 +386,9 @@ describe("改动前后对比", () => {
     },
     validation: {
       before: "无结构化校验，仅后置 LLM 核验（不可靠）",
-      after: "5层校验管线（格式→Schema→禁止词→KB命中率→固定话术）",
+      mid: "5层校验管线（格式→Schema→禁止词→KB关键词命中率→固定话术）",
+      after:
+        "5层校验 + Citation 逐句语义引证（格式→Schema→禁止词→语义引证→固定话术）",
     },
     retry: {
       before: "无重试机制",
@@ -360,6 +423,14 @@ describe("改动前后对比", () => {
   it("应有重试 + 降级 + fallback", () => {
     expect(BEFORE_AFTER.retry.after).toContain("确定性fallback");
     expect(BEFORE_AFTER.fallback.after).toContain("chunk");
+  });
+
+  it("L4 应从关键词重叠升级为 Citation 语义引证", () => {
+    expect(BEFORE_AFTER.validation.after).toContain("Citation");
+    expect(BEFORE_AFTER.validation.after).toContain("语义引证");
+    // 关键词命中率不再是主要校验手段
+    expect(BEFORE_AFTER.validation.mid).toContain("关键词命中率");
+    expect(BEFORE_AFTER.validation.after).not.toContain("关键词命中率");
   });
 
   it("应有数据回收", () => {

@@ -9,6 +9,22 @@ import { logger } from "@agentforge/logger";
 import { react_system_prompt } from "@agentforge/shared-prompts";
 import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
 import { truncateHistory } from "../lib/context-window.js";
+import { classifyError } from "./error-classifier.js";
+import {
+  executeWithRetry,
+  DEFAULT_LLM_RETRY,
+  DEFAULT_TOOL_RETRY,
+} from "./retry-executor.js";
+import {
+  buildDegradationMessage,
+  getAlternativeTools,
+} from "./degradation-chain.js";
+import { AgentGuardService, DEFAULT_GUARD_CONFIG } from "./agent-guard.js";
+import type { AgentGuardConfig } from "./agent-guard.js";
+import {
+  MemoryCompressor,
+  SCRATCHPAD_COMPRESSION_THRESHOLD,
+} from "./memory-compressor.js";
 import type {
   AgentDecision,
   AgentStep,
@@ -22,6 +38,26 @@ import type {
 const DEFAULT_MAX_ITERATIONS = 10;
 // Timeout per LLM call (ms)
 const ITERATION_TIMEOUT_MS = 120_000;
+
+// Retry delay calculator (reuses dag-executor pattern)
+function calculateRetryDelayForAgent(
+  retry: { backoff: string; initialDelay: number; maxDelay: number },
+  attempt: number,
+): number {
+  switch (retry.backoff) {
+    case "fixed":
+      return retry.initialDelay;
+    case "linear":
+      return Math.min(retry.initialDelay * attempt, retry.maxDelay);
+    case "exponential":
+      return Math.min(
+        retry.initialDelay * Math.pow(2, attempt - 1),
+        retry.maxDelay,
+      );
+    default:
+      return retry.initialDelay;
+  }
+}
 
 // Virtual tool: agent_decide — the LLM calls this to report its decision
 // instead of outputting raw JSON. Provides native structured output guarantee.
@@ -97,9 +133,13 @@ const AGENT_DECIDE_TOOL: ToolDefinition = {
 // ReAct prompt adapted for tool calling — instructs LLM to call agent_decide
 const REACT_PROMPT_WITH_TOOLS =
   react_system_prompt.content +
-  "\n\n重要：你必须调用 agent_decide 函数来报告你的决策，而不是输出原始 JSON 文本。";
+  "\n\n重要：你必须调用 agent_decide 函数来报告你的决策，而不是输出原始 JSON 文本。" +
+  "\n\n注意：不要输出 ```card:xxx 格式的围栏代码块。系统会自动从工具返回的数据中提取结构化卡片展示给用户。" +
+  "\n你只需用自然语言 + Markdown 格式（表格、列表等）向用户解释结果即可。";
 
 export class AgentService {
+  private compressor = new MemoryCompressor();
+
   /**
    * Run the ReAct agent loop for a given task.
    * Yields AgentStreamEvent chunks for SSE streaming to the frontend.
@@ -111,6 +151,7 @@ export class AgentService {
       model?: string | null;
       maxIterations?: number;
       tools?: string[] | null;
+      guardConfig?: Partial<AgentGuardConfig> | null;
     } = {},
   ): AsyncGenerator<AgentStreamEvent> {
     const maxIterations = options.maxIterations || DEFAULT_MAX_ITERATIONS;
@@ -119,6 +160,15 @@ export class AgentService {
     // 1. Resolve model/provider
     const [providerName, resolvedModel] = resolveModel(options.model);
     const provider = getProvider(providerName);
+
+    // 1b. Initialize Agent Guard
+    const guard = new AgentGuardService(options.guardConfig ?? undefined);
+    let tokensUsed = 0;
+    let costCentsUsed = 0;
+
+    // 1c. Memory compression state (P0-3)
+    let compressedSummary: string = "";
+    let keptStepNumbers: Set<number> = new Set();
 
     // 2. Get conversation and validate
     const conversation = await prisma.conversation.findUnique({
@@ -206,6 +256,10 @@ export class AgentService {
     let finalContent = "";
     let totalSteps = 0;
 
+    // Track whether tools have been used — once they have, switch to respond-only mode
+    // where the LLM outputs clean Markdown directly (no JSON wrapping) for real streaming
+    let respondOnly = false;
+
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       totalSteps = iteration + 1;
       logger.debug(
@@ -214,103 +268,300 @@ export class AgentService {
       );
 
       // 9a. Build messages for this iteration
+      // In respond-only mode: simple prompt, no tools — LLM streams clean Markdown
+      const iterationSystemPrompt = respondOnly
+        ? "你是一个乐于助人的 AI 客服助手。请根据上面的工具返回数据，用中文直接回复用户。" +
+          "\n使用 Markdown 格式组织回答（表格、列表等），简洁专业。" +
+          "\n不要输出 JSON 结构或代码围栏，只输出给用户看的自然语言内容。"
+        : systemPrompt;
+
+      const iterationTools = respondOnly ? undefined : toolDefs;
+
       const iterationMessages: ChatMessage[] = [
         {
           role: "system",
           content: this.buildIterationContext(
-            systemPrompt,
+            iterationSystemPrompt,
             task,
             scratchpad,
             totalSteps,
+            compressedSummary,
+            keptStepNumbers,
+            respondOnly,
           ),
         },
         ...conversationMessages,
       ];
 
-      // 9b. Call LLM — stream tokens in real time, intercept agent_decide tool calls
+      // 9b. Call LLM with retry — stream tokens in real time, intercept agent_decide tool calls
       const streamMsgId = randomUUID();
       let llmResponse = "";
       let agentDecision: AgentStep | null = null; // set if LLM calls agent_decide
+      let nativeToolCalls: Array<{
+        name: string;
+        args: Record<string, unknown>;
+        result: string;
+      }> = []; // track native tool calls for ReAct loop continuation
+      let llmAttempt = 0;
+      const maxLlmAttempts = DEFAULT_LLM_RETRY.maxAttempts;
+      let llmSucceeded = false;
+      let lastLlmError: string = "";
 
-      try {
-        for await (const chunk of provider.streamChat(
-          iterationMessages,
-          resolvedModel,
-          undefined, // system prompt is in messages
-          undefined, // temperature
-          undefined, // maxTokens
-          toolDefs,
-        )) {
-          if (chunk.type === "token" && chunk.content) {
-            llmResponse += chunk.content;
-            yield {
-              type: "agent_token",
-              content: chunk.content,
-              message_id: streamMsgId,
-            };
-          } else if (chunk.type === "tool_call" && chunk.tool_call) {
-            const tc = chunk.tool_call;
-            if (tc.name === "agent_decide") {
-              agentDecision = this.parseAgentDecideFromArgs(
-                tc.arguments,
-                totalSteps,
-              );
-              // Clear any streamed text — the LLM shouldn't have emitted
-              // text when using tool calling, but clear as a safety measure
-              if (agentDecision && llmResponse.trim().length > 0) {
+      while (!llmSucceeded && llmAttempt < maxLlmAttempts) {
+        llmAttempt++;
+        // Reset state for retry attempts
+        if (llmAttempt > 1) {
+          llmResponse = "";
+          agentDecision = null;
+          nativeToolCalls = [];
+          yield {
+            type: "agent_clear_stream",
+            message_id: streamMsgId,
+            step: totalSteps,
+          };
+        }
+
+        try {
+          for await (const chunk of provider.streamChat(
+            iterationMessages,
+            resolvedModel,
+            undefined, // system prompt is in messages
+            undefined, // temperature
+            undefined, // maxTokens
+            iterationTools,
+          )) {
+            if (chunk.type === "token" && chunk.content) {
+              llmResponse += chunk.content;
+              yield {
+                type: "agent_token",
+                content: chunk.content,
+                message_id: streamMsgId,
+              };
+            } else if (chunk.type === "tool_call" && chunk.tool_call) {
+              const tc = chunk.tool_call;
+              if (tc.name === "agent_decide") {
+                agentDecision = this.parseAgentDecideFromArgs(
+                  tc.arguments,
+                  totalSteps,
+                );
+                // Clear any streamed text — the LLM shouldn't have emitted
+                // text when using tool calling, but clear as a safety measure
+                if (agentDecision && llmResponse.trim().length > 0) {
+                  yield {
+                    type: "agent_clear_stream",
+                    message_id: streamMsgId,
+                    step: totalSteps,
+                  };
+                }
+              } else {
+                // Real tool call — execute immediately for agent workflow
+                let args: Record<string, unknown> = {};
+                try {
+                  args = JSON.parse(tc.arguments);
+                } catch {
+                  /* ignore */
+                }
+                const toolResult = await this.executeToolWithRetry(
+                  tc.name,
+                  args,
+                  conversationMessages,
+                  sessionId,
+                  totalSteps,
+                );
+                nativeToolCalls.push({
+                  name: tc.name,
+                  args,
+                  result: toolResult,
+                });
                 yield {
-                  type: "agent_clear_stream",
-                  message_id: streamMsgId,
+                  type: "agent_observe",
                   step: totalSteps,
+                  result: `Tool ${tc.name}: ${toolResult}`,
                 };
               }
-            } else {
-              // Real tool call — execute immediately for agent workflow
-              let args: Record<string, unknown> = {};
-              try {
-                args = JSON.parse(tc.arguments);
-              } catch {
-                /* ignore */
-              }
-              const result = await toolRegistry.execute(tc.name, args);
-              conversationMessages.push({
-                role: "assistant",
-                content: null,
-                tool_calls: [
-                  {
-                    id: tc.id,
-                    type: "function" as const,
-                    function: { name: tc.name, arguments: tc.arguments },
-                  },
-                ],
-              });
-              conversationMessages.push({
-                role: "tool",
-                tool_call_id: tc.id,
-                content: result,
-              });
-              yield {
-                type: "agent_observe",
-                step: totalSteps,
-                result: `Tool ${tc.name}: ${result}`,
-              };
             }
           }
+          llmSucceeded = true;
+        } catch (err) {
+          const error = err instanceof Error ? err : new Error(String(err));
+          const classified = classifyError(error, "llm");
+          lastLlmError = classified.message;
+
+          // Fatal errors — fail immediately
+          if (classified.category === "fatal") {
+            logger.error(
+              { sessionId, error: classified.message, attempt: llmAttempt },
+              "LLM call fatal error",
+            );
+            yield {
+              type: "agent_error",
+              error: `LLM fatal: ${classified.message}`,
+              step: totalSteps,
+            };
+            await this.saveSession(sessionRecord, scratchpad, "failed", null);
+            return;
+          }
+
+          // Retryable — retry if attempts remain
+          if (
+            classified.category === "retryable" &&
+            llmAttempt < maxLlmAttempts
+          ) {
+            const delay = calculateRetryDelayForAgent(
+              DEFAULT_LLM_RETRY,
+              llmAttempt,
+            );
+            logger.warn(
+              {
+                sessionId,
+                attempt: llmAttempt,
+                maxAttempts: maxLlmAttempts,
+                delayMs: delay,
+                error: classified.message,
+              },
+              "LLM call retryable error, retrying",
+            );
+            await this.delay(delay);
+            continue;
+          }
+
+          // Degradable or out of retries — log and degrade
+          logger.warn(
+            {
+              sessionId,
+              attempt: llmAttempt,
+              category: classified.category,
+              error: classified.message,
+            },
+            "LLM call degraded after attempts exhausted",
+          );
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
-        logger.error({ sessionId, error: msg }, "LLM call failed");
+      }
+
+      // All LLM attempts exhausted without success — degrade gracefully
+      if (!llmSucceeded) {
         yield {
-          type: "agent_error",
-          error: `LLM error: ${msg}`,
+          type: "agent_degraded",
           step: totalSteps,
+          original_tool: "",
+          reason: `LLM调用失败（已尝试${llmAttempt}次）：${lastLlmError}`,
+          retried: llmAttempt > 1,
+          attempts: llmAttempt,
         };
-        await this.saveSession(sessionRecord, scratchpad, "failed", null);
+        // Inject degradation context so agent can adjust
+        const degradationMsg = `[系统提示] 上一轮模型调用失败（${lastLlmError}）。请基于已有信息继续尝试完成任务，或向用户说明当前情况。`;
+        conversationMessages.push({
+          role: "user",
+          content: degradationMsg,
+        });
+        // Continue to next ReAct iteration — agent will work with what it has
+        continue;
+      }
+
+      // 9b-continued. If LLM called native tools (not agent_decide), feed results back and continue ReAct loop
+      if (nativeToolCalls.length > 0) {
+        // Clear any streamed text (the LLM's "let me look that up" preamble)
+        if (llmResponse.trim().length > 0) {
+          yield {
+            type: "agent_clear_stream",
+            message_id: streamMsgId,
+            step: totalSteps,
+          };
+        }
+
+        // Save assistant message with tool calls
+        await prisma.message.create({
+          data: {
+            id: streamMsgId,
+            conversationId,
+            role: "assistant",
+            content: JSON.stringify({
+              tool_calls: nativeToolCalls.map((tc) => ({
+                name: tc.name,
+                arguments: tc.args,
+              })),
+            }),
+            model: resolvedModel,
+          },
+        });
+
+        // Feed tool results back as user messages for next iteration
+        for (const tc of nativeToolCalls) {
+          conversationMessages.push({
+            role: "user",
+            content: `[工具返回] ${tc.name}: ${tc.result}`,
+          });
+        }
+
+        // Record steps in scratchpad
+        for (const tc of nativeToolCalls) {
+          scratchpad.push({
+            step: totalSteps,
+            observation: `调用了工具 ${tc.name}`,
+            analysis: `工具 ${tc.name} 返回了数据`,
+            plan: "查看工具返回的数据并生成用户回复",
+            decision: {
+              action: "tool_call",
+              tool: tc.name,
+              args: tc.args,
+              reason: "LLM通过原生tool calling直接调用",
+            },
+            result: tc.result,
+            timestamp: new Date().toISOString(),
+          });
+        }
+
+        // Switch to respond-only mode for next iteration (LLM will output clean Markdown)
+        respondOnly = true;
+
+        // Continue to next ReAct iteration so LLM can use the tool result
+        continue;
+      }
+
+      // 9b-respondOnly. If in respond-only mode, the LLM output is clean Markdown
+      // No decision parsing needed — streamed tokens are the final answer
+      if (respondOnly) {
+        finalContent = llmResponse;
+
+        // Save assistant message
+        await prisma.message.create({
+          data: {
+            id: streamMsgId,
+            conversationId,
+            role: "assistant",
+            content: finalContent,
+            model: resolvedModel,
+          },
+        });
+
+        yield {
+          type: "agent_respond",
+          content: finalContent,
+          summary: "Agent completed (respond-only)",
+          message_id: streamMsgId,
+        };
+
+        await this.saveSession(
+          sessionRecord,
+          scratchpad,
+          "completed",
+          "Task completed",
+          compressedSummary,
+        );
+
+        yield {
+          type: "agent_done",
+          total_steps: totalSteps,
+          final_summary: "Task completed",
+          session_id: sessionId,
+        };
         return;
       }
 
       // 9c. Parse decision — prefer native tool calling, fall back to JSON text
       const step = agentDecision || this.parseStep(llmResponse, totalSteps);
+      // Track whether decision was parsed from raw text (vs agent_decide tool call)
+      const parsedFromText = agentDecision === null && step !== null;
       if (!step) {
         logger.warn(
           { sessionId, response: llmResponse.slice(0, 200) },
@@ -364,7 +615,17 @@ export class AgentService {
 
       if (decision.action === "respond") {
         // Agent decides task is complete — content was already streamed
-        // as agent_token events during the LLM call (real streaming)
+        // as agent_token events during the LLM call
+        // If the decision was parsed from raw text (not agent_decide), clear the
+        // streamed JSON text before sending the clean response
+        if (parsedFromText) {
+          yield {
+            type: "agent_clear_stream",
+            message_id: streamMsgId,
+            step: totalSteps,
+          };
+        }
+
         yield {
           type: "agent_act",
           step: totalSteps,
@@ -373,13 +634,22 @@ export class AgentService {
 
         finalContent = decision.content;
 
+        // PII scan on response
+        const responseGuard = guard.guardResponse(finalContent);
+        if (!responseGuard.safe) {
+          // Content was blocked — replace with safe message
+          finalContent = responseGuard.sanitizedContent;
+        }
+        // Use sanitized content for DB save
+        const safeContent = responseGuard.sanitizedContent;
+
         // Save assistant message (ID matches the streamed tokens)
         await prisma.message.create({
           data: {
             id: streamMsgId,
             conversationId,
             role: "assistant",
-            content: decision.content,
+            content: safeContent,
             model: resolvedModel,
           },
         });
@@ -390,7 +660,7 @@ export class AgentService {
 
         yield {
           type: "agent_respond",
-          content: decision.content,
+          content: safeContent,
           summary: decision.summary,
           message_id: streamMsgId,
         };
@@ -401,6 +671,7 @@ export class AgentService {
           scratchpad,
           "completed",
           decision.summary,
+          compressedSummary,
         );
 
         yield {
@@ -482,12 +753,56 @@ export class AgentService {
           return;
         }
 
-        // No approval needed — execute directly
-        const toolResult = await this.executeToolAndRecord(
+        // No approval needed — check guard before executing
+        const guardCheck = guard.guardToolCall(
+          decision.tool,
+          decision.args,
+          tokensUsed,
+          costCentsUsed,
+          resolvedModel,
+        );
+        if (!guardCheck.allowed) {
+          step.result = `[安全守卫拦截] ${guardCheck.blockReason}`;
+          scratchpad.push(step);
+          // P0-3: Memory compression check
+          const compResult = this.compressor.compress(scratchpad);
+          if (compResult.compressedCount > 0) {
+            compressedSummary = compResult.summary;
+            keptStepNumbers = new Set(compResult.keptSteps.map((s) => s.step));
+          }
+          yield {
+            type: "agent_guard_block",
+            step: totalSteps,
+            reason: "tool_blocked",
+            detail: guardCheck.blockReason!,
+          };
+          // Inject rejection as tool result so agent can adjust
+          conversationMessages.push({
+            role: "user",
+            content: `[系统提示] 工具 "${decision.tool}" 被安全策略拦截：${guardCheck.blockReason}`,
+          });
+          continue; // Skip to next ReAct iteration
+        }
+
+        // Execute with retry
+        const toolResult = await this.executeToolWithRetry(
           decision.tool,
           decision.args,
           conversationMessages,
+          sessionId,
+          totalSteps,
         );
+
+        // Check if the result is a degradation message
+        const isDegraded = toolResult.startsWith("[工具执行失败]");
+        if (isDegraded) {
+          step.error = {
+            category: "degradable",
+            message: toolResult,
+            retried: true,
+            attempts: DEFAULT_TOOL_RETRY.maxAttempts,
+          };
+        }
 
         // Yield observe event
         yield {
@@ -499,11 +814,25 @@ export class AgentService {
         // Record step in scratchpad
         step.result = toolResult;
         scratchpad.push(step);
+        // P0-3: Memory compression check
+        if (scratchpad.length > SCRATCHPAD_COMPRESSION_THRESHOLD) {
+          const compResult = this.compressor.compress(scratchpad);
+          if (compResult.compressedCount > 0) {
+            compressedSummary = compResult.summary;
+            keptStepNumbers = new Set(compResult.keptSteps.map((s) => s.step));
+          }
+        }
       } else if (decision.action === "ask_user") {
         // Agent needs clarification — pause and wait
         scratchpad.push(step);
 
-        await this.saveSession(sessionRecord, scratchpad, "paused", null);
+        await this.saveSession(
+          sessionRecord,
+          scratchpad,
+          "paused",
+          null,
+          compressedSummary,
+        );
 
         yield {
           type: "agent_ask_user",
@@ -525,6 +854,7 @@ export class AgentService {
       scratchpad,
       "failed",
       `Reached maximum ${maxIterations} iterations without completing the task.`,
+      compressedSummary,
     );
 
     yield {
@@ -711,13 +1041,14 @@ export class AgentService {
       }));
       const conversationMessages = truncateHistory(rawMessages, 6000);
 
-      // Execute the tool
-      let toolResult: string;
-      try {
-        toolResult = await toolRegistry.execute(approval.toolName, args);
-      } catch (err) {
-        toolResult = `Error: ${err instanceof Error ? err.message : "Tool execution failed"}`;
-      }
+      // Execute the tool with retry
+      const toolResult = await this.executeToolWithRetry(
+        approval.toolName,
+        args,
+        conversationMessages,
+        sessionId,
+        approval.stepNumber,
+      );
 
       // Record result
       step.result = toolResult;
@@ -839,6 +1170,10 @@ export class AgentService {
     const systemPrompt = REACT_PROMPT_WITH_TOOLS;
     const maxIterations = DEFAULT_MAX_ITERATIONS;
 
+    // Memory compression state (P0-3) — minimal tracking for continue loop
+    let compressedSummary: string = "";
+    let keptStepNumbers: Set<number> = new Set();
+
     // Load conversation history (most recent 100, reversed for truncateHistory)
     const history = await prisma.message.findMany({
       where: { conversationId },
@@ -887,6 +1222,8 @@ export class AgentService {
             task,
             scratchpad,
             totalSteps,
+            compressedSummary,
+            keptStepNumbers,
           ),
         },
         ...conversationMessages,
@@ -895,84 +1232,150 @@ export class AgentService {
       const streamMsgId = randomUUID();
       let llmResponse = "";
       let agentDecision: AgentStep | null = null;
+      let llmAttempt = 0;
+      const maxLlmAttempts = DEFAULT_LLM_RETRY.maxAttempts;
+      let llmSucceeded = false;
+      let lastLlmError = "";
 
-      try {
-        for await (const chunk of provider.streamChat(
-          iterationMessages,
-          resolvedModel,
-          undefined,
-          undefined,
-          undefined,
-          toolDefs,
-        )) {
-          if (chunk.type === "token" && chunk.content) {
-            llmResponse += chunk.content;
-            yield {
-              type: "agent_token",
-              content: chunk.content,
-              message_id: streamMsgId,
-            };
-          } else if (chunk.type === "tool_call" && chunk.tool_call) {
-            const tc = chunk.tool_call;
-            if (tc.name === "agent_decide") {
-              agentDecision = this.parseAgentDecideFromArgs(
-                tc.arguments,
-                totalSteps,
-              );
-              if (agentDecision && llmResponse.trim().length > 0) {
+      while (!llmSucceeded && llmAttempt < maxLlmAttempts) {
+        llmAttempt++;
+        if (llmAttempt > 1) {
+          llmResponse = "";
+          agentDecision = null;
+          yield {
+            type: "agent_clear_stream",
+            message_id: streamMsgId,
+            step: totalSteps,
+          };
+        }
+
+        try {
+          for await (const chunk of provider.streamChat(
+            iterationMessages,
+            resolvedModel,
+            undefined,
+            undefined,
+            undefined,
+            toolDefs,
+          )) {
+            if (chunk.type === "token" && chunk.content) {
+              llmResponse += chunk.content;
+              yield {
+                type: "agent_token",
+                content: chunk.content,
+                message_id: streamMsgId,
+              };
+            } else if (chunk.type === "tool_call" && chunk.tool_call) {
+              const tc = chunk.tool_call;
+              if (tc.name === "agent_decide") {
+                agentDecision = this.parseAgentDecideFromArgs(
+                  tc.arguments,
+                  totalSteps,
+                );
+                if (agentDecision && llmResponse.trim().length > 0) {
+                  yield {
+                    type: "agent_clear_stream",
+                    message_id: streamMsgId,
+                    step: totalSteps,
+                  };
+                }
+              } else {
+                // Real tool call — execute with retry
+                let tcArgs: Record<string, unknown> = {};
+                try {
+                  tcArgs = JSON.parse(tc.arguments);
+                } catch {
+                  /* ignore */
+                }
+                const result = await this.executeToolWithRetry(
+                  tc.name,
+                  tcArgs,
+                  conversationMessages,
+                  sessionId,
+                  totalSteps,
+                );
                 yield {
-                  type: "agent_clear_stream",
-                  message_id: streamMsgId,
+                  type: "agent_observe",
                   step: totalSteps,
+                  result: `Tool ${tc.name}: ${result}`,
                 };
               }
-            } else {
-              // Real tool call — execute immediately
-              let tcArgs: Record<string, unknown> = {};
-              try {
-                tcArgs = JSON.parse(tc.arguments);
-              } catch {
-                /* ignore */
-              }
-              const result = await toolRegistry.execute(tc.name, tcArgs);
-              conversationMessages.push({
-                role: "assistant",
-                content: null,
-                tool_calls: [
-                  {
-                    id: tc.id,
-                    type: "function" as const,
-                    function: { name: tc.name, arguments: tc.arguments },
-                  },
-                ],
-              });
-              conversationMessages.push({
-                role: "tool",
-                tool_call_id: tc.id,
-                content: result,
-              });
-              yield {
-                type: "agent_observe",
-                step: totalSteps,
-                result: `Tool ${tc.name}: ${result}`,
-              };
             }
           }
+          llmSucceeded = true;
+        } catch (err) {
+          const error = err instanceof Error ? err : new Error(String(err));
+          const classified = classifyError(error, "llm");
+          lastLlmError = classified.message;
+
+          if (classified.category === "fatal") {
+            logger.error(
+              { sessionId, error: classified.message, attempt: llmAttempt },
+              "LLM call fatal error (continue loop)",
+            );
+            yield {
+              type: "agent_error",
+              error: `LLM fatal: ${classified.message}`,
+              step: totalSteps,
+            };
+            await this.saveSession(
+              this.sessionRecord(sessionId, conversationId, task),
+              scratchpad,
+              "failed",
+              null,
+            );
+            return;
+          }
+
+          if (
+            classified.category === "retryable" &&
+            llmAttempt < maxLlmAttempts
+          ) {
+            const delay = calculateRetryDelayForAgent(
+              DEFAULT_LLM_RETRY,
+              llmAttempt,
+            );
+            logger.warn(
+              {
+                sessionId,
+                attempt: llmAttempt,
+                maxAttempts: maxLlmAttempts,
+                delayMs: delay,
+                error: classified.message,
+              },
+              "LLM call retryable error in continue loop, retrying",
+            );
+            await this.delay(delay);
+            continue;
+          }
+
+          logger.warn(
+            {
+              sessionId,
+              attempt: llmAttempt,
+              category: classified.category,
+              error: classified.message,
+            },
+            "LLM call degraded in continue loop",
+          );
         }
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "Unknown error";
+      }
+
+      // All LLM attempts exhausted — degrade gracefully
+      if (!llmSucceeded) {
         yield {
-          type: "agent_error",
-          error: `LLM error: ${msg}`,
+          type: "agent_degraded",
           step: totalSteps,
+          original_tool: "",
+          reason: `LLM调用失败（已尝试${llmAttempt}次）：${lastLlmError}`,
+          retried: llmAttempt > 1,
+          attempts: llmAttempt,
         };
-        await this.saveSession(
-          this.sessionRecord(sessionId, conversationId, task),
-          scratchpad,
-          "failed",
-          null,
-        );
-        return;
+        conversationMessages.push({
+          role: "user",
+          content: `[系统提示] 上一轮模型调用失败（${lastLlmError}）。请基于已有信息继续尝试完成任务。`,
+        });
+        continue;
       }
 
       const step = agentDecision || this.parseStep(llmResponse, totalSteps);
@@ -1113,21 +1516,48 @@ export class AgentService {
           return;
         }
 
-        const toolResult = await this.executeToolAndRecord(
+        const toolResult = await this.executeToolWithRetry(
           decision.tool,
           decision.args,
           conversationMessages,
+          sessionId,
+          totalSteps,
         );
+        // Check if the result is a degradation message
+        const isDegradedC = toolResult.startsWith("[工具执行失败]");
+        if (isDegradedC) {
+          step.error = {
+            category: "degradable",
+            message: toolResult,
+            retried: true,
+            attempts: DEFAULT_TOOL_RETRY.maxAttempts,
+          };
+        }
         yield { type: "agent_observe", step: totalSteps, result: toolResult };
         step.result = toolResult;
         scratchpad.push(step);
+        // P0-3: Memory compression check
+        if (scratchpad.length > SCRATCHPAD_COMPRESSION_THRESHOLD) {
+          const cResult = this.compressor.compress(scratchpad);
+          if (cResult.compressedCount > 0) {
+            compressedSummary = cResult.summary;
+            keptStepNumbers = new Set(cResult.keptSteps.map((s) => s.step));
+          }
+        }
       } else if (decision.action === "ask_user") {
         scratchpad.push(step);
+        // P0-3: Compression check before pausing
+        const cResultPause = this.compressor.compress(scratchpad);
+        if (cResultPause.compressedCount > 0) {
+          compressedSummary = cResultPause.summary;
+          keptStepNumbers = new Set(cResultPause.keptSteps.map((s) => s.step));
+        }
         await this.saveSession(
           this.sessionRecord(sessionId, conversationId, task),
           scratchpad,
           "paused",
           null,
+          compressedSummary,
         );
         yield {
           type: "agent_ask_user",
@@ -1154,29 +1584,66 @@ export class AgentService {
     task: string,
     scratchpad: AgentStep[],
     currentStep: number,
+    compressedSummary?: string,
+    keptStepNumbers?: Set<number>,
+    respondOnly: boolean = false,
   ): string {
     const parts = [systemPrompt];
 
     parts.push(`\n\n## 当前任务\n${task}`);
 
     if (scratchpad.length > 0) {
-      parts.push(
-        `\n\n## 历史步骤（Scratchpad）\n你已完成 ${scratchpad.length} 步：`,
-      );
-      for (const step of scratchpad) {
+      // P0-3: If compression has occurred, show summary + kept steps only
+      if (compressedSummary && keptStepNumbers) {
         parts.push(
-          `\n第 ${step.step} 步:\n- 观察: ${step.observation}\n- 决策: ${step.decision.action}` +
-            (step.result ? `\n- 结果: ${step.result}` : ""),
+          `\n\n## 历史步骤摘要`,
+          compressedSummary,
+          `\n\n## 保留的关键步骤`,
         );
+        const keptSteps = scratchpad.filter((s) => keptStepNumbers.has(s.step));
+        for (const step of keptSteps) {
+          parts.push(this.formatStepForContext(step));
+        }
+        parts.push(
+          `\n注意：以上为压缩后的关键步骤，完整记录已保存但未在上下文中展示。`,
+        );
+      } else {
+        parts.push(
+          `\n\n## 历史步骤（Scratchpad）\n你已完成 ${scratchpad.length} 步：`,
+        );
+        for (const step of scratchpad) {
+          parts.push(this.formatStepForContext(step));
+        }
       }
     }
 
-    parts.push(
-      `\n\n## 当前步骤: 第 ${currentStep} 步`,
-      "请将你的 observation、analysis、plan、decision 输出为一个完整的 JSON 对象。",
-    );
+    // respondOnly 模式：不追加 JSON 输出指令，让 LLM 自由输出 Markdown
+    if (!respondOnly) {
+      parts.push(
+        `\n\n## 当前步骤: 第 ${currentStep} 步`,
+        "调用 agent_decide 函数来报告你的 observation、analysis、plan、decision。不要输出原始 JSON 文本。",
+      );
+    }
 
     return parts.join("\n");
+  }
+
+  /**
+   * Format a single step for injection into the LLM iteration context.
+   */
+  private formatStepForContext(step: AgentStep): string {
+    const lines = [
+      `\n第 ${step.step} 步:`,
+      `- 观察: ${step.observation}`,
+      `- 决策: ${step.decision.action}`,
+    ];
+    if (step.result) {
+      lines.push(`- 结果: ${step.result}`);
+    }
+    if (step.error) {
+      lines.push(`- 错误: ${step.error.message}`);
+    }
+    return lines.join("\n");
   }
 
   /**
@@ -1286,21 +1753,100 @@ export class AgentService {
   }
 
   /**
-   * Execute a tool and record the call + result in conversation messages.
+   * Execute a tool with retry logic and record the call + result in conversation messages.
+   * On failure, builds a degradation message so the agent can try alternatives.
    * Shared by all ReAct loop methods to avoid duplicating tool execution logic.
    */
-  private async executeToolAndRecord(
+  private async executeToolWithRetry(
     toolName: string,
     args: Record<string, unknown>,
     conversationMessages: ChatMessage[],
+    sessionId?: string,
+    stepNumber?: number,
   ): Promise<string> {
-    let result: string;
-    try {
-      result = await toolRegistry.execute(toolName, args);
-    } catch (err) {
-      result = `Error: ${err instanceof Error ? err.message : "Tool execution failed"}`;
+    let finalResult: string;
+    let attempts = 0;
+    let lastError: string = "";
+
+    for (attempts = 0; attempts < DEFAULT_TOOL_RETRY.maxAttempts; attempts++) {
+      try {
+        finalResult = await toolRegistry.execute(toolName, args);
+
+        // Success — record in conversation
+        conversationMessages.push({
+          role: "assistant",
+          content: null,
+          tool_calls: [
+            {
+              id: randomUUID(),
+              type: "function" as const,
+              function: { name: toolName, arguments: JSON.stringify(args) },
+            },
+          ],
+        });
+        conversationMessages.push({
+          role: "tool",
+          tool_call_id:
+            conversationMessages[conversationMessages.length - 1].tool_calls![0]
+              .id,
+          content: finalResult,
+        });
+
+        if (attempts > 0) {
+          logger.info(
+            { tool: toolName, attempts: attempts + 1, sessionId },
+            "Tool executed successfully after retry",
+          );
+        }
+        return finalResult;
+      } catch (err) {
+        const error = err instanceof Error ? err : new Error(String(err));
+        const classified = classifyError(error, "tool", toolName);
+        lastError = classified.message;
+
+        // Fatal — don't retry
+        if (classified.category === "fatal") break;
+
+        // Retryable or degradable — retry if attempts remain
+        if (attempts < DEFAULT_TOOL_RETRY.maxAttempts - 1) {
+          const delay = calculateRetryDelayForAgent(
+            DEFAULT_TOOL_RETRY,
+            attempts + 1,
+          );
+          logger.warn(
+            {
+              tool: toolName,
+              attempt: attempts + 1,
+              delayMs: delay,
+              error: classified.message,
+              sessionId,
+            },
+            "Tool execution retry",
+          );
+          await this.delay(delay);
+        }
+      }
     }
 
+    // All attempts exhausted or fatal — build degradation message
+    logger.warn(
+      { tool: toolName, attempts, lastError, sessionId },
+      "Tool execution degraded after retries exhausted",
+    );
+
+    const classifiedFinal = classifyError(
+      new Error(lastError),
+      "tool",
+      toolName,
+    );
+    const degradationMsg = buildDegradationMessage(
+      classifiedFinal,
+      toolName,
+      attempts,
+    );
+    const alternatives = getAlternativeTools(toolName);
+
+    // Record the degradation message as the tool result
     conversationMessages.push({
       role: "assistant",
       content: null,
@@ -1316,10 +1862,25 @@ export class AgentService {
       role: "tool",
       tool_call_id:
         conversationMessages[conversationMessages.length - 1].tool_calls![0].id,
-      content: result,
+      content: degradationMsg,
     });
 
-    return result;
+    // If alternatives exist, inject them as a hint
+    if (alternatives.length > 0) {
+      conversationMessages.push({
+        role: "user",
+        content: `[系统提示] 工具 "${toolName}" 不可用，你可以尝试替代工具：${alternatives.join(", ")}`,
+      });
+    }
+
+    return degradationMsg;
+  }
+
+  /**
+   * Delay helper for retry backoff.
+   */
+  private delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
   /**
@@ -1355,6 +1916,7 @@ export class AgentService {
     scratchpad: AgentStep[],
     status: "running" | "paused" | "completed" | "failed",
     finalSummary: string | null,
+    compressedSummary?: string,
   ): Promise<void> {
     try {
       const completedAt =
@@ -1369,6 +1931,7 @@ export class AgentService {
           status,
           scratchpad: scratchpad as unknown as object,
           finalSummary,
+          compressedSummary: compressedSummary ?? null,
           startedAt: record.startedAt,
           completedAt,
         },
@@ -1376,6 +1939,7 @@ export class AgentService {
           status,
           scratchpad: scratchpad as unknown as object,
           finalSummary,
+          compressedSummary: compressedSummary ?? null,
           completedAt,
         },
       });

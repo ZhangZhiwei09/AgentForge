@@ -1,27 +1,15 @@
 import { useState, useRef, useCallback } from "react";
+import { generateUUID } from "@/lib/uuid";
+import { extractCardBlocks } from "@/components/markdown/card-parser";
+import type {
+  KnowledgeResult,
+  ToolCallRecord,
+  CSMessage,
+  ContentBlock,
+} from "@agentforge/shared-types";
 
-export interface KnowledgeResult {
-  content: string;
-  score: number;
-  docTitle: string;
-}
-
-export interface ToolCallRecord {
-  id: string;
-  name: string;
-  arguments: string;
-  result?: string;
-  status: "pending" | "done";
-}
-
-export interface CSMessage {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  timestamp: number;
-  knowledge?: KnowledgeResult[];
-  toolCalls?: ToolCallRecord[];
-}
+// Re-export CSMessage for backward compatibility (components currently import from here)
+export type { KnowledgeResult, ToolCallRecord, CSMessage, ContentBlock };
 
 interface StreamMeta {
   messageId: string;
@@ -42,12 +30,10 @@ export function useCustomerChatStream() {
     },
   ]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const streamingRef = useRef(false); // 避免闭包捕获过期状态
+  const streamingRef = useRef(false);
   const [currentMeta, setCurrentMeta] = useState<StreamMeta | null>(null);
   const [sessionId, setSessionId] = useState<string>(() => {
-    return (
-      localStorage.getItem("customer_chat_session_id") || crypto.randomUUID()
-    );
+    return localStorage.getItem("customer_chat_session_id") || generateUUID();
   });
   const abortRef = useRef<AbortController | null>(null);
 
@@ -90,7 +76,7 @@ export function useCustomerChatStream() {
   }, [sessionId]);
 
   const clearSession = useCallback(() => {
-    const newId = crypto.randomUUID();
+    const newId = generateUUID();
     setSessionId(newId);
     localStorage.setItem("customer_chat_session_id", newId);
     setMessages([
@@ -147,6 +133,7 @@ export function useCustomerChatStream() {
         let streamContent = "";
         let knowledgeResults: KnowledgeResult[] | undefined;
         const toolCalls: ToolCallRecord[] = [];
+        const contentBlocks: ContentBlock[] = [];
         let meta: StreamMeta | null = null;
 
         while (true) {
@@ -186,6 +173,12 @@ export function useCustomerChatStream() {
                   knowledge: knowledgeResults || [],
                 };
                 setCurrentMeta(meta);
+                continue;
+              }
+
+              // ── 新增：content_block 事件（ToolAgent 结构化卡片） ──
+              if (chunk.type === "content_block" && chunk.block) {
+                contentBlocks.push(chunk.block as ContentBlock);
                 continue;
               }
 
@@ -276,11 +269,19 @@ export function useCustomerChatStream() {
               } else if (chunk.type === "error") {
                 console.error("Stream error:", chunk.content);
               } else if (chunk.type === "done") {
-                // 服务端已完成校验，streamContent 已是干净的回答文本
                 if (chunk.suggestions && meta) {
                   meta = { ...meta, suggestions: chunk.suggestions };
                   setCurrentMeta(meta);
                 }
+
+                // ── 解析 markdown 中的卡片围栏 ──
+                const { blocks: parsedBlocks } =
+                  extractCardBlocks(streamContent);
+                const allBlocks = deduplicateBlocks([
+                  ...contentBlocks,
+                  ...parsedBlocks.map((b) => b.block),
+                ]);
+
                 if (chunk.message_id) {
                   setMessages((prev) => {
                     const last = prev[prev.length - 1];
@@ -293,6 +294,8 @@ export function useCustomerChatStream() {
                           content: streamContent,
                           knowledge: knowledgeResults,
                           toolCalls: [...toolCalls],
+                          contentBlocks:
+                            allBlocks.length > 0 ? allBlocks : undefined,
                         },
                       ];
                     }
@@ -323,7 +326,7 @@ export function useCustomerChatStream() {
       }
     },
     [sessionId],
-  ); // 只用 sessionId 作为依赖，isStreaming 通过 ref 访问
+  );
 
   return {
     messages,
@@ -334,4 +337,35 @@ export function useCustomerChatStream() {
     loadHistory,
     clearSession,
   };
+}
+
+/**
+ * 去重 ContentBlock 数组：按卡片类型和关键字段去重
+ * 避免 SSE content_block 事件和 Markdown fence 解析产生重复卡片
+ */
+function deduplicateBlocks(blocks: ContentBlock[]): ContentBlock[] {
+  const seen = new Set<string>();
+  return blocks.filter((b) => {
+    const key = blockKey(b);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function blockKey(block: ContentBlock): string {
+  if (block.type === "order_card") {
+    return `order:${block.data.orderId}`;
+  }
+  if (block.type === "status_card") {
+    return `status:${block.data.title}`;
+  }
+  if (block.type === "policy_card") {
+    return `policy:${block.data.category}:${block.data.title}`;
+  }
+  if (block.type === "action_card") {
+    return `action:${block.data.title}`;
+  }
+  // Use JSON for fallback
+  return `${block.type}:${JSON.stringify((block as unknown as Record<string, unknown>).data || block)}`;
 }

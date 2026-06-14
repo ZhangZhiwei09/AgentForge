@@ -53,24 +53,24 @@ interface WelcomeScreenProps {
 
 export function WelcomeScreen({ onSend }: WelcomeScreenProps) {
   return (
-    <div className="flex flex-col items-center justify-center px-6 py-12 animate-fade-in">
+    <div className="flex flex-col items-center justify-center px-3 sm:px-6 py-6 sm:py-12 animate-fade-in">
       {/* 头部 */}
-      <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-[hsl(var(--cs-primary))] shadow-lg mb-5">
-        <MessageCircle className="h-8 w-8 text-white" />
+      <div className="flex h-12 w-12 sm:h-16 sm:w-16 items-center justify-center rounded-2xl bg-[hsl(var(--cs-primary))] shadow-lg mb-3 sm:mb-5">
+        <MessageCircle className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
       </div>
-      <h2 className="text-xl font-bold text-[hsl(var(--foreground))] mb-1">
+      <h2 className="text-lg sm:text-xl font-bold text-[hsl(var(--foreground))] mb-1 text-center">
         您好，欢迎来到智能客服中心
       </h2>
-      <p className="text-sm text-[hsl(var(--muted-foreground))] mb-8">
+      <p className="text-xs sm:text-sm text-[hsl(var(--muted-foreground))] mb-4 sm:mb-8 text-center">
         请选择您想咨询的问题类型，或直接输入您的问题
       </p>
 
       {/* FAQ 话题卡片 */}
-      <div className="grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid w-full max-w-2xl grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 sm:gap-3">
         {FAQ_TOPICS.map((topic) => (
           <div
             key={topic.title}
-            className={`rounded-xl border p-4 transition-all duration-200 hover:shadow-md cursor-pointer ${topic.color}`}
+            className={`rounded-xl border p-3 sm:p-4 transition-all duration-200 hover:shadow-md active:scale-[0.98] cursor-pointer ${topic.color}`}
           >
             <div className="flex items-center gap-2 mb-3">
               {topic.icon}

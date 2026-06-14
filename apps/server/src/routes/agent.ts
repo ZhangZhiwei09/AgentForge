@@ -19,6 +19,17 @@ const agentRunSchema = z.object({
   model: z.string().nullable().optional(),
   max_iterations: z.number().int().min(1).max(20).default(10),
   tools: z.array(z.string()).nullable().optional(),
+  guard_config: z
+    .object({
+      max_tokens: z.number().int().min(1000).optional(),
+      max_cost_cents: z.number().min(1).optional(),
+      allowed_tools: z.array(z.string()).optional(),
+      denied_tools: z.array(z.string()).optional(),
+      pii_detection_enabled: z.boolean().optional(),
+      content_safety_enabled: z.boolean().optional(),
+    })
+    .nullable()
+    .optional(),
 });
 
 const agentRespondSchema = z.object({
@@ -41,8 +52,26 @@ agentRoutes.post(
   "/api/agent/run",
   zValidator("json", agentRunSchema),
   async (c) => {
-    const { conversation_id, task, model, max_iterations, tools } =
-      c.req.valid("json");
+    const {
+      conversation_id,
+      task,
+      model,
+      max_iterations,
+      tools,
+      guard_config,
+    } = c.req.valid("json");
+
+    // Map snake_case to camelCase for guard service
+    const guardConfig = guard_config
+      ? {
+          maxTokens: guard_config.max_tokens,
+          maxCostCents: guard_config.max_cost_cents,
+          allowedTools: guard_config.allowed_tools,
+          deniedTools: guard_config.denied_tools,
+          piiDetectionEnabled: guard_config.pii_detection_enabled,
+          contentSafetyEnabled: guard_config.content_safety_enabled,
+        }
+      : null;
     const user = c.get("user");
 
     if (!(await verifyConversationOwnership(conversation_id, user.id))) {
@@ -61,6 +90,7 @@ agentRoutes.post(
           model,
           maxIterations: max_iterations,
           tools,
+          guardConfig,
         })) {
           await stream.writeSSE({ data: JSON.stringify(event) });
         }

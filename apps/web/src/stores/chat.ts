@@ -11,6 +11,13 @@ import type {
 type PanelMode = "debug" | "memory" | "knowledge" | "agent" | "voice";
 
 export type VoiceStatus = "idle" | "listening" | "processing" | "speaking";
+export type VideoStatus =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "listening"
+  | "processing"
+  | "speaking";
 
 export interface PendingApproval {
   approvalId: string;
@@ -42,6 +49,11 @@ interface ChatState {
   isVoiceActive: boolean;
   voiceStatus: VoiceStatus;
   voiceTranscript: Array<{ role: string; content: string }>;
+  // V11 Video state
+  isVideoActive: boolean;
+  videoStatus: VideoStatus;
+  videoTranscript: Array<{ role: string; content: string }>;
+  videoVisionContext: string;
 
   setConversations: (convs: Conversation[]) => void;
   setCurrentConversation: (id: string | null) => void;
@@ -68,6 +80,12 @@ interface ChatState {
   setVoiceStatus: (status: VoiceStatus) => void;
   appendVoiceTranscript: (entry: { role: string; content: string }) => void;
   clearVoiceTranscript: () => void;
+  // V11 Video actions
+  setVideoActive: (v: boolean) => void;
+  setVideoStatus: (status: VideoStatus) => void;
+  appendVideoTranscript: (entry: { role: string; content: string }) => void;
+  clearVideoTranscript: () => void;
+  setVideoVisionContext: (ctx: string) => void;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -87,6 +105,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   isVoiceActive: false,
   voiceStatus: "idle" as VoiceStatus,
   voiceTranscript: [],
+  isVideoActive: false,
+  videoStatus: "idle" as VideoStatus,
+  videoTranscript: [],
+  videoVisionContext: "",
 
   setConversations: (convs) => set({ conversations: convs }),
   setCurrentConversation: (id) => set({ currentConversationId: id }),
@@ -139,4 +161,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   appendVoiceTranscript: (entry) =>
     set((s) => ({ voiceTranscript: [...s.voiceTranscript, entry] })),
   clearVoiceTranscript: () => set({ voiceTranscript: [] }),
+  setVideoActive: (v) => set({ isVideoActive: v }),
+  setVideoStatus: (status) => set({ videoStatus: status }),
+  appendVideoTranscript: (entry) =>
+    set((s) => ({ videoTranscript: [...s.videoTranscript, entry] })),
+  clearVideoTranscript: () => set({ videoTranscript: [] }),
+  setVideoVisionContext: (ctx) => set({ videoVisionContext: ctx }),
 }));

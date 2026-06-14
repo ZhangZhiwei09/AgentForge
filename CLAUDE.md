@@ -89,9 +89,9 @@ This way each component is independently controllable — restart the backend wi
 
 ## Architecture
 
-AgentForge is a **pnpm + Turborepo monorepo** building a ChatGPT clone as the foundation (V1) for a progressive AI agent platform. The roadmap spans platform engineering (P0-P2) and agent capability phases (V5-V10). Completed phases are marked with ✅ in both this file and `plan.md`.
+AgentForge is a **pnpm + Turborepo monorepo** building a ChatGPT clone as the foundation (V1) for a progressive AI agent platform. The roadmap spans platform engineering (P0-P2) and agent capability phases (V5-V9, V11). Completed phases are marked with ✅ in both this file and `plan.md`.
 
-**Evolution path:** V1 ChatGPT Clone → V2 Memory → V3 RAG → V4 Tool Calling → P0 Platform Foundation → P1 Agent Kernel → V5 Voice → V6 Workflow → V9 Multi-Agent ✅ → V10 MCP
+**Evolution path:** V1 ChatGPT Clone → V2 Memory → V3 RAG → V4 Tool Calling → P0 Platform Foundation → P1 Agent Kernel → V5 Voice → V6 Workflow → V9 Multi-Agent ✅ → V11 Video Conversation ✅
 
 ### Package Layout
 
@@ -165,9 +165,9 @@ When a development phase from `plan.md` is completed:
 
 This ensures CLAUDE.md always reflects the current state of the project, not just the original plan.
 
-### Version Roadmap (V1→V10 + P0-P2)
+### Version Roadmap (V1→V11 + P0-P2)
 
-The `plan.md` defines the full V1→V10 + P0-P2 roadmap. Completed phases are marked with ✅. When a new phase is completed, update both `plan.md` and this section.
+The `plan.md` defines the full V1→V11 + P0-P2 roadmap. Completed phases are marked with ✅. When a new phase is completed, update both `plan.md` and this section.
 
 **Platform Foundation:**
 
@@ -192,8 +192,8 @@ The `plan.md` defines the full V1→V10 + P0-P2 roadmap. Completed phases are ma
 - **V5 Voice Agent:** ✅ WebSocket real-time audio, Whisper ASR, OpenAI TTS (6 voices), VAD, interruption handling
 - **V6 Workflow Engine:** ✅ DAG-based orchestration, checkpoint/resume, 6 step types, 3 templates, 15 API endpoints
 - **V9 Multi-Agent:** ✅ Role-based agent teams, message bus, 3 collaboration patterns, blackboard, 4 templates, 16 API endpoints
-- **V10 MCP Ecosystem:** MCP Server + Client, dynamic tool discovery, hot-reload
+- **V11 Multimodal Video Conversation:** ✅ WebSocket-based video chat with AI customer service agent. Camera + mic → ASR + GPT-4o Vision → TTS. Canvas frame capture (1fps JPEG), multimodal LLM provider, VideoCallPanel UI. Phase 1 complete; Phase 2 (WebRTC/RTC upgrade) planned.
 
-**Beyond V10:**
+**Beyond V11:**
 
 - Agent evaluation & benchmarking, fine-tuning pipeline, multi-modal, K8s deployment
