@@ -508,19 +508,19 @@ describe("AgentPhase 状态机", () => {
   describe("token 转发：仅 responding 阶段转发", () => {
     it("phase=responding 时 token 应转发", () => {
       const phase: AgentPhase = "responding";
-      const shouldForward = phase === "responding";
+      const shouldForward = (phase as AgentPhase) === "responding";
       expect(shouldForward).toBe(true);
     });
 
     it("phase=planning 时 token 应缓存（不转发）", () => {
       const phase: AgentPhase = "planning";
-      const shouldForward = phase === "responding";
+      const shouldForward = (phase as AgentPhase) === "responding";
       expect(shouldForward).toBe(false);
     });
 
     it("phase=observing 时 token 应缓存（不转发）", () => {
       const phase: AgentPhase = "observing";
-      const shouldForward = phase === "responding";
+      const shouldForward = (phase as AgentPhase) === "responding";
       expect(shouldForward).toBe(false);
     });
   });
