@@ -287,6 +287,7 @@ export class AgentService {
             totalSteps,
             compressedSummary,
             keptStepNumbers,
+            respondOnly,
           ),
         },
         ...conversationMessages,
@@ -1585,6 +1586,7 @@ export class AgentService {
     currentStep: number,
     compressedSummary?: string,
     keptStepNumbers?: Set<number>,
+    respondOnly: boolean = false,
   ): string {
     const parts = [systemPrompt];
 
@@ -1615,10 +1617,13 @@ export class AgentService {
       }
     }
 
-    parts.push(
-      `\n\n## 当前步骤: 第 ${currentStep} 步`,
-      "请将你的 observation、analysis、plan、decision 输出为一个完整的 JSON 对象。",
-    );
+    // respondOnly 模式：不追加 JSON 输出指令，让 LLM 自由输出 Markdown
+    if (!respondOnly) {
+      parts.push(
+        `\n\n## 当前步骤: 第 ${currentStep} 步`,
+        "调用 agent_decide 函数来报告你的 observation、analysis、plan、decision。不要输出原始 JSON 文本。",
+      );
+    }
 
     return parts.join("\n");
   }

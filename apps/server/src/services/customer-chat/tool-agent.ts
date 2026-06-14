@@ -156,6 +156,23 @@ export class ToolAgent implements RouteAgent {
         finalAnswer = accumulatedContent;
       }
 
+      // ── 安全网：检测并清除泄漏的 ReAct JSON ──
+      if (finalAnswer) {
+        const sanitized = sanitizeReActJSON(finalAnswer);
+        if (sanitized === null) {
+          // 检测到无法提取内容的 ReAct JSON，使用兜底文案
+          logger.warn(
+            { finalAnswer: finalAnswer.slice(0, 200) },
+            "ReAct JSON leaked to final answer, using fallback",
+          );
+          finalAnswer =
+            "抱歉，查询未找到结果。请检查您提供的信息是否正确，或联系人工客服获取帮助。";
+          suggestions = ["转接人工客服"];
+        } else {
+          finalAnswer = sanitized;
+        }
+      }
+
       if (!finalAnswer) {
         finalAnswer =
           "抱歉，暂时无法处理您的请求。请尝试重新描述您的问题，或转接人工客服获取帮助。";
@@ -338,6 +355,54 @@ function tryExtractCard(result: string): ContentBlock | null {
     // 不是 JSON → 不是结构化数据，跳过
   }
   return null;
+}
+
+/**
+ * 检测并清理 ReAct Agent 内部 JSON 输出（防止泄漏到用户界面）
+ * 如果检测到原始 ReAct JSON 格式，尝试提取其中的用户回复内容；
+ * 如果无法提取，返回 null 以便调用方使用统一兜底文案。
+ */
+function sanitizeReActJSON(text: string): string | null {
+  const trimmed = text.trim();
+
+  // 检测特征：以 { 开头，且包含 observation/analysis/plan 三个关键字段
+  const looksLikeReActJSON =
+    trimmed.startsWith("{") &&
+    /\b"observation"\s*:/.test(trimmed) &&
+    /\b"analysis"\s*:/.test(trimmed) &&
+    /\b"plan"\s*:/.test(trimmed);
+
+  if (!looksLikeReActJSON) return text; // 正常内容，原样返回
+
+  // 尝试提取 decision.content（用户回复）
+  try {
+    const parsed = JSON.parse(trimmed);
+    const decision = parsed.decision;
+
+    // 情况1：decision 是对象，有 content 字段
+    if (typeof decision === "object" && decision?.content) {
+      return String(decision.content);
+    }
+
+    // 情况2：decision 是 "respond" 字符串 —— LLM 未生成具体回复
+    // 返回 null，调用方使用兜底文案
+    if (typeof decision === "string") {
+      return null;
+    }
+
+    // 情况3：尝试从顶层 content 或 summary 提取
+    if (parsed.content && typeof parsed.content === "string") {
+      return parsed.content;
+    }
+    if (parsed.summary && typeof parsed.summary === "string") {
+      return parsed.summary;
+    }
+
+    return null;
+  } catch {
+    // JSON 解析失败——说明是半成品输出，返回 null
+    return null;
+  }
 }
 
 /**
