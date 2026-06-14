@@ -334,27 +334,67 @@ async function searchKnowledgeBaseExecute(
   }
 
   try {
-    // 动态导入 KnowledgeService（避免循环依赖）
+    // ── Pipeline: Recall → Rerank → Threshold → Return ──
     const { KnowledgeService } = await import("../services/knowledge.js");
     const service = new KnowledgeService();
-    const results = await service.search(query, null, 5);
 
-    if (!results || results.length === 0) {
+    // 1. Recall: 从 Milvus 检索 top-10 候选
+    const rawResults = await service.search(query, null, 10);
+
+    if (!rawResults || rawResults.length === 0) {
       return JSON.stringify({
         query,
         found: false,
-        message: "未找到相关知识库内容，请基于通用知识回答用户。",
+        message: "未找到相关知识库内容。请基于通用知识回答用户，并建议联系人工客服获取准确信息。",
       });
     }
+
+    // 2. Rerank: 去重 + 分数排序
+    const seen = new Set<string>();
+    const deduped: Array<{ content: string; score: number; source: string }> = [];
+    for (const r of rawResults) {
+      const key = r.content.slice(0, 100).trim();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      deduped.push({
+        content: r.content,
+        score: Math.round(r.score * 100) / 100,
+        source: r.docTitle || "知识库",
+      });
+    }
+    // 按分数降序
+    deduped.sort((a, b) => b.score - a.score);
+
+    // 取 top-5
+    const reranked = deduped.slice(0, 5);
+
+    // 3. Threshold: 最高分低于 0.5 → 不返回（避免低质量信息）
+    const topScore = reranked[0]?.score ?? 0;
+    if (topScore < 0.5) {
+      return JSON.stringify({
+        query,
+        found: false,
+        topScore,
+        message: "知识库中未找到高相关度内容。请基于通用知识回答，并告知用户此信息可能需要人工核实。",
+      });
+    }
+
+    // 4. 质量标记
+    const qualityLabel = topScore >= 0.8 ? "high" : topScore >= 0.65 ? "medium" : "low";
 
     return JSON.stringify({
       query,
       found: true,
-      results: results.map((r: { content: string; score: number; docTitle?: string }) => ({
+      quality: qualityLabel,
+      topScore,
+      results: reranked.map((r) => ({
         content: r.content,
-        score: Math.round(r.score * 100) / 100,
-        source: r.docTitle || "知识库",
+        score: r.score,
+        source: r.source,
       })),
+      note: qualityLabel === "low"
+        ? "相关度较低，建议在回复中标注'仅供参考'并建议用户联系人工核实。"
+        : undefined,
     });
   } catch (e) {
     logger.error(e, "search_knowledge_base failed");

@@ -12,7 +12,11 @@ export interface RouterDecision {
   route: RouteName;
   confidence: number; // 0.0 ~ 1.0
   reasoning: string; // 简短分类理由，用于审计/debug
-  suggestedTools?: string[]; // TOOL 路由时推荐的工具名列表
+  /** Intent Classifier 推荐的工具列表（空数组 = 无需工具，直接回复） */
+  tools?: string[];
+  /** 工具执行顺序：parallel（无依赖，可并行）| sequential（按顺序，后一个依赖前一个结果） */
+  execution_order?: "parallel" | "sequential";
+  suggestedTools?: string[]; // 已废弃，用 tools 替代
   escalationReason?: string; // HUMAN 路由时的升级原因
 }
 
@@ -41,6 +45,10 @@ export interface RouteContext {
   withinServiceHours: boolean;
   assistantMsgId: string;
   intent: string;
+  /** Intent Classifier 推荐的工具列表（Agent 可自行决定是否采纳） */
+  toolHints?: string[];
+  /** 推荐的工具执行顺序 */
+  executionHint?: "parallel" | "sequential";
 }
 
 // ── SSE 流事件（与现有 customer-chat SSE 协议兼容） ──

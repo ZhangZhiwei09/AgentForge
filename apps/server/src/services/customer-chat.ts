@@ -278,7 +278,7 @@ export class CustomerChatService {
       "Router classified customer message",
     );
 
-    // ── 4. 构建 RouteContext ──
+    // ── 4. 构建 RouteContext（含 Intent Classifier 的工具推荐） ──
     let context: RouteContext = {
       conversationId: conversation.id,
       sessionId: conversation.sessionId,
@@ -294,6 +294,8 @@ export class CustomerChatService {
       withinServiceHours: withinHours,
       assistantMsgId,
       intent,
+      toolHints: decision.tools,
+      executionHint: decision.execution_order,
     };
 
     // ── 5. KB 预加载（统一 Agent 架构：不再预加载，Agent 按需调用 search_knowledge_base 工具） ──

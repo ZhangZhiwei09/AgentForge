@@ -24,6 +24,8 @@ export class ToolAgent implements RouteAgent {
       withinServiceHours,
       assistantMsgId,
       intent,
+      toolHints,
+      executionHint,
     } = context;
 
     // 发送 meta
@@ -52,8 +54,13 @@ export class ToolAgent implements RouteAgent {
 
       const agentService = new AgentService();
 
-      // 构建客服任务描述（不要求 LLM 输出卡片 fence —— 服务端自动提取）
-      const task = `用户询问：${userMessage}
+      // 构建客服任务描述（含 Intent Classifier 的工具推荐 + 执行策略）
+      const hintsBlock =
+        toolHints && toolHints.length > 0
+          ? `\n\n[系统提示] Intent Classifier 推荐使用以下工具：${toolHints.join("、")}。建议${executionHint === "sequential" ? "按顺序" : "可并行"}执行。你可根据实际情况调整。`
+          : "";
+
+      const task = `用户询问：${userMessage}${hintsBlock}
 
 请使用可用工具帮助用户解决问题。回答要简洁、专业、友好。
 如果工具返回了数据，请直接用自然语言 + Markdown 表格或列表向用户解释结果。
