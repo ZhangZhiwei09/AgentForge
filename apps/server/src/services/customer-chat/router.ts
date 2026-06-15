@@ -1,7 +1,7 @@
 // QueryRouter —— LLM 驱动的客服查询分类器
-// 将用户消息路由到 5 条路径之一：SAFETY | SMALL_TALK | BUSINESS | TOOL | HUMAN
+// 将用户消息路由到 4 条路径之一：SAFETY | SMALL_TALK | TOOL | HUMAN
 // 使用 chatSync + jsonMode 做结构化分类（~60 token 输出）
-// 降级策略：LLM 失败或低置信度 → 回退到 regex IntentDetector → BUSINESS
+// 降级策略：LLM 失败或低置信度 → 回退到 regex IntentDetector → TOOL
 
 import { z } from "zod";
 import { getProvider, resolveModel } from "../../providers/registry.js";
@@ -75,8 +75,8 @@ const INTENT_TO_ROUTE: Record<string, RouteName> = {
 };
 
 // ── 关键词快速路由（零延迟，不走 LLM） ──
-// 处理高置信度模式：SAFETY 扫描 + HUMAN/TOOL/BUSINESS 快速路由
-// 这些规则弥补 LLM Router 的分类不稳定问题
+// 处理高置信度模式：SAFETY 扫描 + HUMAN 快速路由
+// SAFETY 和 HUMAN 走关键词规则，其余交给 Router LLM 统一分类
 
 export const SAFETY_KEYWORDS = [
   // ── 原有规则：英文 prompt injection ──
@@ -169,9 +169,9 @@ export class QueryRouter {
    * 对用户消息进行分类，返回路由决策。
    *
    * 流程：
-   * 1. 关键词快速路由（SAFETY/HUMAN/TOOL/BUSINESS 高置信度模式）→ 零延迟
+   * 1. 关键词快速路由（SAFETY/HUMAN 高置信度模式）→ 零延迟
    * 2. LLM 调用（廉价模型 + jsonMode）→ 结构化分类
-   * 3. 失败/低置信度 → 回退 regex IntentDetector → BUSINESS
+   * 3. 失败/低置信度 → 回退 regex IntentDetector → TOOL
    */
   async classify(
     message: string,

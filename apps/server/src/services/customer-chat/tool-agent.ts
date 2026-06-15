@@ -9,7 +9,12 @@ import { logger } from "@agentforge/logger";
 import {
   csReActIterations,
   csToolCallsTotal,
+  csCitationCoverage,
 } from "../../observability/metrics.js";
+import { AgentService } from "../agent.js";
+import type { CitationReport } from "./citation-verifier.js";
+import { getCitationVerifier } from "./citation-verifier.js";
+import { validateBusinessResponse } from "./validation.js";
 
 // ── 默认客服工具集（Router 未推荐工具时使用） ──
 
@@ -21,6 +26,10 @@ const DEFAULT_CS_TOOLS = [
   "check_shipping_status",
   "get_current_time",
 ];
+
+// ── 硬编码最终兜底文案（与 post-processing 优先级链最后一层保持一致） ──
+const HARDCODED_FALLBACK =
+  "抱歉，暂时无法处理您的请求，请稍后再试或联系人工客服。";
 
 // ── Agent 业务阶段（由业务事件驱动，不由 token 驱动） ──
 //
@@ -92,6 +101,8 @@ export class ToolAgent implements RouteAgent {
     let suggestions: string[] = [];
     const contentBlocks: ContentBlock[] = [];
     let accumulatedContent = "";
+    const collectedKBChunks: string[] = []; // 从 search_knowledge_base 工具结果中收集，供 Citation 校验
+    let citationReport: CitationReport | null = null; // L4 引证校验报告（try 块内赋值，done 事件中透传）
 
     // ── 解耦的状态机 ──
     let phase: AgentPhase = "planning";
@@ -104,9 +115,6 @@ export class ToolAgent implements RouteAgent {
     let iterationCount = 0; // ReAct 迭代计数（用于指标埋点）
 
     try {
-      // 动态导入 AgentService（避免循环依赖）
-      const { AgentService } = await import("../agent.js");
-
       const agentService = new AgentService();
 
       // ── 工具列表：Router 推荐优先，为空时使用默认全量工具集 ──
@@ -199,6 +207,11 @@ export class ToolAgent implements RouteAgent {
               if (card) {
                 contentBlocks.push(card);
               }
+              // 从 search_knowledge_base 结果中收集 KB chunks 用于 Citation 引证校验
+              const kbChunks = extractKBChunks(event.result as string);
+              if (kbChunks.length > 0) {
+                collectedKBChunks.push(...kbChunks);
+              }
             }
             break;
 
@@ -233,8 +246,7 @@ export class ToolAgent implements RouteAgent {
             );
             // fallbackContent 不覆盖已有的值
             if (!envelope.fallbackContent) {
-              envelope.fallbackContent =
-                "抱歉，暂时无法处理您的请求，请稍后再试或联系人工客服。";
+              envelope.fallbackContent = HARDCODED_FALLBACK;
             }
             break;
 
@@ -271,11 +283,42 @@ export class ToolAgent implements RouteAgent {
           finalAnswer = sanitized;
         }
       }
+
+      // ── Citation 引证校验（L4：逐句语义对齐，检测 LLM 幻觉） ──
+      if (finalAnswer && collectedKBChunks.length > 0) {
+        try {
+          const verifier = getCitationVerifier();
+          citationReport = await verifier.verify(
+            finalAnswer,
+            collectedKBChunks,
+          );
+          csCitationCoverage.observe(
+            { level: citationReport.level },
+            citationReport.coverageRate,
+          );
+        } catch (e) {
+          logger.warn(e, "Citation verification skipped");
+        }
+      }
+
+      // ── 业务回复校验（5 层管线，L4 使用 citationReport） ──
+      if (finalAnswer) {
+        const validationResult = validateBusinessResponse(
+          finalAnswer,
+          collectedKBChunks,
+          citationReport ?? undefined,
+        );
+        if (!validationResult.valid) {
+          logger.warn(
+            { errors: validationResult.errors, layer: validationResult.layer },
+            "Business response validation failed",
+          );
+        }
+      }
     } catch (e) {
       logger.error(e, "ToolAgent execution failed");
       if (!envelope.fallbackContent) {
-        envelope.fallbackContent =
-          "抱歉，系统暂时无法处理您的请求，请稍后再试或联系人工客服。";
+        envelope.fallbackContent = HARDCODED_FALLBACK;
       }
     }
 
@@ -290,12 +333,19 @@ export class ToolAgent implements RouteAgent {
 
     // ── Post-processing：唯一补偿出口 ──
     // 判断依据：最终回复是否已完成交付（不依赖 phase，不依赖 flowState）
+    let fallbackUsed = false;
     if (!outputState.responseCompleted) {
-      const content =
+      // 注意：sanitizeReActJSON 可能返回空字符串（非 null），
+      // 所以最后一层用 || 而非 ?? 来同时捕获 null 和空字符串
+      const resolved =
         envelope.finalContent ??
         envelope.fallbackContent ??
-        sanitizeReActJSON(accumulatedContent) ??
-        "抱歉，暂时无法处理您的请求，请稍后再试或联系人工客服。";
+        sanitizeReActJSON(accumulatedContent);
+      const content = resolved || HARDCODED_FALLBACK;
+
+      // fallbackUsed 必须在 content 解析之后计算：
+      // sanitizeReActJSON 可能成功提取有效内容（即使两个 envelope 字段都为空）
+      fallbackUsed = content === HARDCODED_FALLBACK;
 
       for (const char of content) {
         yield {
@@ -313,10 +363,26 @@ export class ToolAgent implements RouteAgent {
       type: "done",
       message_id: assistantMsgId,
       usage: {},
-      suggestions: suggestions.length > 0 ? suggestions : undefined,
+      suggestions:
+        suggestions.length > 0
+          ? suggestions
+          : fallbackUsed
+            ? ["转接人工客服"]
+            : undefined,
       memory: { injected: 0, extracted: 0 },
       validated: true,
+      fallback_used: fallbackUsed || undefined,
       route: "TOOL",
+      citation: citationReport
+        ? {
+            level: citationReport.level,
+            coverageRate: citationReport.coverageRate,
+            avgScore: citationReport.avgScore,
+            uncitedCount: citationReport.sentences.filter(
+              (s) => s.isFactual && s.status === "uncited",
+            ).length,
+          }
+        : undefined,
     };
   }
 }
@@ -442,7 +508,7 @@ function tryExtractCard(result: string): ContentBlock | null {
  * 如果检测到原始 ReAct JSON 格式，尝试提取其中的用户回复内容；
  * 如果无法提取，返回 null 以便调用方使用统一兜底文案。
  */
-function sanitizeReActJSON(text: string): string | null {
+export function sanitizeReActJSON(text: string): string | null {
   const trimmed = text.trim();
 
   // 检测特征：以 { 开头，且包含 observation/analysis/plan 三个关键 JSON 字段
@@ -482,5 +548,26 @@ function sanitizeReActJSON(text: string): string | null {
   } catch {
     // JSON 解析失败——说明是半成品输出，返回 null
     return null;
+  }
+}
+
+/**
+ * 从 search_knowledge_base 工具返回的 JSON 中提取 KB chunk 文本。
+ * 用于 CitationVerifier 引证校验（替代已被移除的 KB 预加载）。
+ */
+function extractKBChunks(toolResult: string): string[] {
+  // 轻量检测：仅 search_knowledge_base 工具返回包含 "results" 数组
+  if (!toolResult.includes('"results"') || !toolResult.includes('"found"')) {
+    return [];
+  }
+  try {
+    const data = JSON.parse(toolResult.trim());
+    if (!data.found || !Array.isArray(data.results)) return [];
+    return data.results
+      .filter((r: unknown) => typeof r === "object" && r !== null)
+      .map((r: Record<string, unknown>) => String(r.content ?? ""))
+      .filter((s: string) => s.length > 0);
+  } catch {
+    return [];
   }
 }

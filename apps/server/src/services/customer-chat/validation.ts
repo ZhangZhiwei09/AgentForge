@@ -54,34 +54,42 @@ export function validateBusinessResponse(
   knowledgeChunks: string[],
   citationReport?: CitationReport,
 ): ValidationResult {
-  // Layer 1: JSON 可解析
+  // ── 尝试 JSON 解析（兼容旧 BusinessAgent 格式） ──
+  // 新的 ToolAgent 输出自然语言文本而非 JSON，此时跳过 L1/L2 直接进 L3/L4/L5
   let parsed: unknown;
+  let isJSON = false;
   try {
     parsed = JSON.parse(extractJSONFromLLMResponse(rawText));
+    isJSON = true;
   } catch {
-    return { valid: false, errors: ["Layer1: JSON 不可解析"], layer: 1 };
+    // 非 JSON 格式（自然语言文本）→ 跳过 L1/L2，以 rawText 作为校验目标
   }
 
-  // Layer 2: Schema 校验
-  const schemaResult = ChatResponseSchema.safeParse(parsed);
-  if (!schemaResult.success) {
-    const issues = schemaResult.error.issues.map(
-      (i) => `${i.path.join(".")}: ${i.message}`,
-    );
-    return {
-      valid: false,
-      errors: [`Layer2: Schema校验失败 - ${issues.join("; ")}`],
-      layer: 2,
-    };
+  // Layer 1-2: JSON 格式校验（仅 JSON 输入）
+  if (isJSON) {
+    const schemaResult = ChatResponseSchema.safeParse(parsed);
+    if (!schemaResult.success) {
+      const issues = schemaResult.error.issues.map(
+        (i) => `${i.path.join(".")}: ${i.message}`,
+      );
+      return {
+        valid: false,
+        errors: [`Layer2: Schema校验失败 - ${issues.join("; ")}`],
+        layer: 2,
+      };
+    }
   }
 
-  const data = schemaResult.data;
+  // 校验目标文本：JSON 格式用 answer 字段，自然语言直接用原文本
+  const answerText = isJSON
+    ? (parsed as { answer: string }).answer
+    : rawText;
 
-  // Layer 3: 禁止行为扫描
+  // Layer 3: 禁止行为扫描（JSON 和自然语言均适用）
   const forbiddenHits: string[] = [];
   for (const { pattern, label } of FORBIDDEN_PATTERNS) {
     pattern.lastIndex = 0;
-    if (pattern.test(data.answer)) {
+    if (pattern.test(answerText)) {
       forbiddenHits.push(label);
     }
   }
@@ -98,7 +106,7 @@ export function validateBusinessResponse(
   // 降级时回退到旧版关键词重叠检测
   const layer4Errors: string[] = [];
 
-  if (knowledgeChunks.length > 0 && data.answer !== SORRY_TEMPLATE) {
+  if (knowledgeChunks.length > 0 && answerText !== SORRY_TEMPLATE) {
     if (citationReport) {
       // ── 新版 Citation-based 语义对齐 ──
       const uncitedFactuals = citationReport.sentences.filter(
@@ -120,7 +128,7 @@ export function validateBusinessResponse(
       }
     } else {
       // ── 旧版关键词回退（CitationVerifier 不可用时的保底） ──
-      const answerLower = data.answer.toLowerCase();
+      const answerLower = answerText.toLowerCase();
       const hitCount = knowledgeChunks.filter((chunk) => {
         const keywords = chunk.match(/[一-鿿\w]{3,}/g) || [];
         return keywords.some((kw) => answerLower.includes(kw.toLowerCase()));
@@ -136,14 +144,14 @@ export function validateBusinessResponse(
   }
 
   // Layer 5: KB 为空但回复包含业务事实性内容 → 疑似编造
-  if (knowledgeChunks.length === 0 && data.answer !== SORRY_TEMPLATE) {
+  if (knowledgeChunks.length === 0 && answerText !== SORRY_TEMPLATE) {
     const factualIndicators = [
       /[0-9]+\s*(天|个工作日|小时|分钟)/,
       /[0-9]+\s*(元|块|折|%|折)/,
       /(退货|退款|换货|物流|快递|发货|运费)/,
       /(会员|积分|等级|优惠券|折扣)/,
     ];
-    const hasFactualClaims = factualIndicators.some((p) => p.test(data.answer));
+    const hasFactualClaims = factualIndicators.some((p) => p.test(answerText));
     if (hasFactualClaims) {
       return {
         valid: false,

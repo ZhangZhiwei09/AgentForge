@@ -175,8 +175,11 @@ function keywordCitationScore(sentence: string, chunkText: string): number {
 // ═══════════════════════════════════════════════════════
 
 export class CitationVerifier {
+  private static readonly MAX_CACHE_SIZE = 1000;
+
   private embeddingProvider: EmbeddingProvider | null = null;
   private chunkEmbeddingCache: Map<string, number[]> = new Map();
+  private cacheInsertionOrder: string[] = []; // LRU 淘汰队列
 
   constructor() {
     try {
@@ -431,6 +434,7 @@ export class CitationVerifier {
       const cached = this.chunkEmbeddingCache.get(chunks[i]);
       if (cached) {
         results[i] = cached;
+        this.addToCache(chunks[i], cached); // promote on read (true LRU)
       } else {
         toEmbed.push({ idx: i, text: chunks[i] });
       }
@@ -445,7 +449,7 @@ export class CitationVerifier {
         for (let j = 0; j < toEmbed.length; j++) {
           const { idx, text } = toEmbed[j];
           results[idx] = embeddings[j];
-          this.chunkEmbeddingCache.set(text, embeddings[j]);
+          this.addToCache(text, embeddings[j]);
         }
       } catch (e) {
         logger.warn(e, "CitationVerifier: batch embedding failed");
@@ -453,7 +457,7 @@ export class CitationVerifier {
         for (const { idx, text } of toEmbed) {
           try {
             results[idx] = await this.embeddingProvider!.embedSingle(text);
-            this.chunkEmbeddingCache.set(text, results[idx]);
+            this.addToCache(text, results[idx]);
           } catch {
             results[idx] = new Array(this.embeddingProvider!.dimension).fill(0);
           }
@@ -489,11 +493,32 @@ export class CitationVerifier {
   /** 清除 embedding 缓存（KB 更新后调用） */
   clearCache(): void {
     this.chunkEmbeddingCache.clear();
+    this.cacheInsertionOrder = [];
   }
 
   /** 获取当前缓存大小 */
   get cacheSize(): number {
     return this.chunkEmbeddingCache.size;
+  }
+
+  /** LRU 缓存写入（防 OOM：超过上限时淘汰最早 entry） */
+  private addToCache(key: string, embedding: number[]): void {
+    // 如果 key 已存在，先从淘汰队列移除（后续重新追加到队尾）
+    const existingIdx = this.cacheInsertionOrder.indexOf(key);
+    if (existingIdx !== -1) {
+      this.cacheInsertionOrder.splice(existingIdx, 1);
+    }
+
+    // LRU 淘汰：超过上限时移除最早的 entry
+    while (this.cacheInsertionOrder.length >= CitationVerifier.MAX_CACHE_SIZE) {
+      const oldest = this.cacheInsertionOrder.shift();
+      if (oldest !== undefined) {
+        this.chunkEmbeddingCache.delete(oldest);
+      }
+    }
+
+    this.chunkEmbeddingCache.set(key, embedding);
+    this.cacheInsertionOrder.push(key);
   }
 }
 

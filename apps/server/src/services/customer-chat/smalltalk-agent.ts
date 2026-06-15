@@ -75,6 +75,7 @@ export class SmallTalkAgent implements RouteAgent {
     // LLM 调用
     let answer: string;
     let suggestions: string[] = [];
+    let fallbackUsed = false;
 
     try {
       const provider = getProvider(providerName);
@@ -96,10 +97,12 @@ export class SmallTalkAgent implements RouteAgent {
       } else {
         // JSON 解析失败 → 使用原始文本
         answer = result.content.trim() || "您好！有什么可以帮助您的吗？";
+        fallbackUsed = answer === "您好！有什么可以帮助您的吗？"; // 空内容兜底
       }
     } catch (e) {
       logger.warn(e, "SmallTalkAgent LLM call failed, using fallback");
       answer = "您好！我是 AgentForge 智能客服助手，有什么可以帮助您的吗？";
+      fallbackUsed = true;
     }
 
     // 逐字符流式输出
@@ -107,13 +110,14 @@ export class SmallTalkAgent implements RouteAgent {
 
     // 发送 done
     yield {
-      type: "done",
+      type: "done" as const,
       message_id: assistantMsgId,
       usage: {},
       suggestions: suggestions.length > 0 ? suggestions : undefined,
       memory: { injected: 0, extracted: 0 },
       validated: true,
-      route: "SMALL_TALK",
+      fallback_used: fallbackUsed || undefined,
+      route: "SMALL_TALK" as const,
     };
   }
 

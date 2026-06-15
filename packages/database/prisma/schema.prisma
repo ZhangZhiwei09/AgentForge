@@ -82,6 +82,7 @@ model Conversation {
   @@index([sessionId], map: "ix_conversations_session_id")
   @@index([userId], map: "ix_conversations_user_id")
   @@index([userId, updatedAt], map: "ix_conversations_user_updated")
+  @@index([type, createdAt], map: "ix_conversations_type_created")
   @@map("conversations")
 }
 
@@ -237,6 +238,8 @@ model SatisfactionRating {
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
 
   @@index([conversationId], map: "ix_satisfaction_ratings_conversation_id")
+  @@index([createdAt], map: "ix_satisfaction_ratings_created_at")
+  @@index([rating], map: "ix_satisfaction_ratings_rating")
   @@map("satisfaction_ratings")
 }
 

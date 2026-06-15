@@ -11,6 +11,7 @@
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
 import { getOrderService } from "../services/customer-chat/order-service.js";
+import { KnowledgeService } from "../services/knowledge.js";
 import { logger } from "@agentforge/logger";
 
 // ═══════════════════════════════════════════════════════
@@ -335,7 +336,6 @@ async function searchKnowledgeBaseExecute(
 
   try {
     // ── Pipeline: Recall → Rerank → Threshold → Return ──
-    const { KnowledgeService } = await import("../services/knowledge.js");
     const service = new KnowledgeService();
 
     // 1. Recall: 从 Milvus 检索 top-10 候选

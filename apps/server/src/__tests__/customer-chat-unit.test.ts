@@ -9,56 +9,7 @@ import {
   SAFETY_KEYWORDS,
   HUMAN_KEYWORDS,
 } from "../services/customer-chat/router.js";
-
-// ═══════════════════════════════════════════════════════
-// 辅助函数（从 tool-agent.ts 内联，避免循环依赖）
-// ═══════════════════════════════════════════════════════
-
-/**
- * 检测并清理 ReAct Agent 内部 JSON 输出（防止泄漏到用户界面）
- * 从 tool-agent.ts 复制，确保行为一致
- */
-function sanitizeReActJSON(text: string): string | null {
-  const trimmed = text.trim();
-
-  // 检测特征：以 { 开头，且包含 observation/analysis/plan 三个关键 JSON 字段
-  const looksLikeReActJSON =
-    trimmed.startsWith("{") &&
-    /"observation"\s*:/.test(trimmed) &&
-    /"analysis"\s*:/.test(trimmed) &&
-    /"plan"\s*:/.test(trimmed);
-
-  if (!looksLikeReActJSON) return text; // 正常内容，原样返回
-
-  // 尝试提取 decision.content（用户回复）
-  try {
-    const parsed = JSON.parse(trimmed);
-    const decision = parsed.decision;
-
-    // 情况1：decision 是对象，有 content 字段
-    if (typeof decision === "object" && decision?.content) {
-      return String(decision.content);
-    }
-
-    // 情况2：decision 是 "respond" 字符串 —— LLM 未生成具体回复
-    if (typeof decision === "string") {
-      return null;
-    }
-
-    // 情况3：尝试从顶层 content 或 summary 提取
-    if (parsed.content && typeof parsed.content === "string") {
-      return parsed.content;
-    }
-    if (parsed.summary && typeof parsed.summary === "string") {
-      return parsed.summary;
-    }
-
-    return null;
-  } catch {
-    // JSON 解析失败——说明是半成品输出，返回 null
-    return null;
-  }
-}
+import { sanitizeReActJSON } from "../services/customer-chat/tool-agent.js";
 
 // ═══════════════════════════════════════════════════════
 // 1. SAFETY_KEYWORDS 扩展覆盖测试
