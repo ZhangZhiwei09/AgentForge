@@ -3,7 +3,7 @@
 // 编排器职责：
 //   1. Session 管理（获取/创建会话、加载历史）
 //   2. 传统对话快速通道（正则零延迟匹配问候/感谢/道别）
-//   3. QueryRouter 分类（LLM 驱动 → SAFETY|SMALL_TALK|BUSINESS|TOOL|HUMAN）
+//   3. QueryRouter 分类（LLM 驱动 → SAFETY|SMALL_TALK|TOOL|HUMAN）
 //   4. 分发到对应 Agent 执行
 //   5. 后处理（保存消息、提取记忆）
 //
@@ -16,6 +16,7 @@ import { logger } from "@agentforge/logger";
 import {
   csRouteClassificationTotal,
   csRouteConfidence,
+  csRequestDurationMs,
 } from "../observability/metrics.js";
 import { intentDetector } from "./intent-detector.js";
 import { MemoryEngine } from "./memory-engine.js";
@@ -24,10 +25,7 @@ import { QueryRouter } from "./customer-chat/router.js";
 import { SafetyAgent } from "./customer-chat/safety-agent.js";
 import { SmallTalkAgent } from "./customer-chat/smalltalk-agent.js";
 
-import {
-  fetchKnowledge,
-  injectMemories,
-} from "./customer-chat/business-agent.js";
+import { injectMemories } from "./customer-chat/business-agent.js";
 import { ToolAgent } from "./customer-chat/tool-agent.js";
 import { HumanAgent } from "./customer-chat/human-agent.js";
 
@@ -123,7 +121,15 @@ export class CustomerChatService {
 
   // 会话级并发控制：同一 sessionId 的请求串行化，防止竞态条件
   // 使用 Promise 链式串行化而非阻塞式互斥锁，避免饿死 Node 事件循环
+  //
+  // 内存安全：Map 上限 MAX_SESSION_LOCKS 条，超出时淘汰最旧的 entry（LRU 语义）。
+  // 正常路径下 finally 块会清理，上限仅在异常泄漏时触发（如客户端断连后锁未释放）。
+  //
+  // 超时保护：等待前一个同 session 请求超过 SESSION_LOCK_TIMEOUT_MS 时，
+  // 自动清理陈旧锁并继续执行，防止一个卡住的请求永久阻塞同 session 的所有后续请求。
   private static sessionLocks = new Map<string, Promise<void>>();
+  private static readonly MAX_SESSION_LOCKS = 1000;
+  private static readonly SESSION_LOCK_TIMEOUT_MS = 30_000;
 
   constructor(modelId?: string | null) {
     this.modelId = modelId || null;
@@ -132,6 +138,14 @@ export class CustomerChatService {
     this.smallTalkAgent = new SmallTalkAgent();
     this.toolAgent = new ToolAgent();
     this.humanAgent = new HumanAgent();
+
+    // 强类型路由注册表：确保每个 RouteName 都有对应 Agent 实现
+    this.agentRegistry = {
+      SAFETY: this.safetyAgent,
+      SMALL_TALK: this.smallTalkAgent,
+      TOOL: this.toolAgent,
+      HUMAN: this.humanAgent,
+    };
   }
 
   // ── 会话管理 ──
@@ -180,17 +194,18 @@ export class CustomerChatService {
   // SAFETY / HUMAN: 规则命中直接处理
   // SMALL_TALK: 简单 LLM 响应
   // TOOL: 统一 Agent，有全部工具（RAG + 订单 + 物流 + 退货 + 工单）
+  //
+  // 使用 Record 强类型注册表替代 switch，确保每个 RouteName 都有对应的 Agent
+  private readonly agentRegistry: Record<RouteName, RouteAgent>;
+
   private resolveAgent(route: RouteName): RouteAgent {
-    switch (route) {
-      case "SAFETY":
-        return this.safetyAgent;
-      case "SMALL_TALK":
-        return this.smallTalkAgent;
-      case "TOOL":
-        return this.toolAgent;
-      case "HUMAN":
-        return this.humanAgent;
+    const agent = this.agentRegistry[route];
+    if (!agent) {
+      // 防御性编程：如果 RouteName 扩展了新值但忘记注册，这里会明确报错
+      // 而不是静默返回 undefined 导致 NPE
+      throw new Error(`[CustomerChatService] 未注册的 RouteAgent: ${route}`);
     }
+    return agent;
   }
 
   // ═══════════════════════════════════════════════════════
@@ -207,14 +222,55 @@ export class CustomerChatService {
       CustomerChatService.sessionLocks.get(lockKey) ?? Promise.resolve();
 
     // 创建当前请求的完成信号（在 finally 中 resolve）
-    let releaseLock: () => void;
+    let releaseLock: () => void = () => {};
     const currentLock = new Promise<void>((resolve) => {
       releaseLock = resolve;
     });
+
+    // 防御性淘汰：Map 超过上限时逐出最旧的 entry（防止异常泄漏导致 OOM）
+    if (
+      CustomerChatService.sessionLocks.size >=
+      CustomerChatService.MAX_SESSION_LOCKS
+    ) {
+      const firstKey = CustomerChatService.sessionLocks.keys().next().value;
+      if (firstKey !== undefined) {
+        CustomerChatService.sessionLocks.delete(firstKey);
+        logger.warn(
+          {
+            evictedKey: firstKey,
+            mapSize: CustomerChatService.sessionLocks.size,
+          },
+          "Session lock map exceeded limit, evicted oldest entry",
+        );
+      }
+    }
     CustomerChatService.sessionLocks.set(lockKey, currentLock);
 
-    // 等待前一个同 session 的请求完成
-    await previousLock;
+    // 等待前一个同 session 的请求完成（带超时保护）
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+    const lockResult = await Promise.race([
+      previousLock.then(() => "resolved" as const),
+      new Promise<"timeout">((resolve) => {
+        timeoutTimer = setTimeout(
+          () => resolve("timeout"),
+          CustomerChatService.SESSION_LOCK_TIMEOUT_MS,
+        );
+      }),
+    ]);
+    // 及时清理计时器，防止高并发下 orphaned timer 积累
+    if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
+
+    if (lockResult === "timeout") {
+      logger.warn(
+        {
+          lockKey,
+          timeoutMs: CustomerChatService.SESSION_LOCK_TIMEOUT_MS,
+        },
+        "Session lock timed out — proceeding with stale lock",
+      );
+      // 不删除 currentLock：后续请求仍需排队等待当前请求的 finally resolve
+      // 删除会导致下一个请求发现空 Map 而直接并发执行
+    }
 
     try {
       // ── 1. Session 层 ──
@@ -266,6 +322,8 @@ export class CustomerChatService {
       // ── 2. 传统对话快速通道（零延迟） ──
       const convMatch = this.matchConversational(userMessage);
       if (convMatch) {
+        const convStartTime = Date.now();
+
         yield* this.streamConversationalMatch(
           assistantMsgId,
           conversation.sessionId,
@@ -274,6 +332,16 @@ export class CustomerChatService {
           withinHours,
           intent,
           convMatch,
+        );
+
+        // TTFT/TTLT：对话快速通道虽近瞬时，但需记录以保持指标覆盖完整
+        csRequestDurationMs.observe(
+          { route: "SMALL_TALK", phase: "ttft" },
+          Date.now() - convStartTime,
+        );
+        csRequestDurationMs.observe(
+          { route: "SMALL_TALK", phase: "ttlt" },
+          Date.now() - convStartTime,
         );
 
         // 保存助手消息
@@ -348,9 +416,26 @@ export class CustomerChatService {
       const agent = this.resolveAgent(decision.route);
       let streamedAnswer = "";
 
+      const startTime = Date.now();
+      let firstTokenRecorded = false;
+
       for await (const event of agent.execute(context)) {
+        // TTFT：首 token 事件到达时记录（meta 事件在 Agent 启动时即发送，不代表实际响应就绪）
+        if (!firstTokenRecorded && event.type === "token") {
+          firstTokenRecorded = true;
+          csRequestDurationMs.observe(
+            { route: decision.route, phase: "ttft" },
+            Date.now() - startTime,
+          );
+        }
         if (event.type === "token") {
           streamedAnswer += event.content;
+        }
+        if (event.type === "done") {
+          csRequestDurationMs.observe(
+            { route: decision.route, phase: "ttlt" },
+            Date.now() - startTime,
+          );
         }
         yield event;
       }
@@ -368,38 +453,40 @@ export class CustomerChatService {
         });
       }
 
-      // ── 8. 提取记忆 ──
+      // ── 8. 提取记忆（fire-and-forget，不阻塞 generator return 和锁释放） ──
       if (conversation.sessionId && streamedAnswer) {
-        try {
-          const engine = new MemoryEngine();
-          const allMessages = [
-            ...historyMessages.map((m) => ({
-              role: m.role,
-              content: m.content ?? "",
-            })),
-            { role: "user" as const, content: userMessage },
-            { role: "assistant" as const, content: streamedAnswer },
-          ];
-          const extracted = await engine.extractAndStore(
+        const allMessages = [
+          ...historyMessages.map((m) => ({
+            role: m.role,
+            content: m.content ?? "",
+          })),
+          { role: "user" as const, content: userMessage },
+          { role: "assistant" as const, content: streamedAnswer },
+        ];
+        // 异步执行，不 await — 避免 1-3s 延迟阻塞锁释放
+        new MemoryEngine()
+          .extractAndStore(
             allMessages,
             CUSTOMER_USER_ID,
             conversation.id,
             providerName,
             conversation.sessionId,
-          );
-          if (extracted.length > 0) {
-            logger.info(
-              { count: extracted.length, sessionId: conversation.sessionId },
-              "Customer memories extracted",
-            );
-          }
-        } catch (e) {
-          logger.warn(e, "Customer memory extraction failed");
-        }
+          )
+          .then((extracted) => {
+            if (extracted.length > 0) {
+              logger.info(
+                { count: extracted.length, sessionId: conversation.sessionId },
+                "Customer memories extracted",
+              );
+            }
+          })
+          .catch((e) => {
+            logger.warn(e, "Customer memory extraction failed");
+          });
       }
     } finally {
       // 释放会话锁：允许下一个同 sessionId 的请求进入
-      releaseLock!();
+      releaseLock();
       if (CustomerChatService.sessionLocks.get(lockKey) === currentLock) {
         CustomerChatService.sessionLocks.delete(lockKey);
       }
@@ -448,4 +535,15 @@ export class CustomerChatService {
       conversational: true,
     };
   }
+}
+
+// ── 单例工厂（复用实例，避免每个请求创建新的 Agent/Service 对象） ──
+
+let _defaultService: CustomerChatService | null = null;
+
+export function getCustomerChatService(): CustomerChatService {
+  if (!_defaultService) {
+    _defaultService = new CustomerChatService();
+  }
+  return _defaultService;
 }

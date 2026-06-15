@@ -4,6 +4,7 @@
 
 import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
 import { streamTokens } from "./types.js";
+import { logger } from "@agentforge/logger";
 
 const SAFETY_REJECT_MESSAGE =
   "抱歉，您的消息包含不安全的请求内容，无法处理。如有实际业务问题，欢迎重新描述。";
@@ -41,7 +42,6 @@ export class SafetyAgent implements RouteAgent {
     };
 
     // 日志记录（安全事件审计）
-    const { logger } = await import("@agentforge/logger");
     logger.warn(
       {
         sessionId: context.sessionId,

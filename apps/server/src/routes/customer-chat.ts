@@ -4,7 +4,7 @@ import { streamSSE } from "hono/streaming";
 import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { randomUUID } from "crypto";
-import { CustomerChatService } from "../services/customer-chat.js";
+import { getCustomerChatService } from "../services/customer-chat.js";
 import { IntentDetector } from "../services/intent-detector.js";
 import { prisma } from "../db.js";
 import { createHono } from "../lib/hono.js";
@@ -23,7 +23,7 @@ customerChatRoutes.post(
   zValidator("json", customerChatRequestSchema),
   async (c) => {
     const { session_id, message } = c.req.valid("json");
-    const service = new CustomerChatService();
+    const service = getCustomerChatService();
 
     return streamSSE(c, async (stream) => {
       try {

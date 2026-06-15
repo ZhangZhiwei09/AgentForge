@@ -81,6 +81,13 @@ export type RouteStreamEvent =
       fallback_used?: boolean;
       route?: RouteName;
       conversational?: boolean;
+      /** Citation 引证校验结果（L4 语义对齐层） */
+      citation?: {
+        level: string;
+        coverageRate: number;
+        avgScore: number;
+        uncitedCount: number;
+      };
     }
   | {
       type: "content_block";
