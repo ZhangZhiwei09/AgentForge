@@ -17,7 +17,7 @@ const {
   mockKnowledgeSearch: vi.fn<() => Promise<Array<Record<string, unknown>>>>(
     async () => [],
   ),
-  mockToolExecute: vi.fn(async () => "tool result"),
+  mockToolExecute: vi.fn(async () => ({ status: "success" as const, output: "tool result" })),
 }));
 
 // ---- Mock all external dependencies ----

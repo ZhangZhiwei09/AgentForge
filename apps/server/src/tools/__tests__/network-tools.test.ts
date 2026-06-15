@@ -38,7 +38,7 @@ describe("web_fetch tool", () => {
     } as unknown as Response);
 
     const result = await webFetchTool.execute({ url: "https://example.com" }, testCtx);
-    const parsed = JSON.parse(result.output);
+    const parsed = JSON.parse(executionResultToContent(result));
 
     expect(result.status).toBe("success");
     expect(parsed.url).toBe("https://example.com");
@@ -62,8 +62,8 @@ describe("web_fetch tool", () => {
       url: "https://example.com",
       max_chars: 500,
     }, testCtx);
-    // For partial results, parse .output directly (executionResultToContent adds note prefix)
-    const parsed = JSON.parse(result.output);
+    // For partial results, parse output directly (executionResultToContent adds note prefix)
+    const parsed = JSON.parse((result as { output: string }).output);
 
     expect(result.status).toBe("partial");
     expect(parsed.content.length).toBeLessThanOrEqual(500);
@@ -113,7 +113,7 @@ describe("web_fetch tool", () => {
     } as unknown as Response);
 
     const result = await webFetchTool.execute({ url: "https://example.com" }, testCtx);
-    const parsed = JSON.parse(result.output);
+    const parsed = JSON.parse(executionResultToContent(result));
 
     // Default is 10000, content is shorter
     expect(result.status).toBe("success");

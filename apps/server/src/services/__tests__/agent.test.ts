@@ -10,7 +10,7 @@ const {
   mockTruncateHistory,
 } = vi.hoisted(() => ({
   mockAgentStreamChat: vi.fn(),
-  mockToolExecute: vi.fn(async () => "tool result"),
+  mockToolExecute: vi.fn(async () => ({ status: "success" as const, output: "tool result" })),
   mockToolListNames: vi.fn(() => ["calculator", "web_search"]),
   mockToolGetDefinitions: vi.fn(() => []),
   mockTruncateHistory: vi.fn((msgs: Array<unknown>) => msgs),
