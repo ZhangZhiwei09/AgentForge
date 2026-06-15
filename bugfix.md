@@ -11,6 +11,7 @@
 **影响**: 无法检测 LLM 编造事实（幻觉），引证质量保障形同虚设。
 
 **修复文件**:
+
 - `apps/server/src/services/customer-chat.ts`
 - `apps/server/src/services/customer-chat/tool-agent.ts`
 
@@ -235,13 +236,13 @@ export const customerServiceTools: RegisteredTool[] = [
     definition: searchKnowledgeBaseDef,
     execute: searchKnowledgeBaseExecute,
     // ...
-    parallelizable: true,  // ← 改为 true：KB 搜索无副作用，可并行
+    parallelizable: true, // ← 改为 true：KB 搜索无副作用，可并行
   },
   {
     definition: lookupOrderDef,
     execute: lookupOrderExecute,
     // ...
-    parallelizable: true,  // ← 改为 true：只读查询，无依赖
+    parallelizable: true, // ← 改为 true：只读查询，无依赖
   },
   {
     definition: createSupportTicketDef,
@@ -253,13 +254,13 @@ export const customerServiceTools: RegisteredTool[] = [
     definition: checkReturnPolicyDef,
     execute: checkReturnPolicyExecute,
     // ...
-    parallelizable: true,  // ← 改为 true：只读查询
+    parallelizable: true, // ← 改为 true：只读查询
   },
   {
     definition: checkShippingStatusDef,
     execute: checkShippingStatusExecute,
     // ...
-    parallelizable: true,  // ← 改为 true：只读查询（与 lookup_order 共享 OrderService 时需注意线程安全）
+    parallelizable: true, // ← 改为 true：只读查询（与 lookup_order 共享 OrderService 时需注意线程安全）
   },
 ];
 ```
@@ -322,6 +323,7 @@ if (conversation.sessionId && streamedAnswer) {
 **问题**: `customer-service-tools.ts:329-410` 成功时返回 `{ found: true, results: [...] }`，失败/无结果时返回 `{ error: "..." }` 或 `{ found: false, message: "..." }`。LLM Agent 的 system prompt 没有说明如何解析这些变体。
 
 **修复文件**:
+
 - `apps/server/src/tools/customer-service-tools.ts`
 - `apps/server/src/services/customer-chat/tool-agent.ts`
 
@@ -344,14 +346,14 @@ async function searchKnowledgeBaseExecute(
 
   try {
     // ... 检索逻辑 ...
-    
+
     if (!rawResults || rawResults.length === 0) {
       return JSON.stringify({
         found: false,
         message: `未找到与"${query}"相关的知识库内容。建议联系人工客服获取准确信息。`,
       });
     }
-    
+
     if (topScore < 0.5) {
       return JSON.stringify({
         found: false,
@@ -368,7 +370,8 @@ async function searchKnowledgeBaseExecute(
     logger.error(e, "search_knowledge_base failed");
     return JSON.stringify({
       found: false,
-      message: "知识库搜索服务暂时不可用，请基于通用知识回答用户，并建议用户联系人工客服核实。",
+      message:
+        "知识库搜索服务暂时不可用，请基于通用知识回答用户，并建议用户联系人工客服核实。",
     });
   }
 }
@@ -389,6 +392,7 @@ async function searchKnowledgeBaseExecute(
 **影响**: 维护噩梦。任何 SSE 协议的变更需要同时改两个文件，极易出现行为不一致。
 
 **修复文件**:
+
 - `apps/web/src/components/customer-chat/CustomerChat.tsx`
 - `apps/web/src/hooks/useCustomerChatStream.ts`
 
@@ -447,9 +451,11 @@ useEffect(() => {
 ### P1-FE2: CustomerFeedbackPanel 趋势图 `.reverse()` 变异原数组
 
 **问题**: `CustomerFeedbackPanel.tsx:183`：
+
 ```typescript
 {data.trends.reverse().map((t) => {
 ```
+
 `Array.prototype.reverse()` **就地反转原数组**。每次组件 re-render（筛选切换、分页翻页），`data.trends` 被再次反转→趋势图方向反复翻转。
 
 **修复文件**: `apps/web/src/components/customer-chat/CustomerFeedbackPanel.tsx`
@@ -466,6 +472,7 @@ useEffect(() => {
 ### P2-FE1: FAQSidebar 所有分类共享同一份文档列表
 
 **问题**: `FAQSidebar.tsx:56-61`：
+
 ```typescript
 const cats: FAQCategory[] = catList
   .filter((cat: FAQCategory) => cat.count > 0)
@@ -496,11 +503,13 @@ const cats: FAQCategory[] = catList
 ### P2-FE2: SatisfactionRating 提交失败无用户提示
 
 **问题**: `SatisfactionRating.tsx:37-39`：
+
 ```typescript
 } catch (err) {
   console.error("Failed to submit rating:", err);
 }
 ```
+
 fetch 失败时组件直接显示"感谢您的反馈！"，用户完全不知道评价没提交成功。
 
 **方案**:
@@ -564,16 +573,20 @@ clearTimeout(timeoutId);
 const CONVERSATIONAL_RULES: ConversationalRule[] = [
   // ... 现有规则 ...
   {
-    pattern: /^(你是谁|你叫什么|你的名字|who are you|what are you)[\s!！。.,，?？]*$/i,
+    pattern:
+      /^(你是谁|你叫什么|你的名字|who are you|what are you)[\s!！。.,，?？]*$/i,
     response: {
-      answer: "我是 AgentForge 智能客服助手 🤖 我可以帮您查询订单状态、物流进度、退换货政策、会员权益等问题。请问有什么可以帮您的？",
+      answer:
+        "我是 AgentForge 智能客服助手 🤖 我可以帮您查询订单状态、物流进度、退换货政策、会员权益等问题。请问有什么可以帮您的？",
       suggestions: ["查询订单", "退换货政策", "联系人工客服"],
     },
   },
   {
-    pattern: /^(你能做什么|你能干什么|你有什么功能|what can you do)[\s!！。.,，?？]*$/i,
+    pattern:
+      /^(你能做什么|你能干什么|你有什么功能|what can you do)[\s!！。.,，?？]*$/i,
     response: {
-      answer: "我可以帮您：\n- 📦 查询订单状态与物流进度\n- 🔄 了解退换货政策与流程\n- 🎫 创建客服工单\n- 📋 解答会员权益、支付方式等问题\n\n请问您需要什么帮助？",
+      answer:
+        "我可以帮您：\n- 📦 查询订单状态与物流进度\n- 🔄 了解退换货政策与流程\n- 🎫 创建客服工单\n- 📋 解答会员权益、支付方式等问题\n\n请问您需要什么帮助？",
       suggestions: ["查询订单", "退换货政策", "会员权益"],
     },
   },
@@ -646,6 +659,7 @@ describe("CitationVerifier", () => {
 **文件**: 新建 `apps/server/src/__tests__/customer-chat-integration.test.ts`
 
 覆盖路径：
+
 1. `CustomerChatService.streamChat()` 完整流程（Mock LLM）
 2. ToolAgent `execute()` 的 SSE 事件序列验证
 3. `QueryRouter.classify()` 的 LLM → fallback 降级链
@@ -655,22 +669,22 @@ describe("CitationVerifier", () => {
 
 ## 优先级和修复顺序
 
-| 顺序 | 编号 | 层级 | 修复内容 | 预计工时 |
-|------|------|------|----------|----------|
-| 1 | P0-2 | 后端 | satisfaction_ratings 写入失败处理 | 2h |
-| 2 | P0-1 | 后端 | CitationVerifier 集成 | 3h |
-| 3 | P0-FE1 | 前端 | CustomerChat.tsx 改用 useCustomerChatStream 消除重复 | 2h |
-| 4 | P0-3 | 后端 | 匿名会话锁优化 | 1h |
-| 5 | P1-4 | 后端 | 工具返回格式统一 | 1.5h |
-| 6 | P1-FE2 | 前端 | 趋势图 reverse() 变异原数组 | 0.25h |
-| 7 | P1-FE1 | 前端 | CustomerChat 缺少历史加载（随 P0-FE1 一并修复） | 0h |
-| 8 | P1-1 | 后端 | Feedback 查询安全化 | 2h |
-| 9 | P1-2 | 后端 | 工具并行化启用 | 1h |
-| 10 | P1-3 | 后端 | 记忆提取异步化 | 2h |
-| 11 | P2-FE1 | 前端 | FAQSidebar 分类文档过滤修正 | 0.5h |
-| 12 | P2-FE2 | 前端 | SatisfactionRating 提交失败提示 | 0.5h |
-| 13 | P2-FE3 | 前端 | fetch 超时机制 | 0.5h |
-| 14 | P2-FE4 | 前端 | CustomerChat 输入框流式时禁用 | 0.25h |
-| 15 | P2-1~P2-5 | 后端 | 工程改进 | 4h |
+| 顺序 | 编号      | 层级 | 修复内容                                             | 预计工时 |
+| ---- | --------- | ---- | ---------------------------------------------------- | -------- |
+| 1    | P0-2      | 后端 | satisfaction_ratings 写入失败处理                    | 2h       |
+| 2    | P0-1      | 后端 | CitationVerifier 集成                                | 3h       |
+| 3    | P0-FE1    | 前端 | CustomerChat.tsx 改用 useCustomerChatStream 消除重复 | 2h       |
+| 4    | P0-3      | 后端 | 匿名会话锁优化                                       | 1h       |
+| 5    | P1-4      | 后端 | 工具返回格式统一                                     | 1.5h     |
+| 6    | P1-FE2    | 前端 | 趋势图 reverse() 变异原数组                          | 0.25h    |
+| 7    | P1-FE1    | 前端 | CustomerChat 缺少历史加载（随 P0-FE1 一并修复）      | 0h       |
+| 8    | P1-1      | 后端 | Feedback 查询安全化                                  | 2h       |
+| 9    | P1-2      | 后端 | 工具并行化启用                                       | 1h       |
+| 10   | P1-3      | 后端 | 记忆提取异步化                                       | 2h       |
+| 11   | P2-FE1    | 前端 | FAQSidebar 分类文档过滤修正                          | 0.5h     |
+| 12   | P2-FE2    | 前端 | SatisfactionRating 提交失败提示                      | 0.5h     |
+| 13   | P2-FE3    | 前端 | fetch 超时机制                                       | 0.5h     |
+| 14   | P2-FE4    | 前端 | CustomerChat 输入框流式时禁用                        | 0.25h    |
+| 15   | P2-1~P2-5 | 后端 | 工程改进                                             | 4h       |
 
 **总估算**: ~20.5 工时（后端 14h + 前端 6.5h）

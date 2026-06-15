@@ -81,9 +81,7 @@ export function validateBusinessResponse(
   }
 
   // 校验目标文本：JSON 格式用 answer 字段，自然语言直接用原文本
-  const answerText = isJSON
-    ? (parsed as { answer: string }).answer
-    : rawText;
+  const answerText = isJSON ? (parsed as { answer: string }).answer : rawText;
 
   // Layer 3: 禁止行为扫描（JSON 和自然语言均适用）
   const forbiddenHits: string[] = [];

@@ -9,7 +9,10 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { AgentStreamEvent } from "@agentforge/shared-types";
-import type { RouteContext, RouteStreamEvent } from "../services/customer-chat/types.js";
+import type {
+  RouteContext,
+  RouteStreamEvent,
+} from "../services/customer-chat/types.js";
 
 // ═══════════════════════════════════════════════════════
 // Mock AgentService：注入可控的事件序列
@@ -25,7 +28,10 @@ vi.mock("../services/agent.js", () => ({
   })),
 }));
 
-import { ToolAgent, sanitizeReActJSON } from "../services/customer-chat/tool-agent.js";
+import {
+  ToolAgent,
+  sanitizeReActJSON,
+} from "../services/customer-chat/tool-agent.js";
 
 // ── Helper: 创建最小 RouteContext ──
 
@@ -113,9 +119,9 @@ describe("Runtime Contract — 完整生命周期场景", () => {
       const done = events.find((e) => e.type === "done");
 
       expect(tokens.length).toBe(3);
-      expect(tokens.map((t) => "content" in t ? t.content : "").join("")).toBe(
-        "您的订单",
-      );
+      expect(
+        tokens.map((t) => ("content" in t ? t.content : "")).join(""),
+      ).toBe("您的订单");
       expect(done).toBeDefined();
       if (done && done.type === "done") {
         expect(done.validated).toBe(true);
@@ -264,7 +270,11 @@ describe("Runtime Contract — 完整生命周期场景", () => {
           },
           // Agent 声明开始回复
           { type: "agent_responding", step: 2 },
-          { type: "agent_token", content: "您的订单 ORD-001", message_id: "m5" },
+          {
+            type: "agent_token",
+            content: "您的订单 ORD-001",
+            message_id: "m5",
+          },
           { type: "agent_token", content: " 正在配送中", message_id: "m5" },
           {
             type: "agent_respond",
@@ -356,7 +366,11 @@ describe("Runtime Contract — 完整生命周期场景", () => {
       mockAgentRun.mockReturnValue(
         generateEvents([
           // 前置废话（JSON 格式分析）
-          { type: "agent_token", content: "让我分析一下这个查询...", message_id: "m7" },
+          {
+            type: "agent_token",
+            content: "让我分析一下这个查询...",
+            message_id: "m7",
+          },
           // 清空
           { type: "agent_clear_stream", message_id: "m7", step: 1 },
           // 重新开始回复
@@ -591,7 +605,12 @@ describe("Runtime Contract — 跨维度不变量", () => {
 describe("Runtime Contract — 状态机规则（可执行规范）", () => {
   // ── Contract 类型定义（与 tool-agent.ts 保持同步，作为契约锚点） ──
 
-  type ContractPhase = "planning" | "executing" | "observing" | "responding" | "finished";
+  type ContractPhase =
+    | "planning"
+    | "executing"
+    | "observing"
+    | "responding"
+    | "finished";
 
   interface ContractOutputState {
     visibleChars: number;
@@ -605,7 +624,11 @@ describe("Runtime Contract — 状态机规则（可执行规范）", () => {
   }
 
   function createOutputState(): ContractOutputState {
-    return { visibleChars: 0, responseStarted: false, responseCompleted: false };
+    return {
+      visibleChars: 0,
+      responseStarted: false,
+      responseCompleted: false,
+    };
   }
 
   // ── Phase 转换规则 ──
@@ -631,7 +654,12 @@ describe("Runtime Contract — 状态机规则（可执行规范）", () => {
 
     it("Rule: agent_error 不改变 phase", () => {
       // 错误是临时状态，Agent 可能恢复继续执行
-      const phases: ContractPhase[] = ["planning", "executing", "observing", "responding"];
+      const phases: ContractPhase[] = [
+        "planning",
+        "executing",
+        "observing",
+        "responding",
+      ];
       for (const originalPhase of phases) {
         // agent_error 到达 → phase 保持不变
         expect(originalPhase).toBe(originalPhase);
@@ -720,7 +748,8 @@ describe("Runtime Contract — 状态机规则（可执行规范）", () => {
         finalContent: "正常回复",
         fallbackContent: "降级回复",
       };
-      const result = envelope.finalContent ?? envelope.fallbackContent ?? "硬编码兜底";
+      const result =
+        envelope.finalContent ?? envelope.fallbackContent ?? "硬编码兜底";
       expect(result).toBe("正常回复");
     });
 
@@ -770,7 +799,8 @@ describe("Runtime Contract — 状态机规则（可执行规范）", () => {
       if (!envelope.fallbackContent) {
         envelope.fallbackContent = "兜底文案";
       }
-      const result = envelope.finalContent ?? envelope.fallbackContent ?? "硬编码";
+      const result =
+        envelope.finalContent ?? envelope.fallbackContent ?? "硬编码";
       expect(result).toBe("兜底文案");
     });
   });
@@ -794,7 +824,11 @@ describe("Runtime Contract — 混合事件序列", () => {
           step: 1,
           result: '{"found":false}',
         },
-        { type: "agent_token", content: "未找到，换个方式查...", message_id: "mx" },
+        {
+          type: "agent_token",
+          content: "未找到，换个方式查...",
+          message_id: "mx",
+        },
         { type: "agent_clear_stream", message_id: "mx", step: 1 },
         // 第2轮
         {
@@ -862,7 +896,11 @@ describe("Runtime Contract — 混合事件序列", () => {
     mockAgentRun.mockReturnValue(
       generateEvents([
         // Agent 在 planning 阶段产出了 token（未转发）
-        { type: "agent_token", content: "您的订单已发货，物流单号 SF123456。", message_id: "mz" },
+        {
+          type: "agent_token",
+          content: "您的订单已发货，物流单号 SF123456。",
+          message_id: "mz",
+        },
         // 直接 done，跳过 agent_respond
         {
           type: "agent_done",

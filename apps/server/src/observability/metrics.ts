@@ -183,7 +183,10 @@ export const csRequestDurationMs = new Histogram({
   name: "cs_request_duration_ms",
   help: "Customer chat end-to-end request latency (TTFT and TTLT)",
   labelNames: ["route", "phase"], // phase = ttft | ttlt
-  buckets: [5, 10, 25, 50, 100, 200, 300, 500, 800, 1000, 2500, 5000, 10000, 15000, 30000],
+  buckets: [
+    5, 10, 25, 50, 100, 200, 300, 500, 800, 1000, 2500, 5000, 10000, 15000,
+    30000,
+  ],
   registers: [registry],
 });
 

@@ -203,7 +203,9 @@ describe("OrderService", () => {
     });
 
     it("未知状态返回原值", () => {
-      expect(service.statusLabel("unknown_status" as any)).toBe("unknown_status");
+      expect(service.statusLabel("unknown_status" as any)).toBe(
+        "unknown_status",
+      );
     });
   });
 
@@ -231,7 +233,10 @@ describe("validateBusinessResponse — 五层校验管线", () => {
   describe("Layer 1: JSON 可解析", () => {
     it("有效 JSON 通过 L1", () => {
       const result = validateBusinessResponse(
-        JSON.stringify({ answer: "您好，有什么可以帮助您的？", suggestions: [] }),
+        JSON.stringify({
+          answer: "您好，有什么可以帮助您的？",
+          suggestions: [],
+        }),
         [],
       );
       expect(result.valid).toBe(true);
@@ -297,7 +302,9 @@ describe("validateBusinessResponse — 五层校验管线", () => {
           answer: "您的订单已发货，预计明天到达。",
           suggestions: ["查询物流", "联系客服"],
         }),
-        ["知识库内容：订单发货后预计1-3个工作日送达，可在订单详情页查看物流进度。"],
+        [
+          "知识库内容：订单发货后预计1-3个工作日送达，可在订单详情页查看物流进度。",
+        ],
       );
       expect(result.valid).toBe(true);
     });
@@ -358,7 +365,8 @@ describe("validateBusinessResponse — 五层校验管线", () => {
     it("正常合规回复通过 L3", () => {
       const result = validateBusinessResponse(
         JSON.stringify({
-          answer: "您的订单 ORD-2024-001234 目前处于配送中，预计明天送达。如需帮助请随时联系。",
+          answer:
+            "您的订单 ORD-2024-001234 目前处于配送中，预计明天送达。如需帮助请随时联系。",
           suggestions: ["查询物流详情"],
         }),
         ["KB chunk about shipping process"],
@@ -414,7 +422,9 @@ describe("validateBusinessResponse — 五层校验管线", () => {
       // L4 是软告警不阻止通过
       expect(result.valid).toBe(true);
       // 但应有 L4 告警
-      const l4Error = result.errors.find((e) => e.startsWith("Layer4(keyword)"));
+      const l4Error = result.errors.find((e) =>
+        e.startsWith("Layer4(keyword)"),
+      );
       expect(l4Error).toBeDefined();
     });
   });
@@ -435,7 +445,8 @@ describe("CitationVerifier", () => {
     it("回复内容与 KB 高度匹配时不产生 L4 告警", () => {
       const result = validateBusinessResponse(
         JSON.stringify({
-          answer: "自签收之日起7天内可申请退货，审核通过后1-3个工作日退款到原支付方式。",
+          answer:
+            "自签收之日起7天内可申请退货，审核通过后1-3个工作日退款到原支付方式。",
           suggestions: [],
         }),
         [
