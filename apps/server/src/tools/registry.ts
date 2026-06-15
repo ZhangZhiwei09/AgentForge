@@ -1,6 +1,7 @@
 // Tool Registry — central hub for registering, listing, and executing tools
 // Singleton pattern: initialized once, used by ChatService and API routes
-// V2: Added risk levels, per-tool timeouts, and circuit breaker pattern
+// V3: Returns ExecutionResult instead of string — enables structured status-aware
+//     handling by circuit breaker, agent (degradation), and trace (observability)
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type {
   RegisteredTool,
@@ -8,6 +9,15 @@ import type {
   CircuitBreakerState,
 } from "./types.js";
 import type { RunContext } from "../runtime/context.js";
+import type { ExecutionResult } from "../runtime/results.js";
+import {
+  successResult,
+  failedResult,
+  cancelledResult,
+  timeoutResult,
+  executionResultToContent,
+  ExecutionErrorCode,
+} from "../runtime/results.js";
 import { builtinTools } from "./builtins.js";
 import { fileTools } from "./file-tools.js";
 import { databaseTools } from "./database-tools.js";
@@ -75,17 +85,22 @@ class ToolRegistry {
     return definitions;
   }
 
-  // Execute a tool by name with arguments and runtime context
-  // Supports: circuit breaker, per-tool timeout, cancellation (via context.signal), error tracking
+  /**
+   * Execute a tool by name with arguments and runtime context.
+   * Returns structured ExecutionResult (V3) instead of raw string.
+   */
   async execute(
     name: string,
     args: Record<string, unknown>,
     context: RunContext,
-  ): Promise<string> {
+  ): Promise<ExecutionResult> {
     this.init();
     const tool = this.tools.get(name);
     if (!tool) {
-      return `Error: unknown tool "${name}". Available: ${this.listNames().join(", ")}`;
+      return failedResult(
+        ExecutionErrorCode.NOT_FOUND,
+        `Unknown tool "${name}". Available: ${this.listNames().join(", ")}`,
+      );
     }
 
     // Check circuit breaker
@@ -94,7 +109,10 @@ class ToolRegistry {
       const cooldownRemaining =
         CIRCUIT_BREAKER_COOLDOWN_MS - (Date.now() - breaker.openedAt);
       if (cooldownRemaining > 0) {
-        return `Error: tool "${name}" is temporarily disabled (circuit breaker open). Try again in ${Math.ceil(cooldownRemaining / 1000)}s.`;
+        return failedResult(
+          ExecutionErrorCode.CIRCUIT_OPEN,
+          `Tool "${name}" is temporarily disabled. Try again in ${Math.ceil(cooldownRemaining / 1000)}s.`,
+        );
       }
       // Cooldown expired — close circuit
       this.circuitBreakers.set(name, {
@@ -107,7 +125,7 @@ class ToolRegistry {
 
     // Fast path: check if already aborted before execution
     if (context.signal?.aborted) {
-      return `Error: tool "${name}" execution cancelled`;
+      return cancelledResult(`Tool "${name}" execution cancelled`);
     }
 
     // Execute with timeout + cancellation
@@ -117,60 +135,42 @@ class ToolRegistry {
       const result = await this.executeWithTimeout(tool.execute, args, timeout, context);
       const duration = Date.now() - start;
 
-      // Reset circuit breaker on success
-      if (breaker && breaker.failures > 0) {
-        this.circuitBreakers.set(name, {
-          failures: 0,
-          lastFailure: 0,
-          open: false,
-          openedAt: 0,
-        });
-        circuitBreakerState.set({ tool_name: name }, 0);
+      // Circuit breaker: reset on success or partial; trip on failed/timeout
+      if (result.status === "success" || result.status === "partial") {
+        if (breaker && breaker.failures > 0) {
+          this.circuitBreakers.set(name, {
+            failures: 0,
+            lastFailure: 0,
+            open: false,
+            openedAt: 0,
+          });
+          circuitBreakerState.set({ tool_name: name }, 0);
+        }
+        toolCallsTotal.inc({ tool_name: name, status: result.status });
+      } else {
+        // failed / cancelled / timeout → increment circuit breaker
+        this.incrementCircuitBreaker(name);
+        toolCallsTotal.inc({ tool_name: name, status: result.status });
       }
+
+      toolExecutionDurationMs.observe({ tool_name: name }, duration);
 
       logger.debug(
         {
           tool: name,
           args: JSON.stringify(args).slice(0, 100),
-          result: result.slice(0, 80),
+          status: result.status,
+          output: executionResultToContent(result).slice(0, 80),
           durationMs: duration,
         },
         "Tool executed",
       );
-      toolCallsTotal.inc({ tool_name: name, status: "success" });
-      toolExecutionDurationMs.observe({ tool_name: name }, duration);
       return result;
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Unknown error";
 
       // Update circuit breaker
-      const current = this.circuitBreakers.get(name) || {
-        failures: 0,
-        lastFailure: 0,
-        open: false,
-        openedAt: 0,
-      };
-      const failures = current.failures + 1;
-
-      if (failures >= CIRCUIT_BREAKER_THRESHOLD) {
-        this.circuitBreakers.set(name, {
-          failures,
-          lastFailure: Date.now(),
-          open: true,
-          openedAt: Date.now(),
-        });
-        circuitBreakerState.set({ tool_name: name }, 1);
-        logger.warn(
-          { tool: name, failures },
-          "Circuit breaker opened — too many consecutive failures",
-        );
-      } else {
-        this.circuitBreakers.set(name, {
-          ...current,
-          failures,
-          lastFailure: Date.now(),
-        });
-      }
+      this.incrementCircuitBreaker(name);
 
       logger.error({ tool: name, error: msg }, "Tool execution failed");
 
@@ -181,22 +181,25 @@ class ToolRegistry {
         status: isTimeout ? "timeout" : "error",
       });
 
-      return `Error executing tool "${name}": ${msg}`;
+      if (isTimeout) {
+        return timeoutResult(timeout);
+      }
+      return failedResult(
+        ExecutionErrorCode.EXECUTION_ERROR,
+        `Error executing tool "${name}": ${msg}`,
+      );
     }
   }
 
   // Execute with timeout + cancellation signal (unified via AbortSignal.any)
-  // Node 20+: AbortSignal.any() combines user cancel + timeout into one signal
-  // Tools only check signal.aborted — timeout/cancel/system-shutdown all unified
   private async executeWithTimeout(
     executor: ToolExecutor,
     args: Record<string, unknown>,
     timeoutMs: number,
     context: RunContext,
-  ): Promise<string> {
+  ): Promise<ExecutionResult> {
     const timeoutSignal = AbortSignal.timeout(timeoutMs);
 
-    // Combine user cancellation signal with timeout signal
     const signals: AbortSignal[] = [timeoutSignal];
     if (context.signal) {
       signals.push(context.signal);
@@ -206,7 +209,7 @@ class ToolRegistry {
         ? AbortSignal.any(signals)
         : timeoutSignal;
 
-    return new Promise<string>((resolve, reject) => {
+    return new Promise<ExecutionResult>((resolve, reject) => {
       const onAbort = () => {
         const reason = timeoutSignal.aborted
           ? new Error(`Tool execution timed out after ${timeoutMs}ms`)
@@ -224,30 +227,63 @@ class ToolRegistry {
           reject(err);
         })
         .finally(() => {
-          // Production-grade: clean up listener to prevent MaxListenersExceededWarning
           combinedSignal.removeEventListener("abort", onAbort);
         });
     });
   }
 
-  // List all registered tool names
+  // ── Circuit breaker helpers ──
+
+  private incrementCircuitBreaker(name: string): void {
+    const current = this.circuitBreakers.get(name) || {
+      failures: 0,
+      lastFailure: 0,
+      open: false,
+      openedAt: 0,
+    };
+    const failures = current.failures + 1;
+
+    if (failures >= CIRCUIT_BREAKER_THRESHOLD) {
+      this.circuitBreakers.set(name, {
+        failures,
+        lastFailure: Date.now(),
+        open: true,
+        openedAt: Date.now(),
+      });
+      circuitBreakerState.set({ tool_name: name }, 1);
+      logger.warn(
+        { tool: name, failures },
+        "Circuit breaker opened — too many consecutive failures",
+      );
+    } else {
+      this.circuitBreakers.set(name, {
+        ...current,
+        failures,
+        lastFailure: Date.now(),
+      });
+    }
+  }
+
+  // ── Query methods ──
+
+  /** List all registered tool names */
   listNames(): string[] {
     this.init();
     return Array.from(this.tools.keys());
   }
 
-  // Get all registered tools (for API endpoint) — includes metadata
+  /** Get all registered tools (for API endpoint) — includes metadata */
   getAll(): RegisteredTool[] {
     this.init();
     return Array.from(this.tools.values());
   }
 
-  // Get circuit breaker states (for monitoring)
+  /** Get circuit breaker states (for monitoring) */
   getCircuitBreakerStates(): Record<string, CircuitBreakerState> {
     return Object.fromEntries(this.circuitBreakers);
   }
 
-  // Reset circuit breaker for a tool (manual override)
+  /** Reset circuit breaker for a tool (manual override) */
   resetCircuitBreaker(name: string): void {
     this.circuitBreakers.delete(name);
     circuitBreakerState.set({ tool_name: name }, 0);

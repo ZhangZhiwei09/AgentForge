@@ -221,7 +221,7 @@ describe("Agent Error Recovery", () => {
     it("retries tool execution on failure", async () => {
       mockToolExecute
         .mockRejectedValueOnce(new Error("ETIMEDOUT"))
-        .mockResolvedValueOnce("tool result after retry");
+        .mockResolvedValueOnce({ status: "success", output: "tool result after retry" });
 
       let callCount = 0;
       mockAgentStreamChat.mockImplementation(async function* () {

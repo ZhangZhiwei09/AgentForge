@@ -2,6 +2,13 @@
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
 import type { RunContext } from "../runtime/context.js";
+import type { ExecutionResult } from "../runtime/results.js";
+import {
+  successResult,
+  partialResult,
+  failedResult,
+  ExecutionErrorCode,
+} from "../runtime/results.js";
 import { prisma } from "../db.js";
 import { logger } from "@agentforge/logger";
 
@@ -73,14 +80,14 @@ function validateReadOnlySql(query: string): string | null {
 async function dbQueryExecute(
   args: Record<string, unknown>,
   _context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const query = (args.query as string) || "";
 
   // Validate read-only SQL
   const validationError = validateReadOnlySql(query);
   if (validationError) {
     logger.warn({ query: query.slice(0, 100) }, "db_query validation rejected");
-    return `Error: ${validationError}`;
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, validationError);
   }
 
   try {
@@ -113,24 +120,27 @@ async function dbQueryExecute(
     const jsonResult = JSON.stringify(result, null, 2);
     // Truncate to 80000 chars to avoid overwhelming the LLM context
     if (jsonResult.length > 80_000) {
-      return JSON.stringify(
-        {
-          row_count: rowCount,
-          rows: resultRows.slice(0, 20),
-          truncated: true,
-          truncation_note: `Result truncated from ${jsonResult.length} to 80000 chars. Showing first 20 rows.`,
-          duration_ms: duration,
-        },
-        null,
-        2,
+      return partialResult(
+        JSON.stringify(
+          {
+            row_count: rowCount,
+            rows: resultRows.slice(0, 20),
+            truncated: true,
+            truncation_note: `Result truncated from ${jsonResult.length} to 80000 chars. Showing first 20 rows.`,
+            duration_ms: duration,
+          },
+          null,
+          2,
+        ),
+        `Result truncated to 80K chars, showing first 20 of ${rowCount} rows`,
       );
     }
 
-    return jsonResult;
+    return successResult(jsonResult, { rowCount, durationMs: duration });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     logger.error({ error: msg, query: query.slice(0, 100) }, "db_query failed");
-    return `Error executing query: ${msg}`;
+    return failedResult(ExecutionErrorCode.EXECUTION_ERROR, `Error executing query: ${msg}`);
   }
 }
 

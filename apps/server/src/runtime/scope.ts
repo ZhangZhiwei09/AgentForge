@@ -1,17 +1,21 @@
 // ExecutionScope — 聚合入口
 //
-// 一个 createExecutionScope() 调用返回完整的 { context, controller, buffer }。
+// 一个 createExecutionScope() 调用返回完整的 { context, node, buffer }。
+// ExecutionNode 是 ExecutionController 的演化版本，统一了状态机 + 树结构。
 // 未来 Tracing / Metrics / Logger 直接往 Scope 加字段，
 // 不用全项目到处传多个独立参数。
 
 import { createRunContext, createChildContext, type RunContext } from "./context.js";
 import { OutputBuffer } from "./buffer.js";
-import { ExecutionController } from "./controller.js";
+import { ExecutionNode, type ExecutionType } from "./controller.js";
 
 export interface ExecutionScope {
   readonly context: RunContext;
-  readonly controller: ExecutionController;
+  readonly node: ExecutionNode;
   readonly buffer: OutputBuffer;
+
+  /** @deprecated Use node instead */
+  readonly controller: ExecutionNode;
 }
 
 export interface CreateScopeOptions {
@@ -21,6 +25,8 @@ export interface CreateScopeOptions {
   parentContext?: RunContext;
   /** 自定义 runId（测试 / replay 场景） */
   runId?: string;
+  /** 执行类型 */
+  executionType?: ExecutionType;
 }
 
 /**
@@ -33,7 +39,17 @@ export function createExecutionScope(options: CreateScopeOptions): ExecutionScop
     : createRunContext(options.signal, options.runId);
 
   const buffer = new OutputBuffer();
-  const controller = new ExecutionController(context, buffer);
+  const node = new ExecutionNode(
+    options.executionType ?? "chat",
+    context,
+    buffer,
+  );
 
-  return { context, controller, buffer };
+  return {
+    context,
+    node,
+    buffer,
+    // 向后兼容：保留 controller 引用
+    controller: node,
+  };
 }

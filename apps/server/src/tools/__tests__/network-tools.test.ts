@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRunContext } from "../../runtime/context.js";
+import { executionResultToContent } from "../../runtime/results.js";
 
 // We test the web_fetch tool — mock global fetch
 const { networkTools } = await import("../network-tools.js");
@@ -37,8 +38,9 @@ describe("web_fetch tool", () => {
     } as unknown as Response);
 
     const result = await webFetchTool.execute({ url: "https://example.com" }, testCtx);
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(result.output);
 
+    expect(result.status).toBe("success");
     expect(parsed.url).toBe("https://example.com");
     expect(parsed.status).toBe(200);
     expect(parsed.content_type).toBe("text/html");
@@ -60,21 +62,23 @@ describe("web_fetch tool", () => {
       url: "https://example.com",
       max_chars: 500,
     }, testCtx);
-    const parsed = JSON.parse(result);
+    // For partial results, parse .output directly (executionResultToContent adds note prefix)
+    const parsed = JSON.parse(result.output);
 
+    expect(result.status).toBe("partial");
     expect(parsed.content.length).toBeLessThanOrEqual(500);
     expect(parsed.truncated).toBe(true);
   });
 
   it("should reject invalid URLs", async () => {
     const result = await webFetchTool.execute({ url: "not-a-url" }, testCtx);
-    expect(result).toContain("Error");
-    expect(result).toContain("http");
+    expect(result.status).toBe("failed");
+    expect(executionResultToContent(result)).toContain("http");
   });
 
   it("should reject URLs without http/https prefix", async () => {
     const result = await webFetchTool.execute({ url: "ftp://example.com" }, testCtx);
-    expect(result).toContain("Error");
+    expect(result.status).toBe("failed");
   });
 
   it("should handle HTTP error status codes", async () => {
@@ -87,16 +91,16 @@ describe("web_fetch tool", () => {
     const result = await webFetchTool.execute({
       url: "https://example.com/404",
     }, testCtx);
-    expect(result).toContain("Error");
-    expect(result).toContain("404");
+    expect(result.status).toBe("failed");
+    expect(executionResultToContent(result)).toContain("404");
   });
 
   it("should handle network errors gracefully", async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
     const result = await webFetchTool.execute({ url: "https://example.com" }, testCtx);
-    expect(result).toContain("Error");
-    expect(result).toContain("Network error");
+    expect(result.status).toBe("failed");
+    expect(executionResultToContent(result)).toContain("Network error");
   });
 
   it("should use default max_chars when not specified", async () => {
@@ -109,14 +113,15 @@ describe("web_fetch tool", () => {
     } as unknown as Response);
 
     const result = await webFetchTool.execute({ url: "https://example.com" }, testCtx);
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(result.output);
 
     // Default is 10000, content is shorter
+    expect(result.status).toBe("success");
     expect(parsed.truncated).toBe(false);
   });
 
   it("should return error for missing URL parameter", async () => {
     const result = await webFetchTool.execute({}, testCtx);
-    expect(result).toContain("Error");
+    expect(result.status).toBe("failed");
   });
 });

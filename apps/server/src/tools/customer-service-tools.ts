@@ -11,6 +11,8 @@
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
 import type { RunContext } from "../runtime/context.js";
+import type { ExecutionResult } from "../runtime/results.js";
+import { successResult, failedResult, ExecutionErrorCode } from "../runtime/results.js";
 import { getOrderService } from "../services/customer-chat/order-service.js";
 import { KnowledgeService } from "../services/knowledge.js";
 import { logger } from "@agentforge/logger";
@@ -41,10 +43,10 @@ const lookupOrderDef: ToolDefinition = {
 async function lookupOrderExecute(
   args: Record<string, unknown>,
   _context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const orderId = (args.order_id as string) || "";
   if (!orderId) {
-    return JSON.stringify({ error: "请提供订单号" });
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, "请提供订单号");
   }
 
   try {
@@ -52,52 +54,42 @@ async function lookupOrderExecute(
     const order = await service.lookupOrder(orderId);
 
     if (!order) {
-      return JSON.stringify(
-        {
-          found: false,
-          order_id: orderId,
-          message: `订单 ${orderId} 未找到。请检查订单号是否正确。可尝试的格式：ORD-2024-001234。`,
-          suggestion: "如果您不确定订单号，可以尝试提供快递单号查询物流。",
-        },
-        null,
-        2,
-      );
+      return successResult(JSON.stringify({
+        found: false,
+        order_id: orderId,
+        message: `订单 ${orderId} 未找到。请检查订单号是否正确。可尝试的格式：ORD-2024-001234。`,
+        suggestion: "如果您不确定订单号，可以尝试提供快递单号查询物流。",
+      }, null, 2));
     }
 
-    return JSON.stringify(
-      {
-        found: true,
-        order_id: order.orderId,
-        status: service.statusLabel(order.status),
-        items: order.items.map((i) => ({
-          name: i.name,
-          quantity: i.quantity,
-          unit_price: i.unitPrice,
-          subtotal: i.quantity * i.unitPrice,
-        })),
-        payment: {
-          method: order.paymentMethod || "未指定",
-          subtotal: order.subtotal,
-          shipping_fee: order.shippingFee,
-          discount: order.discount,
-          total: order.total,
-        },
-        shipping: {
-          carrier: order.shipping.carrier || "待分配",
-          tracking_no: order.shipping.trackingNo || "暂无",
-          estimated_delivery: order.shipping.estimatedDelivery || "待确定",
-        },
-        created_at: order.createdAt,
-        notes: order.notes || null,
+    return successResult(JSON.stringify({
+      found: true,
+      order_id: order.orderId,
+      status: service.statusLabel(order.status),
+      items: order.items.map((i) => ({
+        name: i.name,
+        quantity: i.quantity,
+        unit_price: i.unitPrice,
+        subtotal: i.quantity * i.unitPrice,
+      })),
+      payment: {
+        method: order.paymentMethod || "未指定",
+        subtotal: order.subtotal,
+        shipping_fee: order.shippingFee,
+        discount: order.discount,
+        total: order.total,
       },
-      null,
-      2,
-    );
+      shipping: {
+        carrier: order.shipping.carrier || "待分配",
+        tracking_no: order.shipping.trackingNo || "暂无",
+        estimated_delivery: order.shipping.estimatedDelivery || "待确定",
+      },
+      created_at: order.createdAt,
+      notes: order.notes || null,
+    }, null, 2));
   } catch (e) {
     logger.error(e, "lookup_order failed");
-    return JSON.stringify({
-      error: "订单查询服务暂时不可用，请稍后再试或转接人工客服。",
-    });
+    return failedResult(ExecutionErrorCode.EXECUTION_ERROR, "订单查询服务暂时不可用，请稍后再试或转接人工客服。");
   }
 }
 
@@ -121,8 +113,7 @@ const createSupportTicketDef: ToolDefinition = {
         priority: {
           type: "string",
           enum: ["normal", "urgent"],
-          description:
-            "工单优先级：normal（普通，24小时响应）或 urgent（紧急，1小时响应）",
+          description: "工单优先级：normal（普通，24小时响应）或 urgent（紧急，1小时响应）",
         },
         order_id: {
           type: "string",
@@ -137,7 +128,7 @@ const createSupportTicketDef: ToolDefinition = {
 async function createSupportTicketExecute(
   args: Record<string, unknown>,
   _context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const summary = (args.summary as string) || "未提供摘要";
   const priority = (args.priority as "normal" | "urgent") || "normal";
   const orderId = (args.order_id as string) || undefined;
@@ -146,29 +137,22 @@ async function createSupportTicketExecute(
     const service = getOrderService();
     const ticket = await service.createTicket({ summary, priority, orderId });
 
-    return JSON.stringify(
-      {
-        ticket_id: ticket.ticketId,
-        status: "已创建",
-        priority: ticket.priority,
-        summary: ticket.summary,
-        order_id: ticket.orderId || null,
-        created_at: ticket.createdAt,
-        response_time:
-          priority === "urgent"
-            ? "工单已标记为紧急，客服团队将在 1 小时内响应处理。"
-            : "工单已创建，客服团队将在 24 小时内响应处理。",
-        tracking_tip: `您可以通过工单号 ${ticket.ticketId} 查询处理进度。`,
-      },
-      null,
-      2,
-    );
+    return successResult(JSON.stringify({
+      ticket_id: ticket.ticketId,
+      status: "已创建",
+      priority: ticket.priority,
+      summary: ticket.summary,
+      order_id: ticket.orderId || null,
+      created_at: ticket.createdAt,
+      response_time:
+        priority === "urgent"
+          ? "工单已标记为紧急，客服团队将在 1 小时内响应处理。"
+          : "工单已创建，客服团队将在 24 小时内响应处理。",
+      tracking_tip: `您可以通过工单号 ${ticket.ticketId} 查询处理进度。`,
+    }, null, 2));
   } catch (e) {
     logger.error(e, "create_support_ticket failed");
-    return JSON.stringify({
-      error:
-        "工单创建服务暂时不可用，请稍后再试。如有紧急问题，请拨打客服热线：400-XXX-XXXX。",
-    });
+    return failedResult(ExecutionErrorCode.EXECUTION_ERROR, "工单创建服务暂时不可用，请稍后再试。如有紧急问题，请拨打客服热线：400-XXX-XXXX。");
   }
 }
 
@@ -202,7 +186,7 @@ const checkReturnPolicyDef: ToolDefinition = {
 async function checkReturnPolicyExecute(
   args: Record<string, unknown>,
   _context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const category = (args.product_category as string) || "通用";
   const reason = (args.reason as string) || undefined;
 
@@ -210,25 +194,19 @@ async function checkReturnPolicyExecute(
     const service = getOrderService();
     const policy = await service.getReturnPolicy(category, reason);
 
-    return JSON.stringify(
-      {
-        category: policy.category,
-        policy: policy.policy,
-        return_window: policy.returnWindow,
-        conditions: policy.conditions,
-        refund_timeline: policy.refundTimeline,
-        shipping_responsibility: policy.shippingResponsibility,
-        exceptions: policy.exceptions,
-        reason_note: policy.reasonNote,
-      },
-      null,
-      2,
-    );
+    return successResult(JSON.stringify({
+      category: policy.category,
+      policy: policy.policy,
+      return_window: policy.returnWindow,
+      conditions: policy.conditions,
+      refund_timeline: policy.refundTimeline,
+      shipping_responsibility: policy.shippingResponsibility,
+      exceptions: policy.exceptions,
+      reason_note: policy.reasonNote,
+    }, null, 2));
   } catch (e) {
     logger.error(e, "check_return_policy failed");
-    return JSON.stringify({
-      error: "退换货政策查询暂时不可用，请稍后再试。",
-    });
+    return failedResult(ExecutionErrorCode.EXECUTION_ERROR, "退换货政策查询暂时不可用，请稍后再试。");
   }
 }
 
@@ -251,8 +229,7 @@ const checkShippingStatusDef: ToolDefinition = {
         },
         order_id: {
           type: "string",
-          description:
-            "订单号（如果没有运单号，可通过订单号关联查询），如 ORD-2024-001234",
+          description: "订单号（如果没有运单号，可通过订单号关联查询），如 ORD-2024-001234",
         },
       },
       required: [],
@@ -263,15 +240,13 @@ const checkShippingStatusDef: ToolDefinition = {
 async function checkShippingStatusExecute(
   args: Record<string, unknown>,
   _context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const trackingNo = (args.tracking_number as string) || "";
   const orderId = (args.order_id as string) || "";
   const query = trackingNo || orderId;
 
   if (!query) {
-    return JSON.stringify({
-      error: "请提供运单号或订单号以查询物流信息。",
-    });
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, "请提供运单号或订单号以查询物流信息。");
   }
 
   try {
@@ -279,31 +254,25 @@ async function checkShippingStatusExecute(
     const result = await service.getShippingStatus(query);
 
     if (!result.found) {
-      return JSON.stringify(result, null, 2);
+      return successResult(JSON.stringify(result, null, 2));
     }
 
-    return JSON.stringify(
-      {
-        found: true,
-        order_id: result.orderId,
-        carrier: result.carrier,
-        tracking_no: result.trackingNo,
-        current_status: result.status,
-        estimated_delivery: result.estimatedDelivery,
-        history: result.history?.map((h) => ({
-          time: h.time,
-          location: h.location,
-          description: h.description,
-        })),
-      },
-      null,
-      2,
-    );
+    return successResult(JSON.stringify({
+      found: true,
+      order_id: result.orderId,
+      carrier: result.carrier,
+      tracking_no: result.trackingNo,
+      current_status: result.status,
+      estimated_delivery: result.estimatedDelivery,
+      history: result.history?.map((h) => ({
+        time: h.time,
+        location: h.location,
+        description: h.description,
+      })),
+    }, null, 2));
   } catch (e) {
     logger.error(e, "check_shipping_status failed");
-    return JSON.stringify({
-      error: "物流查询服务暂时不可用，请稍后再试。",
-    });
+    return failedResult(ExecutionErrorCode.EXECUTION_ERROR, "物流查询服务暂时不可用，请稍后再试。");
   }
 }
 
@@ -334,32 +303,26 @@ const searchKnowledgeBaseDef: ToolDefinition = {
 async function searchKnowledgeBaseExecute(
   args: Record<string, unknown>,
   _context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const query = (args.query as string) || "";
   if (!query.trim()) {
-    return JSON.stringify({ error: "请提供搜索查询" });
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, "请提供搜索查询");
   }
 
   try {
-    // ── Pipeline: Recall → Rerank → Threshold → Return ──
     const service = new KnowledgeService();
-
-    // 1. Recall: 从 Milvus 检索 top-10 候选
     const rawResults = await service.search(query, null, 10);
 
     if (!rawResults || rawResults.length === 0) {
-      return JSON.stringify({
+      return successResult(JSON.stringify({
         query,
         found: false,
-        message:
-          "未找到相关知识库内容。请基于通用知识回答用户，并建议联系人工客服获取准确信息。",
-      });
+        message: "未找到相关知识库内容。请基于通用知识回答用户，并建议联系人工客服获取准确信息。",
+      }));
     }
 
-    // 2. Rerank: 去重 + 分数排序
     const seen = new Set<string>();
-    const deduped: Array<{ content: string; score: number; source: string }> =
-      [];
+    const deduped: Array<{ content: string; score: number; source: string }> = [];
     for (const r of rawResults) {
       const key = r.content.slice(0, 100).trim();
       if (seen.has(key)) continue;
@@ -370,29 +333,22 @@ async function searchKnowledgeBaseExecute(
         source: r.docTitle || "知识库",
       });
     }
-    // 按分数降序
     deduped.sort((a, b) => b.score - a.score);
-
-    // 取 top-5
     const reranked = deduped.slice(0, 5);
 
-    // 3. Threshold: 最高分低于 0.5 → 不返回（避免低质量信息）
     const top_score = reranked[0]?.score ?? 0;
     if (top_score < 0.5) {
-      return JSON.stringify({
+      return successResult(JSON.stringify({
         query,
         found: false,
         top_score,
-        message:
-          "知识库中未找到高相关度内容。请基于通用知识回答，并告知用户此信息可能需要人工核实。",
-      });
+        message: "知识库中未找到高相关度内容。请基于通用知识回答，并告知用户此信息可能需要人工核实。",
+      }));
     }
 
-    // 4. 质量标记
-    const qualityLabel =
-      top_score >= 0.8 ? "high" : top_score >= 0.65 ? "medium" : "low";
+    const qualityLabel = top_score >= 0.8 ? "high" : top_score >= 0.65 ? "medium" : "low";
 
-    return JSON.stringify({
+    return successResult(JSON.stringify({
       query,
       found: true,
       quality: qualityLabel,
@@ -402,16 +358,13 @@ async function searchKnowledgeBaseExecute(
         score: r.score,
         source: r.source,
       })),
-      note:
-        qualityLabel === "low"
-          ? "相关度较低，建议在回复中标注'仅供参考'并建议用户联系人工核实。"
-          : undefined,
-    });
+      note: qualityLabel === "low"
+        ? "相关度较低，建议在回复中标注'仅供参考'并建议用户联系人工核实。"
+        : undefined,
+    }));
   } catch (e) {
     logger.error(e, "search_knowledge_base failed");
-    return JSON.stringify({
-      error: "知识库搜索暂时不可用，请基于通用知识回答用户。",
-    });
+    return failedResult(ExecutionErrorCode.EXECUTION_ERROR, "知识库搜索暂时不可用，请基于通用知识回答用户。");
   }
 }
 
@@ -443,7 +396,7 @@ export const customerServiceTools: RegisteredTool[] = [
     execute: createSupportTicketExecute,
     riskLevel: "mutation",
     timeout: 30_000,
-    requireApproval: false, // 创建工单是低风险操作，客服场景无交互式审批UI，设为false避免Agent永久挂起
+    requireApproval: false,
     category: "customer_service",
     parallelizable: false,
   },

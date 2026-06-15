@@ -10,6 +10,7 @@ import { logger } from "@agentforge/logger";
 import { truncateHistory } from "../lib/context-window.js";
 import { isCancelled } from "../lib/abort-utils.js";
 import { createRunContext } from "../runtime/context.js";
+import { executionResultToContent, type ExecutionResult } from "../runtime/results.js";
 import {
   chatMessagesTotal,
   chatTokensTotal,
@@ -212,7 +213,7 @@ export class ChatService {
       }> = [];
       const executedTools: Array<{
         tc: { id: string; name: string; arguments: string };
-        result: string;
+        result: ExecutionResult;
       }> = [];
 
       // 调用 LLM（流式） — 收集token和tool_call，延迟执行
@@ -356,7 +357,8 @@ export class ChatService {
             tool_result: {
               tool_call_id: tc.id,
               name: tc.name,
-              result,
+              result: executionResultToContent(result),
+              status: result.status,
             },
             message_id: assistantMsgId,
           };
@@ -383,7 +385,7 @@ export class ChatService {
         conversationMessages.push({
           role: "tool",
           tool_call_id: tc.id,
-          content: result,
+          content: executionResultToContent(result),
         });
       }
 

@@ -11,7 +11,7 @@ const {
   mockTruncateHistory,
 } = vi.hoisted(() => ({
   mockAgentStreamChat: vi.fn(),
-  mockToolExecute: vi.fn(async () => "tool result"),
+  mockToolExecute: vi.fn(async () => ({ status: "success", output: "tool result" })),
   mockToolListNames: vi.fn(() => ["calculator", "web_search"]),
   mockToolGetDefinitions: vi.fn(() => []),
   mockTruncateHistory: vi.fn((msgs: Array<unknown>) => msgs),
@@ -449,7 +449,7 @@ describe("Agent Memory Compression", () => {
         }
       });
 
-      mockToolExecute.mockResolvedValue("ok");
+      mockToolExecute.mockResolvedValue({ status: "success", output: "ok" });
 
       const events = await collectAgentEvents(
         service.run("conv-mem", "Do a complex multi-step task"),

@@ -11,7 +11,7 @@ const {
   mockTruncateHistory,
 } = vi.hoisted(() => ({
   mockAgentStreamChat: vi.fn(),
-  mockToolExecute: vi.fn(async () => "tool result"),
+  mockToolExecute: vi.fn(async () => ({ status: "success", output: "tool result" })),
   mockToolListNames: vi.fn(() => ["file_write", "calculator"]),
   mockToolGetDefinitions: vi.fn(() => []),
   mockToolGetAll: vi.fn(() => [
@@ -293,7 +293,7 @@ describe("AgentService — Approval Gate (P1-5)", () => {
       ),
     );
 
-    mockToolExecute.mockResolvedValueOnce("4");
+    mockToolExecute.mockResolvedValueOnce({ status: "success", output: "4" });
 
     const gen = service.run("conv-agent", "Calculate 2+2");
     const events = await collectAgentEvents(gen);
@@ -424,7 +424,7 @@ describe("AgentService — Approval Gate (P1-5)", () => {
     mockAgentStreamChat.mockReturnValueOnce(
       createRespondStream("File written successfully!"),
     );
-    mockToolExecute.mockResolvedValueOnce("File written to /tmp/test.txt");
+    mockToolExecute.mockResolvedValueOnce({ status: "success", output: "File written to /tmp/test.txt" });
 
     const gen = service.handleApproval(sessionId, approvalId, "approve");
     const events = await collectAgentEvents(gen);

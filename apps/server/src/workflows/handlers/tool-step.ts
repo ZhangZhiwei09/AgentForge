@@ -6,6 +6,7 @@ import type {
 } from "@agentforge/shared-types";
 import { toolRegistry } from "../../tools/registry.js";
 import { createRunContext } from "../../runtime/context.js";
+import { executionResultToContent } from "../../runtime/results.js";
 import { variableResolver } from "../variable-resolver.js";
 import type { StepHandler, StepContext } from "./types.js";
 
@@ -49,8 +50,8 @@ export class ToolStepHandler implements StepHandler {
       const toolContext = createRunContext(new AbortController().signal);
       const result = await toolRegistry.execute(toolStep.tool, resolvedArgs, toolContext);
       return {
-        status: "completed",
-        output: result,
+        status: result.status === "success" || result.status === "partial" ? "completed" : "failed",
+        output: executionResultToContent(result),
         durationMs: Date.now() - startTime,
       };
     } catch (err) {
