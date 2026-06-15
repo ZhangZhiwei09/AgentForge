@@ -5,6 +5,7 @@ import type {
   WorkflowStep,
 } from "@agentforge/shared-types";
 import { toolRegistry } from "../../tools/registry.js";
+import { createRunContext } from "../../runtime/context.js";
 import { variableResolver } from "../variable-resolver.js";
 import type { StepHandler, StepContext } from "./types.js";
 
@@ -45,7 +46,8 @@ export class ToolStepHandler implements StepHandler {
 
     // Execute the tool
     try {
-      const result = await toolRegistry.execute(toolStep.tool, resolvedArgs);
+      const toolContext = createRunContext(new AbortController().signal);
+      const result = await toolRegistry.execute(toolStep.tool, resolvedArgs, toolContext);
       return {
         status: "completed",
         output: result,

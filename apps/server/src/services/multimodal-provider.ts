@@ -55,6 +55,7 @@ export interface MultimodalLLMProvider {
     temperature?: number,
     maxTokens?: number,
     tools?: ToolDefinition[],
+    signal?: AbortSignal,
   ): AsyncGenerator<MultimodalStreamChunk>;
 
   chatSync(
@@ -121,6 +122,7 @@ class OpenAIMultimodalProvider implements MultimodalLLMProvider {
     temperature: number = 0.7,
     maxTokens?: number,
     tools?: ToolDefinition[],
+    signal?: AbortSignal,
   ): AsyncGenerator<MultimodalStreamChunk> {
     const formattedMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [];
 

@@ -51,6 +51,7 @@ export interface LLMProvider {
     temperature?: number,
     maxTokens?: number,
     tools?: ToolDefinition[],
+    signal?: AbortSignal,
   ): AsyncGenerator<StreamChunk>;
 
   // 非流式聊天：用于记忆提取、Rerank、结构化JSON输出等需要完整响应的场景

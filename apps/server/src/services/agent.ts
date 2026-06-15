@@ -6,6 +6,8 @@ import { getProvider, resolveModel } from "../providers/registry.js";
 import type { ChatMessage } from "../providers/types.js";
 import { toolRegistry } from "../tools/registry.js";
 import { logger } from "@agentforge/logger";
+import type { ExecutionScope } from "../runtime/scope.js";
+import { createChildContext, createRunContext, type RunContext } from "../runtime/context.js";
 import { react_system_prompt } from "@agentforge/shared-prompts";
 import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
 import { truncateHistory } from "../lib/context-window.js";
@@ -152,10 +154,16 @@ export class AgentService {
       maxIterations?: number;
       tools?: string[] | null;
       guardConfig?: Partial<AgentGuardConfig> | null;
+      scope?: ExecutionScope;
     } = {},
   ): AsyncGenerator<AgentStreamEvent> {
     const maxIterations = options.maxIterations || DEFAULT_MAX_ITERATIONS;
     const enabledTools = options.tools?.length ? options.tools : null;
+    const scope = options.scope;
+    const signal = scope?.context.signal;
+
+    // Transition controller from Pending → Running so state machine is accurate
+    scope?.controller.start();
 
     // 1. Resolve model/provider
     const [providerName, resolvedModel] = resolveModel(options.model);
@@ -262,6 +270,33 @@ export class AgentService {
 
     for (let iteration = 0; iteration < maxIterations; iteration++) {
       totalSteps = iteration + 1;
+
+      // Runtime cancellation: check if execution was interrupted
+      if (scope?.controller.shouldStop) {
+        logger.info({ sessionId, iteration: totalSteps }, "Agent interrupted by runtime signal");
+        const result = scope.controller.interrupt();
+        // Save partial content if any
+        if (finalContent) {
+          await prisma.message.create({
+            data: {
+              id: randomUUID(),
+              conversationId,
+              role: "assistant",
+              content: finalContent,
+              model: resolvedModel,
+            },
+          });
+        }
+        await this.saveSession(sessionRecord, scratchpad, "failed", "Interrupted by user");
+        yield {
+          type: "agent_done",
+          total_steps: totalSteps,
+          final_summary: result.termination,
+          session_id: sessionId,
+        };
+        return;
+      }
+
       logger.debug(
         { sessionId, iteration: totalSteps },
         "Agent iteration start",
@@ -329,6 +364,7 @@ export class AgentService {
             undefined, // temperature
             undefined, // maxTokens
             iterationTools,
+            signal, // AbortSignal for cancellation
           )) {
             if (chunk.type === "token" && chunk.content) {
               llmResponse += chunk.content;
@@ -367,6 +403,7 @@ export class AgentService {
                   conversationMessages,
                   sessionId,
                   totalSteps,
+                  scope?.context,
                 );
                 nativeToolCalls.push({
                   name: tc.name,
@@ -800,6 +837,7 @@ export class AgentService {
           conversationMessages,
           sessionId,
           totalSteps,
+          scope?.context,
         );
 
         // Check if the result is a degradation message
@@ -880,6 +918,7 @@ export class AgentService {
   async *resume(
     sessionId: string,
     userResponse: string,
+    scope?: ExecutionScope,
   ): AsyncGenerator<AgentStreamEvent> {
     // 1. Load and validate paused session
     const session = await this.getSession(sessionId);
@@ -918,6 +957,7 @@ export class AgentService {
       task,
       scratchpad,
       scratchpad.length,
+      scope,
     );
   }
 
@@ -931,6 +971,7 @@ export class AgentService {
     action: "approve" | "reject",
     modifiedArgs?: Record<string, unknown>,
     rejectionReason?: string,
+    scope?: ExecutionScope,
   ): AsyncGenerator<AgentStreamEvent> {
     // 1. Load the paused session
     const session = await this.getSession(sessionId);
@@ -1011,6 +1052,7 @@ export class AgentService {
         task,
         scratchpad,
         scratchpad.length,
+        scope,
       );
       return;
     }
@@ -1057,6 +1099,7 @@ export class AgentService {
         conversationMessages,
         sessionId,
         approval.stepNumber,
+        scope?.context, // Propagate parent context for cancellation
       );
 
       // Record result
@@ -1113,6 +1156,7 @@ export class AgentService {
         task,
         scratchpad,
         scratchpad.length,
+        scope,
       );
       return;
     } else {
@@ -1155,6 +1199,7 @@ export class AgentService {
         task,
         scratchpad,
         scratchpad.length,
+        scope,
       );
       return;
     }
@@ -1170,9 +1215,11 @@ export class AgentService {
     task: string,
     scratchpad: AgentStep[],
     startIteration: number,
+    scope?: ExecutionScope,
   ): AsyncGenerator<AgentStreamEvent> {
     const [providerName, resolvedModel] = resolveModel();
     const provider = getProvider(providerName);
+    const signal = scope?.context.signal;
 
     const toolDefs = [AGENT_DECIDE_TOOL, ...toolRegistry.getDefinitions()];
 
@@ -1215,6 +1262,25 @@ export class AgentService {
         { sessionId, iteration: totalSteps },
         "Agent continue iteration",
       );
+
+      // Runtime cancellation: check if execution was interrupted
+      if (scope?.controller.shouldStop) {
+        logger.info({ sessionId, iteration: totalSteps }, "Agent continue loop interrupted by runtime signal");
+        const result = scope.controller.interrupt();
+        await this.saveSession(
+          this.sessionRecord(sessionId, conversationId, task),
+          scratchpad,
+          "failed",
+          "Interrupted by user",
+        );
+        yield {
+          type: "agent_done",
+          total_steps: totalSteps,
+          final_summary: result.termination,
+          session_id: sessionId,
+        };
+        return;
+      }
 
       await this.saveSession(
         this.sessionRecord(sessionId, conversationId, task),
@@ -1266,6 +1332,7 @@ export class AgentService {
             undefined,
             undefined,
             toolDefs,
+            signal, // Pass AbortSignal for cancellation support
           )) {
             if (chunk.type === "token" && chunk.content) {
               llmResponse += chunk.content;
@@ -1302,6 +1369,7 @@ export class AgentService {
                   conversationMessages,
                   sessionId,
                   totalSteps,
+                  scope?.context, // Propagate parent context for cancellation
                 );
                 yield {
                   type: "agent_observe",
@@ -1532,6 +1600,7 @@ export class AgentService {
           conversationMessages,
           sessionId,
           totalSteps,
+          scope?.context, // Propagate parent context for cancellation
         );
         // Check if the result is a degradation message
         const isDegradedC = toolResult.startsWith("[工具执行失败]");
@@ -1773,14 +1842,20 @@ export class AgentService {
     conversationMessages: ChatMessage[],
     sessionId?: string,
     stepNumber?: number,
+    parentContext?: RunContext,
   ): Promise<string> {
     let finalResult: string;
     let attempts = 0;
     let lastError: string = "";
 
+    // Create child context for tool execution (adds to ancestry for tracing)
+    const toolContext = parentContext
+      ? createChildContext(parentContext)
+      : createRunContext(new AbortController().signal);
+
     for (attempts = 0; attempts < DEFAULT_TOOL_RETRY.maxAttempts; attempts++) {
       try {
-        finalResult = await toolRegistry.execute(toolName, args);
+        finalResult = await toolRegistry.execute(toolName, args, toolContext);
 
         // Success — record in conversation
         conversationMessages.push({

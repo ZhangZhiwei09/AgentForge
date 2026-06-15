@@ -3,6 +3,7 @@
 // 返回确定性拒绝消息（不调 LLM，零延迟）
 
 import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
+import type { ExecutionScope } from "../../runtime/scope.js";
 import { streamTokens } from "./types.js";
 import { logger } from "@agentforge/logger";
 
@@ -12,7 +13,10 @@ const SAFETY_REJECT_MESSAGE =
 export class SafetyAgent implements RouteAgent {
   readonly route = "SAFETY" as const;
 
-  async *execute(context: RouteContext): AsyncGenerator<RouteStreamEvent> {
+  async *execute(
+    context: RouteContext,
+    _scope?: ExecutionScope,
+  ): AsyncGenerator<RouteStreamEvent> {
     // 发送 meta
     yield {
       type: "meta",

@@ -422,6 +422,7 @@ ${code.slice(0, 3000)}
     systemPrompt: string,
     temperature: number,
     maxTokens: number,
+    signal?: AbortSignal,
   ): Promise<string> {
     const [providerName, resolvedModel] = resolveModel(model);
     const provider = getProvider(providerName);
@@ -432,7 +433,8 @@ ${code.slice(0, 3000)}
       systemPrompt,
       temperature,
       maxTokens,
-      // No tools — direct prompting
+      undefined, // No tools — direct prompting
+      signal, // Pass AbortSignal for cancellation support
     );
 
     let content = "";

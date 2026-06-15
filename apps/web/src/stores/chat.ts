@@ -60,6 +60,7 @@ interface ChatState {
   setMessages: (msgs: Message[]) => void;
   appendMessage: (msg: Message) => void;
   appendStreamToken: (token: string) => void;
+  finalizeStreamingMessage: (messageId: string) => void;
   setIsStreaming: (v: boolean) => void;
   setDebugInfo: (info: DebugInfo | null) => void;
   setMemoryInfo: (info: MemoryInfo | null) => void;
@@ -123,6 +124,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
           messages: [
             ...msgs.slice(0, -1),
             { ...last, content: last.content + token },
+          ],
+        });
+      }
+    }
+  },
+  // Replace __streaming__ placeholder with a real message ID (preserving partial content)
+  finalizeStreamingMessage: (messageId: string) => {
+    const msgs = get().messages;
+    if (msgs.length > 0) {
+      const last = msgs[msgs.length - 1];
+      if (last.role === "assistant" && last.id === "__streaming__") {
+        set({
+          messages: [
+            ...msgs.slice(0, -1),
+            { ...last, id: messageId },
           ],
         });
       }

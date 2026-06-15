@@ -74,6 +74,7 @@ export class OrchestratorMode implements CollaborationModeExecutor {
           {
             maxIterations: orchRole.maxIterations,
             tools: orchRole.tools.length > 0 ? orchRole.tools : null,
+            scope: context.scope,
           },
         )) {
           const teamEvent = toTeamEvent(event, orchName);
@@ -203,6 +204,7 @@ export class OrchestratorMode implements CollaborationModeExecutor {
         {
           maxIterations: role.maxIterations,
           tools: role.tools.length > 0 ? role.tools : null,
+          scope: context.scope,
         },
       )) {
         const teamEvent = toTeamEvent(event, agentName);

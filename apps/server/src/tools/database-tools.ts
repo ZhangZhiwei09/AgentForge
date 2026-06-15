@@ -1,6 +1,7 @@
 // Database tools — read-only SQL query execution via Prisma
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
+import type { RunContext } from "../runtime/context.js";
 import { prisma } from "../db.js";
 import { logger } from "@agentforge/logger";
 
@@ -69,7 +70,10 @@ function validateReadOnlySql(query: string): string | null {
   return null; // valid
 }
 
-async function dbQueryExecute(args: Record<string, unknown>): Promise<string> {
+async function dbQueryExecute(
+  args: Record<string, unknown>,
+  _context: RunContext,
+): Promise<string> {
   const query = (args.query as string) || "";
 
   // Validate read-only SQL

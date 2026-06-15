@@ -6,6 +6,7 @@ import { AgentService } from "../services/agent.js";
 import { prisma } from "../db.js";
 import { logger } from "@agentforge/logger";
 import { createHono } from "../lib/hono.js";
+import { createExecutionScope } from "../runtime/scope.js";
 import { verifyConversationOwnership } from "../lib/conversation-guard.js";
 
 export const agentRoutes = createHono();
@@ -85,12 +86,14 @@ agentRoutes.post(
 
     // SSE streaming response
     return streamSSE(c, async (stream) => {
+      const scope = createExecutionScope({ signal: c.req.raw.signal });
       try {
         for await (const event of agentService.run(conversation_id, task, {
           model,
           maxIterations: max_iterations,
           tools,
           guardConfig,
+          scope,
         })) {
           await stream.writeSSE({ data: JSON.stringify(event) });
         }
@@ -135,8 +138,9 @@ agentRoutes.post(
 
     // Resume the paused agent session with the user's response
     return streamSSE(c, async (stream) => {
+      const scope = createExecutionScope({ signal: c.req.raw.signal });
       try {
-        for await (const event of agentService.resume(session_id, response)) {
+        for await (const event of agentService.resume(session_id, response, scope)) {
           await stream.writeSSE({ data: JSON.stringify(event) });
         }
         await stream.writeSSE({ data: "[DONE]" });
@@ -213,6 +217,7 @@ agentRoutes.post(
 
     // Stream the approval result + continued agent loop
     return streamSSE(c, async (stream) => {
+      const scope = createExecutionScope({ signal: c.req.raw.signal });
       try {
         for await (const event of agentService.handleApproval(
           session_id,
@@ -220,6 +225,7 @@ agentRoutes.post(
           action,
           modified_args,
           rejection_reason,
+          scope,
         )) {
           await stream.writeSSE({ data: JSON.stringify(event) });
         }

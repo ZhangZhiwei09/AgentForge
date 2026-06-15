@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "../db.js";
 import { logger } from "@agentforge/logger";
 import { createHono } from "../lib/hono.js";
+import { createExecutionScope } from "../runtime/scope.js";
 import { workflowService } from "../workflows/service.js";
 import {
   CreateWorkflowSchema,
@@ -178,11 +179,14 @@ workflowRoutes.post(
     );
 
     return streamSSE(c, async (stream) => {
+      const scope = createExecutionScope({ signal: c.req.raw.signal });
       try {
         for await (const event of workflowService.runWorkflow(
           workflowId,
           user.id,
           variables,
+          undefined, // conversationId
+          scope,
         )) {
           await stream.writeSSE({ data: JSON.stringify(event) });
         }
@@ -334,6 +338,8 @@ workflowRoutes.post("/api/workflows/runs/:run_id/retry", async (c) => {
         run.workflowId,
         user.id,
         run.input,
+        undefined, // conversationId
+        createExecutionScope({ signal: c.req.raw.signal }),
       )) {
         await stream.writeSSE({ data: JSON.stringify(event) });
       }

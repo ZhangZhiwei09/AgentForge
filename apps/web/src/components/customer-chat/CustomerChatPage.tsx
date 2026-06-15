@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from "react";
 import {
   Send,
+  Square,
   MessageCircle,
   BookOpen,
   ChevronDown,
@@ -29,6 +30,7 @@ export function CustomerChatPage() {
     sendMessage,
     loadHistory,
     clearSession,
+    abort,
   } = useCustomerChatStream();
   const [input, setInput] = useState("");
   const [showRightPanel, setShowRightPanel] = useState(true);
@@ -297,27 +299,36 @@ export function CustomerChatPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                disabled={isStreaming}
                 placeholder="输入您的问题，Enter 发送..."
-                className="flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-gray-400 disabled:opacity-50"
+                className="flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-gray-400"
               />
               <button
                 onClick={() => setShowVideoCall(true)}
                 disabled={isStreaming}
-                className="flex-shrink-0 rounded-lg border border-[hsl(var(--cs-border))] bg-white p-2 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--cs-primary))] hover:border-[hsl(var(--cs-primary))] transition-all disabled:opacity-30"
+                className="flex-shrink-0 rounded-lg border border-[hsl(var(--cs-border))] bg-white p-2 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--cs-primary))] hover:border-[hsl(var(--cs-primary))] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                 aria-label="开始视频通话"
-                title="视频客服"
+                title={isStreaming ? "请等待AI回复完成" : "视频客服"}
               >
                 <Video className="h-4 w-4" />
               </button>
-              <button
-                onClick={handleSend}
-                disabled={!input.trim() || isStreaming}
-                className="flex-shrink-0 rounded-lg bg-[hsl(var(--cs-primary))] p-2 text-white transition-all hover:bg-[hsl(var(--cs-primary-dark))] disabled:opacity-30 disabled:cursor-not-allowed hover:shadow-md"
-                aria-label="发送消息"
-              >
-                <Send className="h-4 w-4" />
-              </button>
+              {isStreaming ? (
+                <button
+                  onClick={abort}
+                  className="flex-shrink-0 rounded-lg bg-red-600 p-2 text-white transition-all hover:bg-red-700 hover:shadow-md"
+                  aria-label="停止回复"
+                >
+                  <Square className="h-4 w-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim()}
+                  className="flex-shrink-0 rounded-lg bg-[hsl(var(--cs-primary))] p-2 text-white transition-all hover:bg-[hsl(var(--cs-primary-dark))] disabled:opacity-30 disabled:cursor-not-allowed hover:shadow-md"
+                  aria-label="发送消息"
+                >
+                  <Send className="h-4 w-4" />
+                </button>
+              )}
             </div>
             <p className="mt-2 text-center text-[10px] text-[hsl(var(--muted-foreground))]">
               客服工作时间：工作日 9:00 - 18:00 · AI

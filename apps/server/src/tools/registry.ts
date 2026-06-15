@@ -7,6 +7,7 @@ import type {
   ToolExecutor,
   CircuitBreakerState,
 } from "./types.js";
+import type { RunContext } from "../runtime/context.js";
 import { builtinTools } from "./builtins.js";
 import { fileTools } from "./file-tools.js";
 import { databaseTools } from "./database-tools.js";
@@ -74,9 +75,13 @@ class ToolRegistry {
     return definitions;
   }
 
-  // Execute a tool by name with arguments
-  // Supports: circuit breaker, per-tool timeout, error tracking
-  async execute(name: string, args: Record<string, unknown>): Promise<string> {
+  // Execute a tool by name with arguments and runtime context
+  // Supports: circuit breaker, per-tool timeout, cancellation (via context.signal), error tracking
+  async execute(
+    name: string,
+    args: Record<string, unknown>,
+    context: RunContext,
+  ): Promise<string> {
     this.init();
     const tool = this.tools.get(name);
     if (!tool) {
@@ -100,11 +105,16 @@ class ToolRegistry {
       });
     }
 
-    // Execute with timeout
+    // Fast path: check if already aborted before execution
+    if (context.signal?.aborted) {
+      return `Error: tool "${name}" execution cancelled`;
+    }
+
+    // Execute with timeout + cancellation
     const timeout = tool.timeout || 30_000;
     try {
       const start = Date.now();
-      const result = await this.executeWithTimeout(tool.execute, args, timeout);
+      const result = await this.executeWithTimeout(tool.execute, args, timeout, context);
       const duration = Date.now() - start;
 
       // Reset circuit breaker on success
@@ -175,25 +185,47 @@ class ToolRegistry {
     }
   }
 
-  // Execute with a timeout — if the tool takes too long, reject
+  // Execute with timeout + cancellation signal (unified via AbortSignal.any)
+  // Node 20+: AbortSignal.any() combines user cancel + timeout into one signal
+  // Tools only check signal.aborted — timeout/cancel/system-shutdown all unified
   private async executeWithTimeout(
     executor: ToolExecutor,
     args: Record<string, unknown>,
     timeoutMs: number,
+    context: RunContext,
   ): Promise<string> {
-    return new Promise<string>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(new Error(`Tool execution timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
+    const timeoutSignal = AbortSignal.timeout(timeoutMs);
 
-      executor(args)
+    // Combine user cancellation signal with timeout signal
+    const signals: AbortSignal[] = [timeoutSignal];
+    if (context.signal) {
+      signals.push(context.signal);
+    }
+    const combinedSignal =
+      signals.length > 1
+        ? AbortSignal.any(signals)
+        : timeoutSignal;
+
+    return new Promise<string>((resolve, reject) => {
+      const onAbort = () => {
+        const reason = timeoutSignal.aborted
+          ? new Error(`Tool execution timed out after ${timeoutMs}ms`)
+          : new DOMException("Aborted", "AbortError");
+        reject(reason);
+      };
+
+      combinedSignal.addEventListener("abort", onAbort, { once: true });
+
+      executor(args, context)
         .then((result) => {
-          clearTimeout(timer);
           resolve(result);
         })
         .catch((err) => {
-          clearTimeout(timer);
           reject(err);
+        })
+        .finally(() => {
+          // Production-grade: clean up listener to prevent MaxListenersExceededWarning
+          combinedSignal.removeEventListener("abort", onAbort);
         });
     });
   }

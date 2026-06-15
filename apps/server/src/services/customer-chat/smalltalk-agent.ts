@@ -9,6 +9,7 @@ import type { ChatMessage } from "../../providers/types.js";
 import { logger } from "@agentforge/logger";
 import { extractJSONFromLLMResponse } from "../../lib/json-utils.js";
 import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
+import type { ExecutionScope } from "../../runtime/scope.js";
 import { streamTokens } from "./types.js";
 
 // ── Zod Schema ──
@@ -49,7 +50,10 @@ const SMALLTALK_SYSTEM_PROMPT = `你是 AgentForge 平台的智能客服助手�
 export class SmallTalkAgent implements RouteAgent {
   readonly route = "SMALL_TALK" as const;
 
-  async *execute(context: RouteContext): AsyncGenerator<RouteStreamEvent> {
+  async *execute(
+    context: RouteContext,
+    _scope?: ExecutionScope,
+  ): AsyncGenerator<RouteStreamEvent> {
     const {
       resolvedModel,
       providerName,

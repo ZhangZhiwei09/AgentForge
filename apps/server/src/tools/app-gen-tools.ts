@@ -3,6 +3,7 @@
 // Follows the same pattern as builtins.ts and other tool files
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
+import type { RunContext } from "../runtime/context.js";
 
 // ---------------------------------------------------------------------------
 // 1. plan_app_structure — Design the file tree for the app
@@ -37,6 +38,7 @@ const planAppStructureDef: ToolDefinition = {
 
 async function planAppStructureExecute(
   args: Record<string, unknown>,
+  _context: RunContext,
 ): Promise<string> {
   const requirements = (args.requirements as string) || "";
   const framework = (args.framework as string) || "react";
@@ -148,6 +150,7 @@ const generateFileDef: ToolDefinition = {
 
 async function generateFileExecute(
   args: Record<string, unknown>,
+  _context: RunContext,
 ): Promise<string> {
   const path = (args.path as string) || "";
   const language = (args.language as string) || "tsx";
@@ -243,6 +246,7 @@ const reviewCodeDef: ToolDefinition = {
 
 async function reviewCodeExecute(
   args: Record<string, unknown>,
+  _context: RunContext,
 ): Promise<string> {
   const path = (args.path as string) || "";
   const code = (args.code as string) || "";
@@ -313,6 +317,7 @@ const modifyFileDef: ToolDefinition = {
 
 async function modifyFileExecute(
   args: Record<string, unknown>,
+  _context: RunContext,
 ): Promise<string> {
   const path = (args.path as string) || "";
   const currentCode = (args.current_code as string) || "";

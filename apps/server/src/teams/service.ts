@@ -16,6 +16,7 @@ import type {
   TeamStreamEvent,
 } from "@agentforge/shared-types";
 import type { ExecutionContext } from "./modes/types.js";
+import type { ExecutionScope } from "../runtime/scope.js";
 
 // ---- Types ----
 
@@ -205,6 +206,7 @@ export class TeamService {
     task: string,
     inputVariables?: Record<string, unknown>,
     conversationId?: string,
+    scope?: ExecutionScope,
   ): AsyncGenerator<TeamStreamEvent> {
     const startTime = Date.now();
     const team = await prisma.agentTeam.findFirst({
@@ -246,6 +248,7 @@ export class TeamService {
       bus,
       blackboard: bb,
       variables: inputVariables || {},
+      scope,
     };
 
     // Subscribe to all messages to persist them

@@ -2,6 +2,7 @@
 // Each tool exports its definition and executor function with risk levels
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
+import type { RunContext } from "../runtime/context.js";
 
 // ---------------------------------------------------------------------------
 // 1. get_current_time — returns current date/time with optional timezone
@@ -29,6 +30,7 @@ const getCurrentTimeDef: ToolDefinition = {
 
 async function getCurrentTimeExecute(
   args: Record<string, unknown>,
+  _context: RunContext,
 ): Promise<string> {
   const timezone = (args.timezone as string) || "UTC";
   try {
@@ -78,6 +80,7 @@ const calculatorDef: ToolDefinition = {
 
 async function calculatorExecute(
   args: Record<string, unknown>,
+  _context: RunContext,
 ): Promise<string> {
   const expression = (args.expression as string) || "";
 
@@ -166,6 +169,7 @@ const webSearchDef: ToolDefinition = {
 
 async function webSearchExecute(
   args: Record<string, unknown>,
+  context: RunContext,
 ): Promise<string> {
   const query = (args.query as string) || "";
   const maxResults = Math.min(
@@ -192,11 +196,9 @@ async function webSearchExecute(
     });
   }
 
-  // Tavily API integration
+  // Registry already handles timeout + cancellation via executeWithTimeout;
+  // use context.signal directly to avoid redundant timeout signal allocation.
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15_000);
-
     const response = await fetch("https://api.tavily.com/search", {
       method: "POST",
       headers: {
@@ -209,10 +211,8 @@ async function webSearchExecute(
         search_depth: "basic",
         include_answer: true,
       }),
-      signal: controller.signal,
+      signal: context.signal,
     });
-
-    clearTimeout(timeout);
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => "Unknown error");
@@ -291,6 +291,7 @@ const httpRequestDef: ToolDefinition = {
 
 async function httpRequestExecute(
   args: Record<string, unknown>,
+  context: RunContext,
 ): Promise<string> {
   const url = (args.url as string) || "";
   const method = ((args.method as string) || "GET").toUpperCase();
@@ -302,10 +303,9 @@ async function httpRequestExecute(
     return "Error: URL must start with http:// or https://";
   }
 
+  // Registry already handles timeout + cancellation via executeWithTimeout;
+  // use context.signal directly to avoid redundant timeout signal allocation.
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 20_000);
-
     const fetchOptions: RequestInit = {
       method,
       headers: {
@@ -313,7 +313,7 @@ async function httpRequestExecute(
         Accept: "application/json, text/plain, */*",
         ...headers,
       },
-      signal: controller.signal,
+      signal: context.signal,
     };
 
     if (method === "POST" && body) {
@@ -323,7 +323,6 @@ async function httpRequestExecute(
     }
 
     const response = await fetch(url, fetchOptions);
-    clearTimeout(timeout);
 
     const contentType = response.headers.get("content-type") || "";
     let responseBody: string;

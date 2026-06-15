@@ -2,16 +2,21 @@ import { useState, useCallback, useRef } from "react";
 import type { ChatStreamChunk, Message } from "@agentforge/shared-types";
 import { useChatStore } from "@/stores/chat";
 import { client } from "@/lib/api";
+import { generateUUID } from "@/lib/uuid";
+import { isAbortError } from "@/lib/abort-utils";
 
 export function useStreamChat() {
   const [isLoading, setIsLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  // Request counter to prevent stale abort handlers from corrupting new requests
+  const requestIdRef = useRef(0);
   const {
     currentConversationId,
     selectedModel,
     enabledTools,
     appendMessage,
     appendStreamToken,
+    finalizeStreamingMessage,
     setDebugInfo,
     setMemoryInfo,
     setIsStreaming,
@@ -24,6 +29,13 @@ export function useStreamChat() {
       if (!currentConversationId) return;
       setIsLoading(true);
       setIsStreaming(true);
+
+      // Create abort controller for this request
+      abortRef.current?.abort();
+      abortRef.current = new AbortController();
+
+      // Bump request ID so previous abort handlers know they're stale
+      const thisRequestId = ++requestIdRef.current;
 
       const userMsg: Message = {
         id: `user-${Date.now()}`,
@@ -48,12 +60,15 @@ export function useStreamChat() {
       try {
         let metaInfo: Partial<ChatStreamChunk> = {};
 
-        for await (const chunk of client.streamChat({
-          conversation_id: currentConversationId,
-          message: content,
-          model: selectedModel,
-          tools: enabledTools.length > 0 ? enabledTools : null,
-        })) {
+        for await (const chunk of client.streamChat(
+          {
+            conversation_id: currentConversationId,
+            message: content,
+            model: selectedModel,
+            tools: enabledTools.length > 0 ? enabledTools : null,
+          },
+          abortRef.current.signal,
+        )) {
           if (chunk.type === "meta") {
             metaInfo = chunk;
           } else if (chunk.type === "token" && chunk.content) {
@@ -90,10 +105,22 @@ export function useStreamChat() {
           }
         }
       } catch (err) {
-        console.error("Chat stream failed:", err);
+        // User-initiated abort: only finalize if this is still the current request.
+        // Stale abort handlers must NOT touch the streaming message — it belongs to
+        // a subsequent request that started after the user aborted this one.
+        if (isAbortError(err)) {
+          if (requestIdRef.current === thisRequestId) {
+            finalizeStreamingMessage(generateUUID());
+          }
+        } else {
+          console.error("Chat stream failed:", err);
+        }
       } finally {
-        setIsLoading(false);
-        setIsStreaming(false);
+        // Only clear loading/streaming state if this request is still current
+        if (requestIdRef.current === thisRequestId) {
+          setIsLoading(false);
+          setIsStreaming(false);
+        }
       }
     },
     [
@@ -102,6 +129,7 @@ export function useStreamChat() {
       enabledTools,
       appendMessage,
       appendStreamToken,
+      finalizeStreamingMessage,
       setDebugInfo,
       setMemoryInfo,
       setIsStreaming,

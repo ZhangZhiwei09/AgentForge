@@ -152,6 +152,7 @@ ${bb.read("con_argument_1") || ""}
         {
           maxIterations: judgeRole.maxIterations,
           tools: judgeRole.tools.length > 0 ? judgeRole.tools : null,
+          scope: context.scope,
         },
       )) {
         const teamEvent = toTeamEvent(event, judgeRole.name);
@@ -241,6 +242,7 @@ ${bb.toContextString()}
         {
           maxIterations: role.maxIterations,
           tools: role.tools.length > 0 ? role.tools : null,
+          scope: context.scope,
         },
       )) {
         const teamEvent = toTeamEvent(event, role.name);

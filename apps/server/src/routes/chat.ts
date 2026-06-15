@@ -58,6 +58,7 @@ chatRoutes.post(
           undefined,
           kb_ids ?? null,
           tools ?? null,
+          c.req.raw.signal, // Pass AbortSignal for client disconnect detection
         )) {
           // 每个 chunk 序列化为 JSON，格式：data: {json}\n\n
           await stream.writeSSE({ data: JSON.stringify(chunk) });
