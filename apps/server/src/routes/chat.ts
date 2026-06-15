@@ -85,7 +85,14 @@ chatRoutes.get("/api/conversations/:id/messages", async (c) => {
   }
 
   const messages = await prisma.message.findMany({
-    where: { conversationId },
+    where: {
+      conversationId,
+      // Defense-in-depth: strip internal system prompts that may have leaked into user messages
+      NOT: {
+        role: "user",
+        content: { contains: "[系统提示]" },
+      },
+    },
     orderBy: { createdAt: "asc" },
   });
 

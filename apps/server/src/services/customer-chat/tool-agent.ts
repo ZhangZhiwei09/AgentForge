@@ -149,6 +149,7 @@ export class ToolAgent implements RouteAgent {
         maxIterations: 5,
         tools: enabledTools,
         scope,
+        skipUserMessageSave: true, // customer-chat.ts already saved the raw user message
         guardConfig: {
           maxTokens: 2000,
           maxCostCents: 5, // $0.05

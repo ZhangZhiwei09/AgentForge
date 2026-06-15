@@ -155,6 +155,7 @@ export class AgentService {
       tools?: string[] | null;
       guardConfig?: Partial<AgentGuardConfig> | null;
       scope?: ExecutionScope;
+      skipUserMessageSave?: boolean;
     } = {},
   ): AsyncGenerator<AgentStreamEvent> {
     const maxIterations = options.maxIterations || DEFAULT_MAX_ITERATIONS;
@@ -237,17 +238,19 @@ export class AgentService {
     }));
     const conversationMessages = truncateHistory(rawMessages, 6000);
 
-    // 7. Add the user's task as the first user message (save to DB)
-    const taskMsgId = randomUUID();
-    await prisma.message.create({
-      data: {
-        id: taskMsgId,
-        conversationId,
-        role: "user",
-        content: task,
-        model: resolvedModel,
-      },
-    });
+    // 7. Save the task as a user message (skip if caller already persisted a clean version)
+    if (!options.skipUserMessageSave) {
+      const taskMsgId = randomUUID();
+      await prisma.message.create({
+        data: {
+          id: taskMsgId,
+          conversationId,
+          role: "user",
+          content: task,
+          model: resolvedModel,
+        },
+      });
+    }
 
     // 8. Send meta event
     yield {
