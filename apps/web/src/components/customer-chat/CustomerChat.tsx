@@ -4,6 +4,7 @@ import {
   MessageCircle,
   X,
   Send,
+  Square,
   Trash2,
   BookOpen,
   ChevronDown,
@@ -307,7 +308,17 @@ export function CustomerChat() {
         }
       }
     } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (err instanceof DOMException && err.name === "AbortError") {
+        // Preserve partial streaming content
+        setMessages((prev) => {
+          const last = prev[prev.length - 1];
+          if (last?.id === "__stream__") {
+            return [...prev.slice(0, -1), { ...last, id: `msg-${Date.now()}` }];
+          }
+          return prev;
+        });
+        return;
+      }
       console.error("Customer chat failed:", err);
       setMessages((prev) => [
         ...prev,
@@ -532,14 +543,24 @@ export function CustomerChat() {
                 placeholder="输入您的问题..."
                 className="flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-gray-400"
               />
-              <button
-                onClick={handleSend}
-                disabled={!input.trim()}
-                className="flex-shrink-0 rounded-lg p-1.5 text-[hsl(var(--primary))] transition-colors hover:bg-[hsl(var(--primary))]/10 disabled:opacity-30 disabled:cursor-not-allowed"
-                aria-label="发送消息"
-              >
-                <Send className="h-4 w-4" />
-              </button>
+              {isTyping ? (
+                <button
+                  onClick={() => abortRef.current?.abort()}
+                  className="flex-shrink-0 rounded-lg p-1.5 text-red-600 transition-colors hover:bg-red-100"
+                  aria-label="停止回复"
+                >
+                  <Square className="h-4 w-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={handleSend}
+                  disabled={!input.trim()}
+                  className="flex-shrink-0 rounded-lg p-1.5 text-[hsl(var(--primary))] transition-colors hover:bg-[hsl(var(--primary))]/10 disabled:opacity-30 disabled:cursor-not-allowed"
+                  aria-label="发送消息"
+                >
+                  <Send className="h-4 w-4" />
+                </button>
+              )}
             </div>
             <p className="mt-1.5 text-center text-[10px] text-gray-400">
               客服工作时间：工作日 9:00 - 18:00

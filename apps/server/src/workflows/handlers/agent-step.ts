@@ -39,6 +39,7 @@ export class AgentStepHandler implements StepHandler {
           model: agentStep.model ?? null,
           maxIterations: agentStep.max_iterations ?? 10,
           tools: agentStep.tools ?? null,
+          scope: context.scope,
         },
       )) {
         events.push(event);

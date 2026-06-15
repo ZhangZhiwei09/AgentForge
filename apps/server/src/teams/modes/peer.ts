@@ -64,6 +64,7 @@ export class PeerMode implements CollaborationModeExecutor {
             {
               maxIterations: agent.maxIterations,
               tools: agent.tools.length > 0 ? agent.tools : null,
+              scope: context.scope,
             },
           )) {
             const teamEvent = toTeamEvent(event, agent.name);

@@ -3,6 +3,7 @@
 
 import type { ChatMessage } from "../../providers/types.js";
 import type { ContentBlock } from "@agentforge/shared-types";
+import type { ExecutionScope } from "../../runtime/scope.js";
 
 // ── 路由分类 ──
 
@@ -103,7 +104,10 @@ export type RouteStreamEvent =
 
 export interface RouteAgent {
   readonly route: RouteName;
-  execute(context: RouteContext): AsyncGenerator<RouteStreamEvent>;
+  execute(
+    context: RouteContext,
+    scope?: ExecutionScope,
+  ): AsyncGenerator<RouteStreamEvent>;
 }
 
 // ── 共享工具函数 ──

@@ -309,9 +309,11 @@ describe("ChatService", () => {
         const toolResultEvts = events.filter((e) => e.type === "tool_result");
         expect(toolCallEvts.length).toBeGreaterThanOrEqual(1);
         expect(toolResultEvts.length).toBeGreaterThanOrEqual(1);
-        expect(mockToolExecute).toHaveBeenCalledWith("calculator", {
-          expr: "2+2",
-        });
+        expect(mockToolExecute).toHaveBeenCalledWith(
+          "calculator",
+          { expr: "2+2" },
+          expect.any(Object), // RunContext
+        );
       });
 
       it("should limit tool calling to MAX_TOOL_ROUNDS (5)", async () => {

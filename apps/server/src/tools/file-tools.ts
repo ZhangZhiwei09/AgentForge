@@ -6,6 +6,7 @@ import { resolve, join, normalize, basename } from "node:path";
 import { glob } from "node:fs/promises"; // Note: glob is available in Node 22+
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
+import type { RunContext } from "../runtime/context.js";
 
 // Workspace root — all file operations are restricted to this directory
 // Default: project root. Override with FILE_WORKSPACE env var.
@@ -51,7 +52,10 @@ const fileReadDef: ToolDefinition = {
   },
 };
 
-async function fileReadExecute(args: Record<string, unknown>): Promise<string> {
+async function fileReadExecute(
+  args: Record<string, unknown>,
+  _context: RunContext,
+): Promise<string> {
   const userPath = (args.path as string) || "";
   const maxLines = Math.min(
     Math.max(1, (args.max_lines as number) || 500),
@@ -112,6 +116,7 @@ const fileWriteDef: ToolDefinition = {
 
 async function fileWriteExecute(
   args: Record<string, unknown>,
+  _context: RunContext,
 ): Promise<string> {
   const userPath = (args.path as string) || "";
   const content = (args.content as string) || "";
@@ -175,6 +180,7 @@ const fileSearchDef: ToolDefinition = {
 
 async function fileSearchExecute(
   args: Record<string, unknown>,
+  _context: RunContext,
 ): Promise<string> {
   const pattern = (args.pattern as string) || "**/*";
   const contains = (args.contains as string) || undefined;

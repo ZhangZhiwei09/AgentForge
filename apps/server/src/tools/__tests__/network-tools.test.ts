@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { createRunContext } from "../../runtime/context.js";
 
 // We test the web_fetch tool — mock global fetch
 const { networkTools } = await import("../network-tools.js");
+
+const testCtx = createRunContext(new AbortController().signal);
 
 describe("web_fetch tool", () => {
   const webFetchTool = networkTools[0];
@@ -33,7 +36,7 @@ describe("web_fetch tool", () => {
       text: async () => "<html><body>Hello World</body></html>",
     } as unknown as Response);
 
-    const result = await webFetchTool.execute({ url: "https://example.com" });
+    const result = await webFetchTool.execute({ url: "https://example.com" }, testCtx);
     const parsed = JSON.parse(result);
 
     expect(parsed.url).toBe("https://example.com");
@@ -56,7 +59,7 @@ describe("web_fetch tool", () => {
     const result = await webFetchTool.execute({
       url: "https://example.com",
       max_chars: 500,
-    });
+    }, testCtx);
     const parsed = JSON.parse(result);
 
     expect(parsed.content.length).toBeLessThanOrEqual(500);
@@ -64,13 +67,13 @@ describe("web_fetch tool", () => {
   });
 
   it("should reject invalid URLs", async () => {
-    const result = await webFetchTool.execute({ url: "not-a-url" });
+    const result = await webFetchTool.execute({ url: "not-a-url" }, testCtx);
     expect(result).toContain("Error");
     expect(result).toContain("http");
   });
 
   it("should reject URLs without http/https prefix", async () => {
-    const result = await webFetchTool.execute({ url: "ftp://example.com" });
+    const result = await webFetchTool.execute({ url: "ftp://example.com" }, testCtx);
     expect(result).toContain("Error");
   });
 
@@ -83,7 +86,7 @@ describe("web_fetch tool", () => {
 
     const result = await webFetchTool.execute({
       url: "https://example.com/404",
-    });
+    }, testCtx);
     expect(result).toContain("Error");
     expect(result).toContain("404");
   });
@@ -91,7 +94,7 @@ describe("web_fetch tool", () => {
   it("should handle network errors gracefully", async () => {
     global.fetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
-    const result = await webFetchTool.execute({ url: "https://example.com" });
+    const result = await webFetchTool.execute({ url: "https://example.com" }, testCtx);
     expect(result).toContain("Error");
     expect(result).toContain("Network error");
   });
@@ -105,7 +108,7 @@ describe("web_fetch tool", () => {
       text: async () => "short content",
     } as unknown as Response);
 
-    const result = await webFetchTool.execute({ url: "https://example.com" });
+    const result = await webFetchTool.execute({ url: "https://example.com" }, testCtx);
     const parsed = JSON.parse(result);
 
     // Default is 10000, content is shorter
@@ -113,7 +116,7 @@ describe("web_fetch tool", () => {
   });
 
   it("should return error for missing URL parameter", async () => {
-    const result = await webFetchTool.execute({});
+    const result = await webFetchTool.execute({}, testCtx);
     expect(result).toContain("Error");
   });
 });

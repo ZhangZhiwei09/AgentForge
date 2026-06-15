@@ -113,11 +113,15 @@ export class AgentForgeClient {
 
   // ---- Streaming ----
 
-  async *streamChat(request: ChatRequest): AsyncGenerator<ChatStreamChunk> {
+  async *streamChat(
+    request: ChatRequest,
+    signal?: AbortSignal,
+  ): AsyncGenerator<ChatStreamChunk> {
     const res = await fetch(`${this.baseUrl}/api/chat`, {
       method: "POST",
       headers: this.authHeaders(),
       body: JSON.stringify(request),
+      signal,
     });
 
     if (!res.ok) {

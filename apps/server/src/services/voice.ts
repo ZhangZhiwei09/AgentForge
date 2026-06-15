@@ -224,6 +224,7 @@ export class VoiceService {
         "", // systemPrompt (use built-in)
         null, // kbIds
         null, // enabledTools
+        signal, // AbortSignal for cancellation
       )) {
         if (signal.aborted) break;
 

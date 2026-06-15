@@ -8,6 +8,8 @@ import { MemoryEngine } from "./memory-engine.js";
 import { toolRegistry } from "../tools/registry.js";
 import { logger } from "@agentforge/logger";
 import { truncateHistory } from "../lib/context-window.js";
+import { isCancelled } from "../lib/abort-utils.js";
+import { createRunContext } from "../runtime/context.js";
 import {
   chatMessagesTotal,
   chatTokensTotal,
@@ -112,6 +114,7 @@ export class ChatService {
     systemPrompt: string = "",
     kbIds: string[] | null = null,
     enabledTools?: string[] | null,
+    signal?: AbortSignal,
   ): AsyncGenerator<Record<string, unknown>> {
     // 1. 解析模型 → 找到对应的 Provider
     const [providerName, resolvedModel] = resolveModel(modelId);
@@ -177,6 +180,8 @@ export class ChatService {
 
     // 9. 预生成助手消息 ID（用于前端在流开始前就知道消息 ID）
     const assistantMsgId = randomUUID();
+    // Create RunContext for tool execution (from signal if available, standalone otherwise)
+    const runContext = createRunContext(signal ?? new AbortController().signal);
     let fullContent = ""; // 累积所有轮次的响应文本
     let firstTokenTs: number | null = null;
     const startTs = Date.now();
@@ -219,6 +224,7 @@ export class ChatService {
           undefined,
           undefined,
           toolDefs.length > 0 ? toolDefs : undefined,
+          signal,
         )) {
           if (chunk.type === "token") {
             if (firstTokenTs === null) firstTokenTs = Date.now();
@@ -254,6 +260,24 @@ export class ChatService {
           }
         }
       } catch (err) {
+        // Check if user interrupted (AbortError from signal)
+        if (isCancelled(err, signal)) {
+          logger.info({ round }, "Chat interrupted by user");
+          if (fullContent.length > 0) {
+            // Save partial content to DB
+            await prisma.message.create({
+              data: {
+                id: assistantMsgId,
+                conversationId,
+                role: "assistant",
+                content: fullContent,
+                model: resolvedModel,
+              },
+            });
+          }
+          return;
+        }
+
         const errMsg = err instanceof Error ? err.message : "Unknown error";
         logger.error(
           { err: errMsg, round },
@@ -301,7 +325,7 @@ export class ChatService {
                 name: ptc.name,
                 arguments: JSON.stringify(ptc.args),
               },
-              result: await toolRegistry.execute(ptc.name, ptc.args),
+              result: await toolRegistry.execute(ptc.name, ptc.args, runContext),
             })),
           );
           executedTools.push(...parallelResults);
@@ -309,7 +333,7 @@ export class ChatService {
 
         // Execute sequential tools one by one
         for (const ptc of sequential) {
-          const result = await toolRegistry.execute(ptc.name, ptc.args);
+          const result = await toolRegistry.execute(ptc.name, ptc.args, runContext);
           executedTools.push({
             tc: {
               id: ptc.id,

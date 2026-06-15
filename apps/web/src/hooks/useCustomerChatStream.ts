@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { generateUUID } from "@/lib/uuid";
+import { isAbortError } from "@/lib/abort-utils";
 import { extractCardBlocks } from "@/components/markdown/card-parser";
 import type {
   KnowledgeResult,
@@ -309,7 +310,20 @@ export function useCustomerChatStream() {
           }
         }
       } catch (err: unknown) {
-        if (err instanceof DOMException && err.name === "AbortError") return;
+        if (isAbortError(err)) {
+          // Preserve partial streaming content with a real message ID
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last?.id === "__stream__") {
+              return [
+                ...prev.slice(0, -1),
+                { ...last, id: `msg-${Date.now()}` },
+              ];
+            }
+            return prev;
+          });
+          return;
+        }
         console.error("Customer chat failed:", err);
         setMessages((prev) => [
           ...prev,
@@ -328,6 +342,10 @@ export function useCustomerChatStream() {
     [sessionId],
   );
 
+  const abort = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
   return {
     messages,
     isStreaming,
@@ -336,6 +354,7 @@ export function useCustomerChatStream() {
     sendMessage,
     loadHistory,
     clearSession,
+    abort,
   };
 }
 

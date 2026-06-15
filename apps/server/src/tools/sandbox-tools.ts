@@ -1,6 +1,7 @@
 // Sandbox tools — code_execute with Docker isolation
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
+import type { RunContext } from "../runtime/context.js";
 import { logger } from "@agentforge/logger";
 
 // Tool definition for code_execute
@@ -36,6 +37,7 @@ const codeExecuteDef: ToolDefinition = {
 
 async function codeExecuteExecute(
   args: Record<string, unknown>,
+  _context: RunContext,
 ): Promise<string> {
   const language = (args.language as string) || "";
   const code = (args.code as string) || "";

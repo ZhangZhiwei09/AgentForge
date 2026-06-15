@@ -1,6 +1,7 @@
 // Network tools — web_fetch for URL content retrieval
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
+import type { RunContext } from "../runtime/context.js";
 import { logger } from "@agentforge/logger";
 
 // Tool definition for web_fetch
@@ -28,7 +29,10 @@ const webFetchDef: ToolDefinition = {
   },
 };
 
-async function webFetchExecute(args: Record<string, unknown>): Promise<string> {
+async function webFetchExecute(
+  args: Record<string, unknown>,
+  context: RunContext,
+): Promise<string> {
   const url = (args.url as string) || "";
   const maxChars = Math.min((args.max_chars as number) || 10_000, 50_000);
 
@@ -39,9 +43,8 @@ async function webFetchExecute(args: Record<string, unknown>): Promise<string> {
 
   const start = Date.now();
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15_000);
-
+  // Registry already handles timeout + cancellation via executeWithTimeout;
+  // use context.signal directly to avoid redundant timeout signal allocation.
   try {
     const response = await fetch(url, {
       method: "GET",
@@ -49,11 +52,9 @@ async function webFetchExecute(args: Record<string, unknown>): Promise<string> {
         "User-Agent": "AgentForge/1.0",
         Accept: "text/html, text/plain, application/json, */*",
       },
-      signal: controller.signal,
+      signal: context.signal,
       redirect: "follow",
     });
-
-    clearTimeout(timeout);
 
     const contentType = response.headers.get("content-type") || "unknown";
     const status = response.status;
@@ -93,7 +94,6 @@ async function webFetchExecute(args: Record<string, unknown>): Promise<string> {
       2,
     );
   } catch (err: unknown) {
-    clearTimeout(timeout);
     const msg = err instanceof Error ? err.message : "Unknown error";
 
     if ((err as Error)?.name === "AbortError") {

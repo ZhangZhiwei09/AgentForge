@@ -1,6 +1,7 @@
 // Step Handler Types — interfaces shared by all step handlers
 import type { WorkflowStep, StepResult } from "@agentforge/shared-types";
 import type { VariableContext } from "../variable-resolver.js";
+import type { ExecutionScope } from "../../runtime/scope.js";
 
 export interface StepContext {
   runId: string;
@@ -15,6 +16,7 @@ export interface StepContext {
     details: Record<string, unknown> | undefined,
     timeoutMs: number,
   ) => Promise<ApprovalDecision>;
+  scope?: ExecutionScope;
 }
 
 export interface ApprovalDecision {

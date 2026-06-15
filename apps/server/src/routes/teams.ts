@@ -5,6 +5,7 @@ import { zValidator } from "@hono/zod-validator";
 import { z } from "zod";
 import { logger } from "@agentforge/logger";
 import { createHono } from "../lib/hono.js";
+import { createExecutionScope } from "../runtime/scope.js";
 import { teamService } from "../teams/service.js";
 import {
   CreateTeamSchema,
@@ -177,12 +178,14 @@ teamRoutes.post("/api/teams/:id/run", async (c) => {
     const conversationId = parsed.conversationId;
 
     return streamSSE(c, async (stream) => {
+      const scope = createExecutionScope({ signal: c.req.raw.signal });
       for await (const event of teamService.runTeam(
         id,
         user.id,
         task,
         variables,
         conversationId,
+        scope,
       )) {
         await stream.writeSSE({
           data: JSON.stringify(event),

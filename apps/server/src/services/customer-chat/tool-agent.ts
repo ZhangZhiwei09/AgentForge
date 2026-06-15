@@ -3,8 +3,11 @@
 // 将 agent SSE 事件映射到 customer-chat SSE 协议
 // 启用客服工具集，限制 maxIterations: 5
 
+import { randomUUID } from "crypto";
 import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
 import type { ContentBlock } from "@agentforge/shared-types";
+import type { ExecutionScope } from "../../runtime/scope.js";
+import { prisma } from "../../db.js";
 import { logger } from "@agentforge/logger";
 import {
   csReActIterations,
@@ -69,7 +72,10 @@ interface ResponseEnvelope {
 export class ToolAgent implements RouteAgent {
   readonly route = "TOOL" as const;
 
-  async *execute(context: RouteContext): AsyncGenerator<RouteStreamEvent> {
+  async *execute(
+    context: RouteContext,
+    scope?: ExecutionScope,
+  ): AsyncGenerator<RouteStreamEvent> {
     const {
       conversationId,
       sessionId,
@@ -142,6 +148,7 @@ export class ToolAgent implements RouteAgent {
         model: resolvedModel,
         maxIterations: 5,
         tools: enabledTools,
+        scope,
         guardConfig: {
           maxTokens: 2000,
           maxCostCents: 5, // $0.05
@@ -156,6 +163,9 @@ export class ToolAgent implements RouteAgent {
       // - agent_token 仅做输出转发，不驱动任何状态转换
 
       for await (const event of events) {
+        // Runtime cancellation: check if execution should stop
+        if (scope?.controller.shouldStop) break;
+
         switch (event.type) {
           // ── Token 输出 ──
           case "agent_token":
@@ -262,6 +272,44 @@ export class ToolAgent implements RouteAgent {
 
       // ── ReAct 迭代指标埋点 ──
       csReActIterations.observe({ agent_type: "tool_agent" }, iterationCount);
+
+      // ── Interruption: exit early with partial content ──
+      if (scope?.controller.shouldStop) {
+        const partialContent = accumulatedContent || envelope.finalContent || "";
+        if (partialContent) {
+          // Persist partial content to DB so it survives page refresh
+          try {
+            await prisma.message.create({
+              data: {
+                id: assistantMsgId,
+                conversationId,
+                role: "assistant",
+                content: partialContent,
+                model: resolvedModel,
+              },
+            });
+          } catch (err) {
+            logger.warn(
+              { error: (err as Error).message, conversationId },
+              "Failed to persist partial tool-agent content on interrupt",
+            );
+          }
+          for (const char of partialContent) {
+            yield { type: "token", content: char, message_id: assistantMsgId };
+          }
+        }
+        yield {
+          type: "done",
+          message_id: assistantMsgId,
+          usage: {},
+          suggestions: undefined,
+          memory: { injected: 0, extracted: 0 },
+          validated: false,
+          fallback_used: !partialContent || undefined,
+          route: "TOOL",
+        };
+        return;
+      }
 
       // ── 安全网：检测并清除泄漏的 ReAct JSON ──
       if (finalAnswer) {

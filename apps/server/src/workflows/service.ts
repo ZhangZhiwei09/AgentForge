@@ -3,6 +3,7 @@
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { logger } from "@agentforge/logger";
+import type { ExecutionScope } from "../runtime/scope.js";
 import { DAGExecutor } from "./dag-executor.js";
 import type { CheckpointData, DAGExecutionContext } from "./dag-executor.js";
 import { WorkflowDefinitionSchema, CreateWorkflowSchema } from "./schema.js";
@@ -176,6 +177,7 @@ export class WorkflowService {
     userId: string,
     inputVariables: Record<string, unknown>,
     conversationId?: string,
+    scope?: ExecutionScope,
   ): AsyncGenerator<unknown> {
     const startTime = Date.now();
     const workflow = await prisma.workflow.findFirst({
@@ -231,6 +233,7 @@ export class WorkflowService {
       stepResults,
       userId,
       definition,
+      scope,
       emit: (event: unknown) => {
         // Events are yielded by the generator, not emitted here
         // This is a placeholder for internal use

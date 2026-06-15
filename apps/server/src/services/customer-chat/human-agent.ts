@@ -3,6 +3,7 @@
 // 更新会话状态 + 返回转接消息
 
 import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
+import type { ExecutionScope } from "../../runtime/scope.js";
 import { streamTokens } from "./types.js";
 import { logger } from "@agentforge/logger";
 import { prisma } from "../../db.js";
@@ -30,7 +31,10 @@ function getHandoffMessage(
 export class HumanAgent implements RouteAgent {
   readonly route = "HUMAN" as const;
 
-  async *execute(context: RouteContext): AsyncGenerator<RouteStreamEvent> {
+  async *execute(
+    context: RouteContext,
+    _scope?: ExecutionScope,
+  ): AsyncGenerator<RouteStreamEvent> {
     const {
       conversationId,
       sessionId,

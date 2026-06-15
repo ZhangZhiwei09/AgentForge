@@ -87,6 +87,7 @@ export class OpenAIProvider implements LLMProvider {
     temperature: number = 0.7,
     maxTokens: number = 4096,
     tools?: ToolDefinition[],
+    signal?: AbortSignal,
   ): AsyncGenerator<StreamChunk> {
     // 构建完整消息列表：system prompt（如有）放在最前面
     const fullMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
@@ -128,6 +129,11 @@ export class OpenAIProvider implements LLMProvider {
       params.tools = tools;
     }
 
+    // 传递 AbortSignal 给 OpenAI SDK — 支持前端中断
+    if (signal) {
+      params.signal = signal;
+    }
+
     // 发起流式请求 (cast needed because params is built dynamically)
     const stream = (await this.client.chat.completions.create(
       params as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParams,
@@ -145,6 +151,9 @@ export class OpenAIProvider implements LLMProvider {
     // 遍历 SSE 事件流
     try {
       for await (const chunk of stream) {
+        // Early exit: 检查中断信号
+        if (signal?.aborted) break;
+
         const delta = chunk.choices[0]?.delta;
 
         // Handle tool call deltas (accumulate across chunks)

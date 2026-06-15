@@ -20,6 +20,7 @@ import {
 } from "../observability/metrics.js";
 import { intentDetector } from "./intent-detector.js";
 import { MemoryEngine } from "./memory-engine.js";
+import { createExecutionScope } from "../runtime/scope.js";
 
 import { QueryRouter } from "./customer-chat/router.js";
 import { SafetyAgent } from "./customer-chat/safety-agent.js";
@@ -215,6 +216,7 @@ export class CustomerChatService {
   async *streamChat(
     sessionId: string | null,
     userMessage: string,
+    signal?: AbortSignal,
   ): AsyncGenerator<Record<string, unknown>> {
     // ── 0. 会话级并发控制：同一 sessionId 的请求串行化 ──
     const lockKey = sessionId ?? `anonymous-${randomUUID()}`;
@@ -319,6 +321,12 @@ export class CustomerChatService {
 
       const assistantMsgId = randomUUID();
 
+      // Create ExecutionScope for runtime cancellation
+      const scope = createExecutionScope({
+        signal: signal ?? new AbortController().signal,
+      });
+      scope.controller.start();
+
       // ── 2. 传统对话快速通道（零延迟） ──
       const convMatch = this.matchConversational(userMessage);
       if (convMatch) {
@@ -419,7 +427,10 @@ export class CustomerChatService {
       const startTime = Date.now();
       let firstTokenRecorded = false;
 
-      for await (const event of agent.execute(context)) {
+      for await (const event of agent.execute(context, scope)) {
+        // Runtime cancellation: stop forwarding events if interrupted
+        if (scope.controller.shouldStop) break;
+
         // TTFT：首 token 事件到达时记录（meta 事件在 Agent 启动时即发送，不代表实际响应就绪）
         if (!firstTokenRecorded && event.type === "token") {
           firstTokenRecorded = true;
@@ -438,6 +449,23 @@ export class CustomerChatService {
           );
         }
         yield event;
+      }
+
+      // Handle interruption: save partial content
+      if (scope.controller.shouldStop) {
+        const result = scope.controller.interrupt();
+        if (streamedAnswer) {
+          await prisma.message.create({
+            data: {
+              id: assistantMsgId,
+              conversationId: conversation.id,
+              role: "assistant",
+              content: streamedAnswer,
+              model: resolvedModel,
+            },
+          });
+        }
+        return;
       }
 
       // ── 7. 保存助手消息 ──

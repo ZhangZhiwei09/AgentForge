@@ -30,6 +30,7 @@ customerChatRoutes.post(
         for await (const chunk of service.streamChat(
           session_id ?? null,
           message,
+          c.req.raw.signal, // Pass AbortSignal for client disconnect detection
         )) {
           await stream.writeSSE({ data: JSON.stringify(chunk) });
         }

@@ -84,6 +84,7 @@ export class DeepSeekProvider implements LLMProvider {
     temperature: number = 0.7,
     maxTokens: number = 4096,
     tools?: ToolDefinition[],
+    signal?: AbortSignal,
   ): AsyncGenerator<StreamChunk> {
     const fullMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] =
       [];
@@ -119,6 +120,11 @@ export class DeepSeekProvider implements LLMProvider {
       params.tools = tools;
     }
 
+    // 传递 AbortSignal 给 OpenAI SDK — 支持前端中断
+    if (signal) {
+      params.signal = signal;
+    }
+
     const stream = (await this.client.chat.completions.create(
       params as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParams,
     )) as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
@@ -133,6 +139,9 @@ export class DeepSeekProvider implements LLMProvider {
 
     try {
       for await (const chunk of stream) {
+        // Early exit: 检查中断信号
+        if (signal?.aborted) break;
+
         const delta = chunk.choices[0]?.delta;
 
         // Handle tool call deltas

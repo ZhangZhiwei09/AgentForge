@@ -7,6 +7,7 @@ import type {
 } from "@agentforge/shared-types";
 import type { MessageBus } from "../message-bus.js";
 import type { Blackboard } from "../blackboard.js";
+import type { ExecutionScope } from "../../runtime/scope.js";
 
 export interface ExecutionContext {
   teamRunId: string;
@@ -16,6 +17,7 @@ export interface ExecutionContext {
   bus: MessageBus;
   blackboard: Blackboard;
   variables: Record<string, unknown>;
+  scope?: ExecutionScope;
 }
 
 export interface CollaborationModeExecutor {

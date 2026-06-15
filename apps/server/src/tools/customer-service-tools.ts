@@ -10,6 +10,7 @@
 
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
+import type { RunContext } from "../runtime/context.js";
 import { getOrderService } from "../services/customer-chat/order-service.js";
 import { KnowledgeService } from "../services/knowledge.js";
 import { logger } from "@agentforge/logger";
@@ -39,6 +40,7 @@ const lookupOrderDef: ToolDefinition = {
 
 async function lookupOrderExecute(
   args: Record<string, unknown>,
+  _context: RunContext,
 ): Promise<string> {
   const orderId = (args.order_id as string) || "";
   if (!orderId) {
@@ -134,6 +136,7 @@ const createSupportTicketDef: ToolDefinition = {
 
 async function createSupportTicketExecute(
   args: Record<string, unknown>,
+  _context: RunContext,
 ): Promise<string> {
   const summary = (args.summary as string) || "未提供摘要";
   const priority = (args.priority as "normal" | "urgent") || "normal";
@@ -198,6 +201,7 @@ const checkReturnPolicyDef: ToolDefinition = {
 
 async function checkReturnPolicyExecute(
   args: Record<string, unknown>,
+  _context: RunContext,
 ): Promise<string> {
   const category = (args.product_category as string) || "通用";
   const reason = (args.reason as string) || undefined;
@@ -258,6 +262,7 @@ const checkShippingStatusDef: ToolDefinition = {
 
 async function checkShippingStatusExecute(
   args: Record<string, unknown>,
+  _context: RunContext,
 ): Promise<string> {
   const trackingNo = (args.tracking_number as string) || "";
   const orderId = (args.order_id as string) || "";
@@ -328,6 +333,7 @@ const searchKnowledgeBaseDef: ToolDefinition = {
 
 async function searchKnowledgeBaseExecute(
   args: Record<string, unknown>,
+  _context: RunContext,
 ): Promise<string> {
   const query = (args.query as string) || "";
   if (!query.trim()) {
