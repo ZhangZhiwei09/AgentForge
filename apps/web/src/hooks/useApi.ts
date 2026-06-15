@@ -13,6 +13,8 @@ export function useMessages(conversationId: string | null) {
     queryKey: ["messages", conversationId],
     queryFn: () => client.getMessages(conversationId!),
     enabled: !!conversationId,
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 }
 
