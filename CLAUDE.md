@@ -15,6 +15,10 @@ All commits must follow [Conventional Commits](https://www.conventionalcommits.o
 - `ci:` — CI/CD changes
 - `style:` — formatting, whitespace (not logic)
 
+## Code Conventions
+
+- **禁止使用 `any` 类型** — 所有 TypeScript 代码必须使用精确类型。无法确定类型时使用 `unknown`，需要类型断言时优先使用 Zod schema 推导或类型守卫函数。
+
 ## Common Commands
 
 ```bash
