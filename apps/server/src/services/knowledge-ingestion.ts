@@ -12,6 +12,7 @@ import { invalidateCitationCache } from "./agent-runtime/citation-verifier.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
 import { RecursiveCharacterTextSplitter } from "./text-splitter.js";
 import { tokenize, getTokenCount } from "./tokenizer.js";
+import type { Prisma } from "@agentforge/database";
 import { logger } from "@agentforge/logger";
 
 export class KnowledgeIngestionService {
@@ -143,7 +144,7 @@ export class KnowledgeIngestionService {
       invalidateCitationCache();
     } catch (e) {
       logger.error(
-        { docId, error: (e as Error).message },
+        { docId, error: e instanceof Error ? e.message : "Unknown error" },
         "Worker document processing failed",
       );
       await prisma.knowledgeDocument.update({
@@ -275,7 +276,7 @@ export class KnowledgeIngestionService {
 
   // 重建倒排索引：清空旧索引 → 重新分词 → 写入
   static async rebuildInvertedIndex(kbId?: string): Promise<void> {
-    const whereClause: any = { enabled: true };
+    const whereClause: Prisma.KnowledgeChunkWhereInput = { enabled: true };
     if (kbId) whereClause.knowledgeBaseId = kbId;
 
     const chunks = await prisma.knowledgeChunk.findMany({

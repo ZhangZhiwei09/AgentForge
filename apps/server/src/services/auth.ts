@@ -70,6 +70,7 @@ function verifyToken(token: string): JwtPayload | null {
     if (payload.exp < Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch {
+    // Expected: invalid/expired JWT or malformed token — returns null (caller treats as unauthenticated)
     return null;
   }
 }

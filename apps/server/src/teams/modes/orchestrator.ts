@@ -5,6 +5,7 @@ import type {
   TeamStreamEvent,
   AgentRole,
 } from "@agentforge/shared-types";
+import { logger } from "@agentforge/logger";
 import { AgentService } from "../../services/agent.js";
 import type { CollaborationModeExecutor, ExecutionContext } from "./types.js";
 import { buildAgentTask, getRoleByName, toTeamEvent } from "./types.js";
@@ -145,8 +146,12 @@ export class OrchestratorMode implements CollaborationModeExecutor {
           return { agentName: parsed.to, subTask: parsed.task };
         }
       }
-    } catch {
+    } catch (err: unknown) {
       // JSON parse failed, try text-based delegation parsing
+      logger.warn(
+        { rawOutput: output?.slice(0, 200) },
+        "Orchestrator JSON parse failed, falling back to text-based parsing",
+      );
     }
 
     // Text-based fallback: look for "delegate to X: task"

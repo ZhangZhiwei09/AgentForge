@@ -25,6 +25,7 @@ export class TransformStepHandler implements StepHandler {
           try {
             output = JSON.parse(resolved);
           } catch {
+            // Expected: resolved expression may not be valid JSON — use raw value
             output = resolved;
           }
           return {

@@ -231,7 +231,7 @@ agentRuntimeRoutes.get("/api/agent/chat/faq/:docId", async (c) => {
     });
   } catch (err) {
     logger.error(
-      { docId, error: (err as Error)?.message },
+      { docId, error: err instanceof Error ? err.message : "Unknown error" },
       "FAQ detail fetch error",
     );
     return c.json({ detail: "获取文档失败" }, 500);

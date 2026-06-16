@@ -3,6 +3,7 @@
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { logger } from "@agentforge/logger";
+import type { Prisma } from "@agentforge/database";
 import type {
   AppProjectDTO,
   ProjectFileDTO,
@@ -337,15 +338,15 @@ export class AppProjectService {
 
   // ---- DTO Conversion (Prisma → DTO) ----
 
-  private toDTO(project: any): AppProjectDTO {
+  private toDTO(project: Prisma.AppProjectGetPayload<Record<string, never>>): AppProjectDTO {
     return {
       id: project.id,
       userId: project.userId,
       name: project.name,
       description: project.description,
-      status: project.status,
-      type: project.type,
-      framework: project.framework,
+      status: project.status as AppProjectDTO["status"],
+      type: project.type as AppProjectDTO["type"],
+      framework: project.framework as AppProjectDTO["framework"],
       previewUrl: project.previewUrl,
       deployUrl: project.deployUrl,
       metadata: project.metadata as Record<string, unknown>,
@@ -360,13 +361,13 @@ export class AppProjectService {
     };
   }
 
-  private fileToDTO(file: any): ProjectFileDTO {
+  private fileToDTO(file: Prisma.ProjectFileGetPayload<Record<string, never>>): ProjectFileDTO {
     return {
       id: file.id,
       projectId: file.projectId,
       path: file.path,
       content: file.content,
-      language: file.language,
+      language: file.language as ProjectFileDTO["language"],
       size: file.size,
       version: file.version,
       createdAt:

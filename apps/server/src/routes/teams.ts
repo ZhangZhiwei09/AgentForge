@@ -31,8 +31,8 @@ teamRoutes.post(
       const team = await teamService.create(user.id, data);
       logger.info({ teamId: team.id, name: team.name }, "Team created");
       return c.json(team, 201);
-    } catch (err: any) {
-      if (err?.name === "ZodError") {
+    } catch (err: unknown) {
+      if (err instanceof z.ZodError) {
         return c.json({ error: "Validation failed", details: err.issues }, 400);
       }
       logger.error({ error: err }, "Failed to create team");
@@ -83,8 +83,8 @@ teamRoutes.post("/api/teams/templates/:id/instantiate", async (c) => {
       return c.json({ error: `Template "${id}" not found` }, 404);
     }
     return c.json(team, 201);
-  } catch (err: any) {
-    if (err?.name === "ZodError") {
+  } catch (err: unknown) {
+    if (err instanceof z.ZodError) {
       return c.json({ error: "Validation failed", details: err.issues }, 400);
     }
     logger.error({ error: err }, "Failed to create team from template");
@@ -137,8 +137,8 @@ teamRoutes.put("/api/teams/:id", async (c) => {
     }
     logger.info({ teamId: id }, "Team updated");
     return c.json(team);
-  } catch (err: any) {
-    if (err?.name === "ZodError") {
+  } catch (err: unknown) {
+    if (err instanceof z.ZodError) {
       return c.json({ error: "Validation failed", details: err.issues }, 400);
     }
     logger.error({ error: err }, "Failed to update team");
@@ -196,8 +196,8 @@ teamRoutes.post("/api/teams/:id/run", async (c) => {
         data: "[DONE]",
       });
     });
-  } catch (err: any) {
-    if (err?.name === "ZodError") {
+  } catch (err: unknown) {
+    if (err instanceof z.ZodError) {
       return c.json({ error: "Validation failed", details: err.issues }, 400);
     }
     logger.error({ error: err }, "Failed to start team run");

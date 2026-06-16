@@ -56,6 +56,7 @@ async function getCurrentTimeExecute(
     });
     return successResult(formatter.format(now));
   } catch {
+    // Expected: invalid timezone format — fallback to UTC
     const now = new Date();
     return partialResult(
       `Invalid timezone "${timezone}". Current UTC time: ${now.toISOString()}`,

@@ -53,7 +53,7 @@ export class OpenAIProvider implements LLMProvider {
       fullMessages.push({ role: "system", content: systemPrompt });
     }
     for (const m of messages) {
-      fullMessages.push({ role: m.role as any, content: m.content });
+      fullMessages.push({ role: m.role, content: m.content } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
     }
 
     const params: Record<string, unknown> = {
@@ -68,7 +68,7 @@ export class OpenAIProvider implements LLMProvider {
       params.response_format = { type: "json_object" };
     }
 
-    const response = await this.client.chat.completions.create(params as any);
+    const response = await this.client.chat.completions.create(params as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming);
 
     return {
       content: response.choices[0].message.content?.trim() || "",

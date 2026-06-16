@@ -377,9 +377,10 @@ async function runEval(): Promise<void> {
         } else {
           validationErrors = validation.errors;
         }
-      } catch (e: any) {
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "Unknown error";
         console.log(
-          `       ⚠ 调用失败 (尝试 ${attempt + 1}): ${e.message?.slice(0, 80)}`,
+          `       ⚠ 调用失败 (尝试 ${attempt + 1}): ${message.slice(0, 80)}`,
         );
         if (attempt < maxRetries - 1 && tc.retryOnFail) {
           // 短暂冷却后重试
@@ -404,8 +405,9 @@ async function runEval(): Promise<void> {
         const validation = validateResponse(rawResponse, tc.kbAvailable);
         passed = validation.valid;
         validationErrors = validation.errors;
-      } catch (e: any) {
-        console.log(`       ⚠ 备选模型也失败: ${e.message?.slice(0, 80)}`);
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : "Unknown error";
+        console.log(`       ⚠ 备选模型也失败: ${message.slice(0, 80)}`);
       }
     }
 

@@ -205,7 +205,7 @@ agentRoutes.post(
           data: { status: "timed_out", decidedAt: new Date() },
         });
       } catch {
-        /* ignore */
+        // Expected: approval record update is best-effort; timeout response is already being sent
       }
       return c.json({ detail: "Approval request has timed out" }, 410);
     }

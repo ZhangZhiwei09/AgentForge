@@ -8,6 +8,7 @@ import { CreateTeamSchema, TeamDefinitionSchema } from "./schema.js";
 import { MessageBus } from "./message-bus.js";
 import { Blackboard } from "./blackboard.js";
 import { builtinTeamTemplates, getTeamTemplate } from "./templates.js";
+import type { Prisma } from "@agentforge/database";
 import type {
   TeamDefinition,
   TeamDTO,
@@ -73,7 +74,7 @@ export class TeamService {
   ): Promise<{ items: TeamDTO[]; total: number; page: number }> {
     const page = options.page || 1;
     const limit = options.limit || 20;
-    const where: Record<string, unknown> = { userId };
+    const where: Prisma.AgentTeamWhereInput = { userId };
 
     if (options.status) {
       where.status = options.status;
@@ -81,12 +82,12 @@ export class TeamService {
 
     const [teams, total] = await Promise.all([
       prisma.agentTeam.findMany({
-        where: where as any,
+        where,
         orderBy: { updatedAt: "desc" },
         skip: (page - 1) * limit,
         take: limit,
       }),
-      prisma.agentTeam.count({ where: where as any }),
+      prisma.agentTeam.count({ where }),
     ]);
 
     // Filter by mode if specified (mode is inside JSON definition)
@@ -399,7 +400,7 @@ export class TeamService {
   ): Promise<{ items: TeamRunDTO[]; total: number; page: number }> {
     const page = options.page || 1;
     const limit = options.limit || 20;
-    const where: Record<string, unknown> = { teamId, userId };
+    const where: Prisma.AgentTeamRunWhereInput = { teamId, userId };
 
     if (options.status) {
       where.status = options.status;
@@ -407,12 +408,12 @@ export class TeamService {
 
     const [runs, total] = await Promise.all([
       prisma.agentTeamRun.findMany({
-        where: where as any,
+        where,
         orderBy: { startedAt: "desc" },
         skip: (page - 1) * limit,
         take: limit,
       }),
-      prisma.agentTeamRun.count({ where: where as any }),
+      prisma.agentTeamRun.count({ where }),
     ]);
 
     return {
@@ -433,7 +434,7 @@ export class TeamService {
 
   // ========== Helpers ==========
 
-  private toDTO(t: any): TeamDTO {
+  private toDTO(t: Prisma.AgentTeamGetPayload<Record<string, never>>): TeamDTO {
     return {
       id: t.id,
       userId: t.userId,
@@ -442,7 +443,7 @@ export class TeamService {
       definition: t.definition as unknown as TeamDefinition,
       version: t.version,
       status: t.status,
-      tags: t.tags || [],
+      tags: (t.tags as string[]) || [],
       runCount: t.runCount || 0,
       lastRunAt: t.lastRunAt?.toISOString(),
       createdAt: t.createdAt.toISOString(),
@@ -450,7 +451,7 @@ export class TeamService {
     };
   }
 
-  private runToDTO(r: any): TeamRunDTO {
+  private runToDTO(r: Prisma.AgentTeamRunGetPayload<Record<string, never>>): TeamRunDTO {
     return {
       id: r.id,
       teamId: r.teamId,
@@ -458,7 +459,7 @@ export class TeamService {
       conversationId: r.conversationId || undefined,
       task: r.task,
       status: r.status,
-      mode: r.mode,
+      mode: r.mode as TeamRunDTO["mode"],
       messages: (r.messages as any[]) || [],
       blackboard: (r.blackboard as Record<string, unknown>) || {},
       checkpoint: r.checkpoint || undefined,

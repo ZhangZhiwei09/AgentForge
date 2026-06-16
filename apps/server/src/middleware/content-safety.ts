@@ -110,8 +110,9 @@ export const contentSafetyMiddleware: MiddlewareHandler<{
     if (!check.safe) {
       return c.json({ detail: check.reason }, 400);
     }
-  } catch {
+  } catch (err: unknown) {
     // If we can't parse the body, let the route handler deal with it
+    logger.warn({ err, path: c.req.path }, "Content safety: unable to parse request body, passing through");
   }
 
   await next();

@@ -88,7 +88,7 @@ function startWorker() {
         );
       } catch (e) {
         logger.error(
-          { error: (e as Error).message },
+          { error: e instanceof Error ? e.message : "Unknown error" },
           "Failed to update document status",
         );
       }

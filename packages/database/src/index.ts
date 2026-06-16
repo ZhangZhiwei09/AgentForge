@@ -3,6 +3,8 @@ import { PrismaClient } from "@prisma/client";
 // Global singleton to avoid multiple connections during hot reload
 const globalForPrisma = globalThis as unknown as { prisma: PrismaClient };
 
+export type { Prisma } from "@prisma/client";
+
 export const prisma = globalForPrisma.prisma ?? new PrismaClient();
 
 if (process.env.NODE_ENV !== "production") {

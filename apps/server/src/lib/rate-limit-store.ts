@@ -182,7 +182,7 @@ export async function getRateLimitStore(): Promise<RateLimitStore> {
       // eslint-disable-next-line no-console
       console.warn(
         "[RateLimit] Redis connection failed, falling back to in-memory store:",
-        (err as Error).message,
+        err instanceof Error ? err.message : "Unknown error",
       );
     }
   }

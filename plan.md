@@ -56,9 +56,6 @@ V1 的目标并不是实现一个简单聊天机器人，而是搭建未来所�
 
 未来新增：
 
-- Tool Calling
-- Voice
-- Workflow Engine
 - Browser Agent
 
 无需推翻现有架构。

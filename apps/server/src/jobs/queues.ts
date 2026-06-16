@@ -48,6 +48,7 @@ function createQueue<T>(name: string): Queue<T> | null {
       },
     });
   } catch {
+    // Expected: Redis may be unavailable — jobs will be processed once Redis is up
     return null;
   }
 }

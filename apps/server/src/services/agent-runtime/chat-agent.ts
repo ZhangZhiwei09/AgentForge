@@ -132,7 +132,8 @@ export class ChatAgent implements RouteAgent {
       const parsed = JSON.parse(jsonStr);
       const result = ChatResponseSchema.safeParse(parsed);
       return result.success ? result.data : null;
-    } catch {
+    } catch (err: unknown) {
+      logger.warn({ raw: raw.slice(0, 200), err }, "Failed to parse chat response JSON");
       return null;
     }
   }
