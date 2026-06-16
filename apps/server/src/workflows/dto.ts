@@ -1,0 +1,75 @@
+// Workflow DTO helpers — pure functions to convert Prisma records to API DTOs
+import type { Prisma } from "@agentforge/database";
+import type {
+  WorkflowDTO,
+  WorkflowRunDTO,
+  WorkflowStepLogDTO,
+  WorkflowDefinition,
+  ProgressSummary,
+} from "@agentforge/shared-types";
+
+export function toDTO(
+  w: Prisma.WorkflowGetPayload<Record<string, never>>,
+): WorkflowDTO {
+  return {
+    id: w.id,
+    userId: w.userId,
+    name: w.name,
+    description: w.description || undefined,
+    definition: w.definition as unknown as WorkflowDefinition,
+    version: w.version,
+    status: w.status as WorkflowDTO["status"],
+    tags: w.tags || [],
+    runCount: w.runCount || 0,
+    lastRunAt: w.lastRunAt?.toISOString(),
+    createdAt: w.createdAt.toISOString(),
+    updatedAt: w.updatedAt.toISOString(),
+  };
+}
+
+export function runToDTO(
+  r: Prisma.WorkflowRunGetPayload<Record<string, never>>,
+): WorkflowRunDTO {
+  return {
+    id: r.id,
+    workflowId: r.workflowId,
+    userId: r.userId,
+    status: r.status as WorkflowRunDTO["status"],
+    input: (r.input as Record<string, unknown>) || {},
+    output: (r.output as Record<string, unknown>) || undefined,
+    checkpoint: r.checkpoint ? (r.checkpoint as unknown as any) : undefined,
+    currentStepId: r.currentStepId || undefined,
+    progress: (r.progress as unknown as ProgressSummary) || {
+      completed: 0,
+      total: 0,
+      failed: 0,
+      skipped: 0,
+      running: 0,
+    },
+    error: r.error || undefined,
+    durationMs: r.durationMs || undefined,
+    startedAt: r.startedAt.toISOString(),
+    completedAt: r.completedAt?.toISOString(),
+  };
+}
+
+export function stepLogToDTO(
+  sl: Prisma.WorkflowStepLogGetPayload<Record<string, never>>,
+): WorkflowStepLogDTO {
+  return {
+    id: sl.id,
+    runId: sl.runId,
+    stepId: sl.stepId,
+    stepType: sl.stepType as WorkflowStepLogDTO["stepType"],
+    status: sl.status as WorkflowStepLogDTO["status"],
+    input: (sl.input as Record<string, unknown>) || undefined,
+    output: (sl.output as Record<string, unknown>) || undefined,
+    error: sl.error || undefined,
+    retryCount: sl.retryCount || 0,
+    durationMs: sl.durationMs || undefined,
+    tokensUsed: sl.tokensUsed || 0,
+    events: (sl.events as unknown[]) || [],
+    startedAt: sl.startedAt?.toISOString(),
+    completedAt: sl.completedAt?.toISOString(),
+  };
+}

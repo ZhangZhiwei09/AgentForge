@@ -257,6 +257,7 @@ export class CitationVerifier {
             const emb = await this.embeddingProvider!.embedSingle(s);
             sentenceEmbeddings.push(emb);
           } catch {
+            // Expected: single embedding may fail — use zero vector as fallback
             sentenceEmbeddings.push(
               new Array(this.embeddingProvider!.dimension).fill(0),
             );
@@ -459,6 +460,7 @@ export class CitationVerifier {
             results[idx] = await this.embeddingProvider!.embedSingle(text);
             this.addToCache(text, results[idx]);
           } catch {
+            // Expected: embedding may fail for individual text — use zero vector as fallback
             results[idx] = new Array(this.embeddingProvider!.dimension).fill(0);
           }
         }

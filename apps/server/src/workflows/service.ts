@@ -7,6 +7,15 @@ import type { ExecutionScope } from "../runtime/scope.js";
 import { DAGExecutor } from "./dag-executor.js";
 import type { CheckpointData, DAGExecutionContext } from "./dag-executor.js";
 import { WorkflowDefinitionSchema, CreateWorkflowSchema } from "./schema.js";
+import { toDTO, runToDTO, stepLogToDTO } from "./dto.js";
+import {
+  findWorkflowById,
+  findRunById,
+  listWorkflows,
+  listRunsForWorkflow,
+  findRunWithLogs,
+} from "./queries.js";
+import type { Prisma } from "@agentforge/database";
 import type {
   WorkflowDefinition,
   WorkflowDTO,
@@ -58,7 +67,7 @@ export class WorkflowService {
       },
     });
 
-    return this.toDTO(workflow);
+    return toDTO(workflow);
   }
 
   /** List workflows for a user */
@@ -73,7 +82,7 @@ export class WorkflowService {
   ): Promise<{ items: WorkflowDTO[]; total: number; page: number }> {
     const page = options.page || 1;
     const limit = options.limit || 20;
-    const where: Record<string, unknown> = { userId };
+    const where: Prisma.WorkflowWhereInput = { userId };
 
     if (options.status) {
       where.status = options.status;
@@ -82,18 +91,10 @@ export class WorkflowService {
       where.tags = { has: options.tag };
     }
 
-    const [workflows, total] = await Promise.all([
-      prisma.workflow.findMany({
-        where: where as any,
-        orderBy: { updatedAt: "desc" },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      prisma.workflow.count({ where: where as any }),
-    ]);
+    const [workflows, total] = await listWorkflows(where, page, limit);
 
     return {
-      items: workflows.map((w) => this.toDTO(w)),
+      items: workflows.map((w) => toDTO(w)),
       total,
       page,
     };
@@ -101,11 +102,9 @@ export class WorkflowService {
 
   /** Get a single workflow by ID */
   async get(workflowId: string, userId: string): Promise<WorkflowDTO | null> {
-    const workflow = await prisma.workflow.findFirst({
-      where: { id: workflowId, userId },
-    });
+    const workflow = await findWorkflowById(workflowId, userId);
     if (!workflow) return null;
-    return this.toDTO(workflow);
+    return toDTO(workflow);
   }
 
   /** Update a workflow definition */
@@ -114,9 +113,7 @@ export class WorkflowService {
     userId: string,
     data: Record<string, unknown>,
   ): Promise<WorkflowDTO | null> {
-    const workflow = await prisma.workflow.findFirst({
-      where: { id: workflowId, userId },
-    });
+    const workflow = await findWorkflowById(workflowId, userId);
     if (!workflow) return null;
 
     const updateData: Record<string, unknown> = {};
@@ -137,14 +134,12 @@ export class WorkflowService {
       data: updateData,
     });
 
-    return this.toDTO(updated);
+    return toDTO(updated);
   }
 
   /** Delete a workflow */
   async delete(workflowId: string, userId: string): Promise<boolean> {
-    const workflow = await prisma.workflow.findFirst({
-      where: { id: workflowId, userId },
-    });
+    const workflow = await findWorkflowById(workflowId, userId);
     if (!workflow) return false;
 
     await prisma.workflow.delete({ where: { id: workflowId } });
@@ -159,9 +154,12 @@ export class WorkflowService {
     try {
       WorkflowDefinitionSchema.parse(definition);
       return { valid: true };
-    } catch (err: any) {
+    } catch (err: unknown) {
+      const issues = err instanceof Error && "issues" in err
+        ? (err as unknown as { issues: Array<{ path?: (string | number)[]; message?: string }> }).issues
+        : undefined;
       const errors =
-        err?.issues?.map((issue: any) => ({
+        issues?.map((issue) => ({
           path: issue.path?.join(".") || "",
           message: issue.message || "Unknown validation error",
         })) || [];
@@ -180,9 +178,7 @@ export class WorkflowService {
     scope?: ExecutionScope,
   ): AsyncGenerator<unknown> {
     const startTime = Date.now();
-    const workflow = await prisma.workflow.findFirst({
-      where: { id: workflowId, userId },
-    });
+    const workflow = await findWorkflowById(workflowId, userId);
     if (!workflow) {
       yield { type: "workflow_failed", error: "Workflow not found" };
       return;
@@ -452,9 +448,7 @@ export class WorkflowService {
     runId: string,
     userId: string,
   ): Promise<WorkflowRunDTO | null> {
-    const run = await prisma.workflowRun.findFirst({
-      where: { id: runId, userId },
-    });
+    const run = await findRunById(runId, userId);
     if (!run || run.status !== "running") return null;
 
     const updated = await prisma.workflowRun.update({
@@ -462,14 +456,12 @@ export class WorkflowService {
       data: { status: "paused" },
     });
 
-    return this.runToDTO(updated);
+    return runToDTO(updated);
   }
 
   /** Resume a paused workflow from checkpoint */
   async *resumeRun(runId: string, userId: string): AsyncGenerator<unknown> {
-    const run = await prisma.workflowRun.findFirst({
-      where: { id: runId, userId },
-    });
+    const run = await findRunById(runId, userId);
     if (!run) {
       yield { type: "workflow_failed", runId, error: "Run not found" };
       return;
@@ -484,9 +476,7 @@ export class WorkflowService {
     }
 
     // Load workflow definition
-    const workflow = await prisma.workflow.findFirst({
-      where: { id: run.workflowId, userId },
-    });
+    const workflow = await findWorkflowById(run.workflowId, userId);
     if (!workflow) {
       yield { type: "workflow_failed", runId, error: "Workflow not found" };
       return;
@@ -643,9 +633,7 @@ export class WorkflowService {
     runId: string,
     userId: string,
   ): Promise<WorkflowRunDTO | null> {
-    const run = await prisma.workflowRun.findFirst({
-      where: { id: runId, userId },
-    });
+    const run = await findRunById(runId, userId);
     if (!run || (run.status !== "running" && run.status !== "paused"))
       return null;
 
@@ -665,7 +653,7 @@ export class WorkflowService {
       }
     }
 
-    return this.runToDTO(updated);
+    return runToDTO(updated);
   }
 
   // ========== Runs ==========
@@ -678,24 +666,16 @@ export class WorkflowService {
   ): Promise<{ items: WorkflowRunDTO[]; total: number; page: number }> {
     const page = options.page || 1;
     const limit = options.limit || 20;
-    const where: Record<string, unknown> = { workflowId, userId };
+    const where: Prisma.WorkflowRunWhereInput = { workflowId, userId };
 
     if (options.status) {
       where.status = options.status;
     }
 
-    const [runs, total] = await Promise.all([
-      prisma.workflowRun.findMany({
-        where: where as any,
-        orderBy: { startedAt: "desc" },
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      prisma.workflowRun.count({ where: where as any }),
-    ]);
+    const [runs, total] = await listRunsForWorkflow(where, page, limit);
 
     return {
-      items: runs.map((r) => this.runToDTO(r)),
+      items: runs.map((r) => runToDTO(r)),
       total,
       page,
     };
@@ -706,19 +686,12 @@ export class WorkflowService {
     runId: string,
     userId: string,
   ): Promise<{ run: WorkflowRunDTO; stepLogs: WorkflowStepLogDTO[] } | null> {
-    const run = await prisma.workflowRun.findFirst({
-      where: { id: runId, userId },
-    });
-    if (!run) return null;
-
-    const stepLogs = await prisma.workflowStepLog.findMany({
-      where: { runId },
-      orderBy: { startedAt: "asc" },
-    });
+    const result = await findRunWithLogs(runId, userId);
+    if (!result) return null;
 
     return {
-      run: this.runToDTO(run),
-      stepLogs: stepLogs.map((sl) => this.stepLogToDTO(sl)),
+      run: runToDTO(result.run),
+      stepLogs: result.stepLogs.map((sl) => stepLogToDTO(sl)),
     };
   }
 
@@ -746,71 +719,10 @@ export class WorkflowService {
         },
       });
     } catch (err) {
-      logger.warn({ error: (err as Error).message }, "Failed to save step log");
+      logger.warn({ error: err instanceof Error ? err.message : "Unknown error" }, "Failed to save step log");
     }
   }
 
-  // ========== Helpers ==========
-
-  private toDTO(w: any): WorkflowDTO {
-    return {
-      id: w.id,
-      userId: w.userId,
-      name: w.name,
-      description: w.description || undefined,
-      definition: w.definition as unknown as WorkflowDefinition,
-      version: w.version,
-      status: w.status,
-      tags: w.tags || [],
-      runCount: w.runCount || 0,
-      lastRunAt: w.lastRunAt?.toISOString(),
-      createdAt: w.createdAt.toISOString(),
-      updatedAt: w.updatedAt.toISOString(),
-    };
-  }
-
-  private runToDTO(r: any): WorkflowRunDTO {
-    return {
-      id: r.id,
-      workflowId: r.workflowId,
-      userId: r.userId,
-      status: r.status,
-      input: (r.input as Record<string, unknown>) || {},
-      output: (r.output as Record<string, unknown>) || undefined,
-      checkpoint: r.checkpoint ? (r.checkpoint as unknown as any) : undefined,
-      currentStepId: r.currentStepId || undefined,
-      progress: (r.progress as ProgressSummary) || {
-        completed: 0,
-        total: 0,
-        failed: 0,
-        skipped: 0,
-        running: 0,
-      },
-      error: r.error || undefined,
-      durationMs: r.durationMs || undefined,
-      startedAt: r.startedAt.toISOString(),
-      completedAt: r.completedAt?.toISOString(),
-    };
-  }
-
-  private stepLogToDTO(sl: any): WorkflowStepLogDTO {
-    return {
-      id: sl.id,
-      runId: sl.runId,
-      stepId: sl.stepId,
-      stepType: sl.stepType,
-      status: sl.status,
-      input: (sl.input as Record<string, unknown>) || undefined,
-      output: (sl.output as Record<string, unknown>) || undefined,
-      error: sl.error || undefined,
-      retryCount: sl.retryCount || 0,
-      durationMs: sl.durationMs || undefined,
-      tokensUsed: sl.tokensUsed || 0,
-      events: sl.events || [],
-      startedAt: sl.startedAt?.toISOString(),
-      completedAt: sl.completedAt?.toISOString(),
-    };
-  }
 }
 
 // Singleton

@@ -209,7 +209,7 @@ export class MemoryCompressor {
       }
     } catch (err) {
       logger.warn(
-        { error: (err as Error).message },
+        { error: err instanceof Error ? err.message : "Unknown error" },
         "LLM compression failed, using rule-based summary",
       );
     }

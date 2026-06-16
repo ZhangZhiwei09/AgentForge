@@ -83,6 +83,7 @@ export class VariableResolver {
             try {
               return JSON.parse(resolved);
             } catch {
+              // Expected: resolved value may not be valid JSON — return raw string
               return resolved;
             }
           }
@@ -276,6 +277,7 @@ export class SafeEvaluator {
     try {
       return JSON.parse(resolved);
     } catch {
+      // Expected: resolved template may not be valid JSON — return raw string
       return resolved;
     }
   }

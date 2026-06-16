@@ -5,6 +5,7 @@
 // 当 embedding provider 可用时使用余弦相似度，否则回退到增强版关键词+实体匹配。
 
 import { z } from "zod";
+import { logger } from "@agentforge/logger";
 import { extractJSONFromLLMResponse } from "../../lib/json-utils.js";
 import type { CitationReport } from "./citation-verifier.js";
 
@@ -54,8 +55,9 @@ export function validateBusinessResponse(
   try {
     parsed = JSON.parse(extractJSONFromLLMResponse(rawText));
     isJSON = true;
-  } catch {
+  } catch (err: unknown) {
     // 非 JSON 格式 → 跳过 L1/L2
+    logger.warn({ rawText: rawText.slice(0, 200), err }, "Failed to parse response JSON for validation");
   }
 
   // Layer 1-2: JSON 格式校验
@@ -158,7 +160,8 @@ export function parseChatResponse(rawText: string): ChatResponse | null {
     const parsed = JSON.parse(extractJSONFromLLMResponse(rawText));
     const result = ChatResponseSchema.safeParse(parsed);
     return result.success ? result.data : null;
-  } catch {
+  } catch (err: unknown) {
+    logger.warn({ rawText: rawText.slice(0, 200), err }, "Failed to parse chat response");
     return null;
   }
 }

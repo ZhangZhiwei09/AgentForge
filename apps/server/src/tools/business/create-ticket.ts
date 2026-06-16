@@ -74,7 +74,7 @@ async function execute(
       tracking_tip: `您可以通过工单号 ${ticketId} 查询处理进度。`,
     }, null, 2));
   } catch (e) {
-    const errMsg = (e as Error)?.message || "";
+    const errMsg = e instanceof Error ? e.message : "";
     // 表不存在 vs 其他数据库错误
     if (errMsg.includes("does not exist") || errMsg.includes("undefined table")) {
       logger.warn(

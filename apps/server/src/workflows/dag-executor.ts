@@ -6,7 +6,6 @@ import type {
   WorkflowDefinition,
   ProgressSummary,
 } from "@agentforge/shared-types";
-import { logger } from "@agentforge/logger";
 import {
   AgentStepHandler,
   ToolStepHandler,
@@ -17,6 +16,14 @@ import {
 } from "./handlers/index.js";
 import type { StepHandler, StepContext } from "./handlers/index.js";
 import type { VariableContext } from "./variable-resolver.js";
+import {
+  buildCheckpoint as buildCheckpointFn,
+  type CheckpointData,
+} from "./checkpoint.js";
+import {
+  executeWithRetry as executeWithRetryFn,
+  executeSingleStep as executeSingleStepFn,
+} from "./step-runner.js";
 
 // ---- Types ----
 
@@ -34,18 +41,8 @@ export interface DAGExecutionContext extends StepContext {
   }>;
 }
 
-export interface CheckpointData {
-  runId: string;
-  workflowId: string;
-  completedSteps: string[];
-  currentStep: string | null;
-  pendingSteps: string[];
-  stepLogs: StepResult[];
-  variables: Record<string, unknown>;
-  stepResults: Record<string, unknown>;
-  savedAt: string;
-  totalSteps: number;
-}
+// Re-export CheckpointData type for backward compatibility — workflows/service.ts imports it from here
+export type { CheckpointData };
 
 interface LevelPlan {
   level: number;
@@ -61,7 +58,7 @@ export class DAGExecutor {
     // Initialize handlers
     const parallelHandler = new ParallelStepHandler(
       (step: WorkflowStep, ctx: StepContext) =>
-        this.executeSingleStep(step, ctx),
+        executeSingleStepFn(step, ctx, this.handlers),
     );
 
     this.handlers = {
@@ -116,9 +113,10 @@ export class DAGExecutor {
           const startTime = Date.now();
 
           try {
-            const result = await this.executeWithRetry(
+            const result = await executeWithRetryFn(
               step,
               context,
+              this.handlers,
               definition,
             );
             const durationMs = Date.now() - startTime;
@@ -313,9 +311,10 @@ export class DAGExecutor {
         pendingSteps.map(async (step) => {
           const startTime = Date.now();
           try {
-            const result = await this.executeWithRetry(
+            const result = await executeWithRetryFn(
               step,
               context,
+              this.handlers,
               definition,
             );
             const durationMs = Date.now() - startTime;
@@ -463,151 +462,19 @@ export class DAGExecutor {
   }
 
   /**
-   * Execute a single step with retry logic.
-   */
-  private async executeWithRetry(
-    step: WorkflowStep,
-    context: StepContext,
-    definition?: WorkflowDefinition,
-  ): Promise<StepResult> {
-    const retry = step.retry || {
-      maxAttempts: 1,
-      backoff: "fixed" as const,
-      initialDelay: 0,
-      maxDelay: 0,
-      retryOn: [],
-    };
-    const maxAttempts = retry.maxAttempts || 1;
-    let lastError: Error | null = null;
-
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      try {
-        const result = await this.executeSingleStepWithTimeout(step, context);
-        return { ...result, retryCount: attempt };
-      } catch (err) {
-        lastError = err instanceof Error ? err : new Error(String(err));
-
-        // Check if we should retry
-        if (attempt < maxAttempts - 1) {
-          const delay = this.calculateRetryDelay(retry, attempt + 1);
-          logger.warn(
-            {
-              stepId: step.id,
-              attempt: attempt + 1,
-              maxAttempts,
-              delayMs: delay,
-            },
-            "Retrying failed step",
-          );
-          await this.sleep(delay);
-        }
-      }
-    }
-
-    // All retries exhausted — check timeout handling
-    if (lastError?.message?.includes("timed out")) {
-      const onTimeout = step.on_timeout || "fail";
-      if (onTimeout === "skip") {
-        return {
-          status: "skipped",
-          output: null,
-          reason: `timeout after ${step.timeout || 60}s`,
-          retryCount: maxAttempts,
-        };
-      }
-      if (onTimeout === "fallback" && step.fallback_step && definition) {
-        const fallbackStep = definition.steps.find(
-          (s: WorkflowStep) => s.id === step.fallback_step,
-        );
-        if (fallbackStep) {
-          logger.info(
-            { stepId: step.id, fallbackStepId: fallbackStep.id },
-            "Executing fallback step",
-          );
-          try {
-            const fbResult = await this.executeWithRetry(
-              fallbackStep,
-              context,
-              definition,
-            );
-            return { ...fbResult, retryCount: maxAttempts };
-          } catch {
-            return {
-              status: "failed",
-              output: null,
-              error: `Fallback step "${fallbackStep.id}" also failed`,
-              retryCount: maxAttempts,
-            };
-          }
-        }
-      }
-    }
-
-    return {
-      status: "failed",
-      output: null,
-      error: lastError?.message || "Step execution failed after retries",
-      retryCount: maxAttempts,
-    };
-  }
-
-  /**
-   * Execute a single step with timeout enforcement.
-   */
-  private async executeSingleStepWithTimeout(
-    step: WorkflowStep,
-    context: StepContext,
-  ): Promise<StepResult> {
-    const timeoutMs = (step.timeout || 60) * 1000;
-
-    return new Promise<StepResult>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(
-          new Error(`Step ${step.id} timed out after ${step.timeout || 60}s`),
-        );
-      }, timeoutMs);
-
-      this.executeSingleStep(step, context)
-        .then((result) => {
-          clearTimeout(timer);
-          resolve(result);
-        })
-        .catch((err) => {
-          clearTimeout(timer);
-          reject(err);
-        });
-    });
-  }
-
-  /**
    * Execute a single workflow step (no retry, no timeout — those are handled by executeWithRetry).
+   * Public API — delegates to the pure function in step-runner.ts.
    */
   async executeSingleStep(
     step: WorkflowStep,
     context: StepContext,
   ): Promise<StepResult> {
-    const handler = this.handlers[step.type];
-    if (!handler) {
-      return {
-        status: "failed",
-        output: null,
-        error: `Unknown step type: ${step.type}`,
-      };
-    }
-
-    try {
-      return await handler.execute(step, context);
-    } catch (err) {
-      return {
-        status: "failed",
-        output: null,
-        error: err instanceof Error ? err.message : "Step handler error",
-      };
-    }
+    return executeSingleStepFn(step, context, this.handlers);
   }
 
   /**
    * Build a checkpoint from the current execution state.
+   * Public API — delegates to the pure function in checkpoint.ts.
    */
   buildCheckpoint(
     runId: string,
@@ -619,42 +486,15 @@ export class DAGExecutor {
     stepResults: Record<string, unknown>,
     totalSteps: number,
   ): CheckpointData {
-    return {
+    return buildCheckpointFn(
       runId,
       workflowId,
-      completedSteps: completedStepIds,
-      currentStep: pendingStepIds[0] || null,
-      pendingSteps: pendingStepIds,
+      completedStepIds,
+      pendingStepIds,
       stepLogs,
       variables,
       stepResults,
-      savedAt: new Date().toISOString(),
       totalSteps,
-    };
-  }
-
-  // ---- Helpers ----
-
-  private calculateRetryDelay(
-    retry: { backoff: string; initialDelay: number; maxDelay: number },
-    attempt: number,
-  ): number {
-    switch (retry.backoff) {
-      case "fixed":
-        return retry.initialDelay;
-      case "linear":
-        return Math.min(retry.initialDelay * attempt, retry.maxDelay);
-      case "exponential":
-        return Math.min(
-          retry.initialDelay * Math.pow(2, attempt - 1),
-          retry.maxDelay,
-        );
-      default:
-        return retry.initialDelay;
-    }
-  }
-
-  private sleep(ms: number): Promise<void> {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+    );
   }
 }

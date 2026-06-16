@@ -50,7 +50,7 @@ async function main() {
     await seedKnowledgeBase();
   } catch (err) {
     logger.warn(
-      { error: (err as Error).message },
+      { error: err instanceof Error ? err.message : "Unknown error" },
       "Knowledge base seeding skipped",
     );
   }
@@ -72,7 +72,7 @@ async function main() {
     }
   } catch (err) {
     logger.warn(
-      { error: (err as Error).message },
+      { error: err instanceof Error ? err.message : "Unknown error" },
       "Inverted index build skipped",
     );
   }

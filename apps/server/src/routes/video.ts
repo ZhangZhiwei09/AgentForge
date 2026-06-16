@@ -148,7 +148,7 @@ videoRoutes.get("/api/video/stream", async (c) => {
         );
         videoService.handleMessage(msg).catch((err: unknown) => {
           logger.error(
-            { error: (err as Error)?.message },
+            { error: err instanceof Error ? err.message : "Unknown error" },
             "Video message handler error",
           );
         });
@@ -159,7 +159,7 @@ videoRoutes.get("/api/video/stream", async (c) => {
 
     ws.on("close", () => {
       videoService.close().catch((err: unknown) => {
-        logger.warn({ error: (err as Error)?.message }, "Video close error");
+        logger.warn({ error: err instanceof Error ? err.message : "Unknown error" }, "Video close error");
       });
     });
 

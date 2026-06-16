@@ -224,7 +224,8 @@ export class QueryRouter {
         reasoning: result.data.reasoning,
         escalationReason: result.data.escalation_reason || undefined,
       };
-    } catch {
+    } catch (err: unknown) {
+      logger.warn({ raw: raw.slice(0, 200), err }, "Failed to parse router decision");
       return null;
     }
   }

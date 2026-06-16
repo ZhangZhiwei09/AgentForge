@@ -147,7 +147,7 @@ voiceRoutes.get("/api/voice/stream", async (c) => {
 
     ws.on("close", () => {
       voiceService.close().catch((err: unknown) => {
-        logger.warn({ error: (err as Error)?.message }, "Voice close error");
+        logger.warn({ error: err instanceof Error ? err.message : "Unknown error" }, "Voice close error");
       });
     });
 

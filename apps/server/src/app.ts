@@ -80,7 +80,7 @@ export async function createApp() {
     const { getBullBoardHandler } = await import("./jobs/bull-board.js");
     const handler = getBullBoardHandler();
     if (handler) {
-      app.route("/admin/queues", handler as any);
+      app.route("/admin/queues", handler as unknown as Parameters<typeof app.route>[1]);
     }
   } catch {
     // Bull Board not available (e.g., missing deps or Redis down) — skip gracefully

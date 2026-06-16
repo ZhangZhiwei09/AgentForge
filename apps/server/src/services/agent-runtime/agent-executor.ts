@@ -250,7 +250,7 @@ export class AgentExecutor implements RouteAgent {
             });
           } catch (err) {
             logger.warn(
-              { error: (err as Error).message, conversationId },
+              { error: err instanceof Error ? err.message : "Unknown error", conversationId },
               "Failed to persist partial agent-executor content on interrupt",
             );
           }
@@ -460,6 +460,7 @@ export function sanitizeReActJSON(text: string): string | null {
 
     return null;
   } catch {
+    // Expected: ReAct JSON extraction is best-effort — returns null for non-JSON content
     return null;
   }
 }
@@ -486,6 +487,7 @@ function extractKBChunks(toolResult: string): string[] {
       .map((r: Record<string, unknown>) => String(r.content ?? ""))
       .filter((s: string) => s.length > 0);
   } catch {
+    // Expected: malformed tool output — return empty array as safe fallback
     return [];
   }
 }

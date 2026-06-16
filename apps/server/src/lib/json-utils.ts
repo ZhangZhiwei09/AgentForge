@@ -37,6 +37,7 @@ export function parseJSONFromLLMResponse(raw: string): unknown | null {
     const jsonStr = extractJSONFromLLMResponse(raw);
     return JSON.parse(jsonStr);
   } catch {
+    // Expected: LLM responses may not contain valid JSON — caller handles null fallback
     return null;
   }
 }

@@ -16,6 +16,7 @@ import { getASRProvider, getTTSProvider } from "./audio-providers.js";
 import {
   getMultimodalProvider,
   buildVisionMessage,
+  type MultimodalMessage,
 } from "./multimodal-provider.js";
 import { pcmToWav, estimateDuration } from "../lib/audio-utils.js";
 import { toolRegistry } from "../tools/registry.js";
@@ -359,18 +360,7 @@ export class VideoSessionService {
       });
 
       // Build messages array
-      const messages: Array<{
-        role: "user" | "assistant";
-        content:
-          | string
-          | Array<
-              | { type: "text"; text: string }
-              | {
-                  type: "image_url";
-                  image_url: { url: string; detail?: string };
-                }
-            >;
-      }> = [];
+      const messages: MultimodalMessage[] = [];
 
       // Add recent history (chronological order)
       for (const msg of history.reverse()) {
@@ -391,7 +381,7 @@ export class VideoSessionService {
           "low", // Use "low" detail for efficiency — video frames don't need high res
         );
 
-        messages.push(visionMsg as any);
+        messages.push(visionMsg);
         this.framesSentToLLM += this.videoFrames.length;
       } else {
         messages.push({ role: "user", content: userText });
@@ -416,12 +406,12 @@ export class VideoSessionService {
       let completionTokens = 0;
 
       for await (const chunk of multimodalLLM.streamChat(
-        messages as any,
+        messages,
         settings.defaultModel, // Use vision-capable model
         systemPrompt,
         0.7,
         4096,
-        tools as any,
+        tools,
       )) {
         if (signal.aborted) break;
 

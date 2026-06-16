@@ -57,7 +57,7 @@ export class DeepSeekProvider implements LLMProvider {
       fullMessages.push({ role: "system", content: effectivePrompt });
     }
     for (const m of messages) {
-      fullMessages.push({ role: m.role as any, content: m.content });
+      fullMessages.push({ role: m.role, content: m.content } as OpenAI.Chat.Completions.ChatCompletionMessageParam);
     }
 
     const response = await this.client.chat.completions.create({

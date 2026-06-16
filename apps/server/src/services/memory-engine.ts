@@ -12,6 +12,7 @@ import {
   EMBEDDING_DIM,
   ensureMemoryCollection,
 } from "./milvus.js";
+import type { Prisma } from "@agentforge/database";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
 import { logger } from "@agentforge/logger";
 import {
@@ -342,8 +343,8 @@ export class MemoryEngine {
 
   // 列出用户所有记忆（支持按 type 过滤）
   async list(userId: string, type?: string): Promise<MemoryOut[]> {
-    const where: any = { userId };
-    if (type) where.type = type;
+    const where: Prisma.MemoryWhereInput = { userId };
+    if (type) where.type = type as Prisma.MemoryWhereInput["type"];
 
     const memories = await prisma.memory.findMany({
       where,

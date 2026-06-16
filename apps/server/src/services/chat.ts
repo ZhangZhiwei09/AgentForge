@@ -66,7 +66,8 @@ export class ChatService {
         });
         if (allKbs.length === 0) return [systemPrompt, []];
         kbIds = allKbs.map((kb) => kb.id);
-      } catch {
+      } catch (err: unknown) {
+        logger.warn({ err }, "Knowledge base injection failed, continuing without KB context");
         return [systemPrompt, []];
       }
     }
