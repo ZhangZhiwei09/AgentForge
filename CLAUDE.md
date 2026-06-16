@@ -158,7 +158,7 @@ Browser (React) ←SSE/HTTP→ Hono (8000) → LLMProvider (abstract) → OpenAI
 
 12. **Agent Kernel (P1-3 ✅ + P1-4 ✅):** `AgentService` (`apps/server/src/services/agent.ts`) implements ReAct (Reasoning + Acting) loop with structured JSON decision output. Agent sessions are persisted in `agent_sessions` table with full scratchpad of reasoning steps. Agent panel in frontend shows reasoning chain (observation → analysis → plan → decision → result). SSE protocol extended with `agent_think`, `agent_act`, `agent_observe`, `agent_respond`, `agent_ask_user`, `agent_done` event types. Supports max iterations (default 10), ask_user pauses, and graceful error handling.
 
-13. **Testing (P0-3 ✅):** 12 test files with 159 tests total (132 pass, 20 auth integration tests require test DB, 7 skipped). Key files: AuthService (20), ToolRegistry (12+), AgentService (12), AgentApproval/P1-5 (6), ChatService (12), MemoryEngine (14), KnowledgeService, BM25 (5), OpenAI provider (13), DeepSeek provider (12), customer-chat-eval, rate-limit-store. Run via `pnpm test` in server package. (Auth integration tests require test DB config.)
+13. **Testing (P0-3 ✅):** vitest unit + integration tests covering core services (Auth, Agent, Chat, Memory, Tools, Providers, Voice) and platform features (error recovery, degradation chain, rate limiting). Run via `pnpm test` in server package. (Auth integration tests require test DB config.)
 
 14. **Content Safety (P0-5 ✅):** Prompt injection detection middleware with 20+ pattern rules, message length limits (16k chars), and Zod validation on all input routes.
 
@@ -284,7 +284,7 @@ The `plan.md` defines the full V1→V11 + P0-P2 roadmap. Completed phases are ma
 
 - **P0-1 Auth & Multi-Tenancy:** ✅ JWT authentication, API keys, per-user data isolation
 - **P0-2 Structured Logging:** ✅ pino-based structured logging with correlation IDs
-- **P0-3 Testing:** ✅ vitest unit + integration tests (36 tests, CI enforced)
+- **P0-3 Testing:** ✅ vitest unit + integration tests, CI enforced
 - **P0-4 CI/CD:** ✅ GitHub Actions pipeline (lint → format → typecheck → test → build)
 - **P0-5 Security:** ✅ Rate limiting, Zod validation, content safety (prompt injection detection)
 - **P1-1 Background Jobs:** ✅ BullMQ job queue for async memory extraction + knowledge ingestion with Redis
