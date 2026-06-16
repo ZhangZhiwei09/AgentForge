@@ -132,39 +132,6 @@ Browser (React) ←SSE/HTTP→ Hono (8000) → LLMProvider (abstract) → OpenAI
 - `/api/chat`: Frontend calls `POST /api/chat` → Hono SSE → `ChatService.streamChat()` → `AgentForgeClient.streamChat()` parses `AsyncGenerator<ChatStreamChunk>` → Zustand store
 - `/api/agent/chat`: Frontend calls `POST /api/agent/chat` → Hono SSE → `AgentRuntimeService.streamChat()` → Router → Agent → `useAgentChatStream` hook
 
-### Key Design Decisions
-
-1. **Provider abstraction** (`apps/server/src/providers/`): All LLM calls go through the `LLMProvider` interface (`streamChat()`, `listModels()`). Adding a new provider means implementing those two methods — business logic in `chat.ts` never changes.
-
-2. **Prisma as shared package** (`packages/database/`): Single source of truth for the data model. All packages import `prisma` from `@agentforge/database`. Migrations are managed independently via `pnpm db:migrate`.
-
-3. **Auth & Multi-Tenancy (P0-1 ✅):** JWT-based authentication with refresh token rotation and API key support. Default users seeded for dev: `default@agentforge.local` and `customer@agentforge.local`. All routes validate per-user data isolation via auth middleware.
-
-4. **Conversation titles** are auto-generated from the first line of the first user message (max 80 chars).
-
-5. **Database port is 5434** (not the default 5432) to avoid conflicts.
-
-6. **Frontend state:** Zustand for UI state, TanStack Query for server data. Three-panel layout: sidebar | chat area | debug panel.
-
-7. **Vite proxies** `/api` requests to `localhost:8000` in dev mode — no changes needed when switching backends.
-
-8. **UUID generation** uses Node.js built-in `crypto.randomUUID()` — no external uuid package needed.
-
-9. **SSE format** is strictly `data: {json}\n\n` + `data: [DONE]\n\n` — the frontend SDK's stream parser depends on this exact format.
-
-10. **DB schema** uses Prisma with `@@map`/`@map` for snake_case column names. IDs are `@db.VarChar(36)` (not UUID type), so UUIDs are generated in application code.
-
-11. **Tool Calling + P1-6 Tool Ecosystem ✅** (`apps/server/src/tools/`): 10 production tools — `get_current_time`, `calculator`, `web_search` (Tavily API), `http_request`, `file_read`, `file_write`, `file_search`, `db_query` (read-only SQL via Prisma), `web_fetch` (URL content retrieval), `code_execute` (Docker sandbox, supports Python/JavaScript). Server-side multi-round tool calling loop in `ChatService.streamChat()` (max 5 rounds). Tools are registered via `ToolRegistry` singleton and sent to LLM only when explicitly requested via `tools` param. Each tool has riskLevel, timeout, optional requireApproval, and sandbox flag. Circuit breaker trips after 5 consecutive failures (60s cooldown). Prometheus metrics: `tool_calls_total`, `tool_execution_duration_ms`, `circuit_breaker_state`. Docker sandbox (`apps/server/src/services/sandbox.ts`) provides isolated code execution with no network, read-only filesystem, 256MB memory limit, and 60s timeout. Build sandbox image: `docker build -t agentforge-sandbox:latest -f infra/docker/Dockerfile.sandbox .`
-
-12. **Agent Kernel (P1-3 ✅ + P1-4 ✅):** `AgentService` (`apps/server/src/services/agent.ts`) implements ReAct (Reasoning + Acting) loop with structured JSON decision output. Agent sessions are persisted in `agent_sessions` table with full scratchpad of reasoning steps. Agent panel in frontend shows reasoning chain (observation → analysis → plan → decision → result). SSE protocol extended with `agent_think`, `agent_act`, `agent_observe`, `agent_respond`, `agent_ask_user`, `agent_done` event types. Supports max iterations (default 10), ask_user pauses, and graceful error handling.
-
-13. **Testing (P0-3 ✅):** vitest unit + integration tests covering core services (Auth, Agent, Chat, Memory, Tools, Providers, Voice) and platform features (error recovery, degradation chain, rate limiting). Run via `pnpm test` in server package. (Auth integration tests require test DB config.)
-
-14. **Content Safety (P0-5 ✅):** Prompt injection detection middleware with 20+ pattern rules, message length limits (16k chars), and Zod validation on all input routes.
-
-15. **Observability (P1-2 ✅):** Prometheus metrics at `GET /api/metrics` (HTTP request count/duration, LLM call/token counts, tool execution, memory extraction, Milvus search latency). OpenTelemetry tracing with conditional OTLP export to Jaeger (enable via `OTEL_ENABLED=true`). Grafana dashboard template at `apps/server/dashboards/agentforge.json`.
-
-16. **Voice Agent (V5 ✅):** WebSocket-based real-time voice via `WS /api/voice/stream`. Pipeline: Browser PCM → VAD → WebSocket → ASR (Whisper) → LLM (ChatService) → TTS (OpenAI, 6 voices) → MP3 playback. `VoiceService` (`apps/server/src/services/voice.ts`) manages turn state machine with `AbortController`-based interruption. Audio providers (`apps/server/src/services/audio-providers.ts`) follow lazy registry pattern. Voice sessions in `voice_sessions` table. Frontend: `VoicePanel` with mic, waveform, voice selector, transcript. HTTP: `POST /api/voice/transcribe`, `POST /api/voice/synthesize`, `GET /api/voice/voices`. Backward compatible — text chat unaffected.
 
 ## Development Workflow: Multi-Agent Pipeline
 
