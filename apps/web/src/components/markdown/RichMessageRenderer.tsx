@@ -11,10 +11,7 @@ import {
   hasUnclosedFence,
   tryParseStreamingCard,
 } from "./card-parser";
-import { OrderCard } from "./cards/OrderCard";
-import { PolicyCard } from "./cards/PolicyCard";
 import { ActionCard } from "./cards/ActionCard";
-import { StatusCard } from "./cards/StatusCard";
 import type { ContentBlock } from "@agentforge/shared-types";
 
 interface Props {
@@ -85,21 +82,9 @@ function renderStreamingCard(
   // 将部分数据包装为 ContentBlock 传给卡片组件
   // 卡片组件通过 isStreaming prop 显示骨架
   switch (type) {
-    case "order":
-      return (
-        <OrderCard key={key} data={partialData as any} isStreaming={true} />
-      );
-    case "policy":
-      return (
-        <PolicyCard key={key} data={partialData as any} isStreaming={true} />
-      );
     case "action":
       return (
         <ActionCard key={key} data={partialData as any} isStreaming={true} />
-      );
-    case "status":
-      return (
-        <StatusCard key={key} data={partialData as any} isStreaming={true} />
       );
     case "table":
       // 表格回退到 Markdown 渲染（部分行）
@@ -145,14 +130,8 @@ function renderInterleaved(
  */
 function renderBlock(block: ContentBlock, key: string): React.ReactNode {
   switch (block.type) {
-    case "order_card":
-      return <OrderCard key={key} data={block.data} />;
-    case "policy_card":
-      return <PolicyCard key={key} data={block.data} />;
     case "action_card":
       return <ActionCard key={key} data={block.data} />;
-    case "status_card":
-      return <StatusCard key={key} data={block.data} />;
     case "table":
       return (
         <MarkdownRenderer
@@ -162,7 +141,7 @@ function renderBlock(block: ContentBlock, key: string): React.ReactNode {
       );
     case "text":
     default:
-      return <MarkdownRenderer key={key} content={block.content} />;
+      return <MarkdownRenderer key={key} content={(block as { content: string }).content} />;
   }
 }
 

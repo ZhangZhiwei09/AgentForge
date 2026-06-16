@@ -2,8 +2,7 @@ import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { ChatLayout } from "./components/layout/ChatLayout";
 import { TopNav } from "./components/layout/TopNav";
 import { LoginPage } from "./components/auth/LoginPage";
-import { CustomerChatPage } from "./components/customer-chat/CustomerChatPage";
-import { CSAdminPage } from "./components/admin/CSAdminPage";
+import { AgentChatPage } from "./components/agent-chat/AgentChatPage";
 import { AppGenLayout } from "./components/app-gen/AppGenLayout";
 import { NewProjectPage } from "./components/app-gen/NewProjectPage";
 
@@ -65,8 +64,7 @@ export default function App() {
             </AuthGuard>
           }
         />
-        <Route path="/admin/cs" element={<CSAdminPage />} />
-        <Route path="/*" element={<CustomerChatPage />} />
+        <Route path="/*" element={<AgentChatPage />} />
       </Routes>
     </AppShell>
   );

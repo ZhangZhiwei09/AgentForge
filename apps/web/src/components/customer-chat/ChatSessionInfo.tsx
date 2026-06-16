@@ -1,9 +1,15 @@
 import { Clock, MessageSquare, Hash, Trash2, BarChart3 } from "lucide-react";
-import type { CSMessage } from "@/hooks/useCustomerChatStream";
+
+interface MessageLike {
+  id: string;
+  role: string;
+  content: string;
+  timestamp: number;
+}
 
 interface ChatSessionInfoProps {
   sessionId: string;
-  messages: CSMessage[];
+  messages: MessageLike[];
   onClear: () => void;
   onDashboard?: () => void;
 }

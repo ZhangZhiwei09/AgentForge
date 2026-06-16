@@ -40,8 +40,8 @@ export function FAQSidebar({ onSelectQuestion }: FAQSidebarProps) {
       try {
         // Fetch categories and documents in parallel
         const [catRes, docsRes] = await Promise.all([
-          fetch("/api/customer-chat/faq/categories"),
-          fetch("/api/customer-chat/faq"),
+          fetch("/api/agent/chat/faq/categories"),
+          fetch("/api/agent/chat/faq"),
         ]);
 
         if (!catRes.ok || !docsRes.ok) throw new Error("Failed to fetch FAQs");
@@ -75,7 +75,7 @@ export function FAQSidebar({ onSelectQuestion }: FAQSidebarProps) {
     setDocLoading(true);
     setDocContent(null);
     try {
-      const res = await fetch(`/api/customer-chat/faq/${docId}`);
+      const res = await fetch(`/api/agent/chat/faq/${docId}`);
       if (res.ok) {
         const doc = await res.json();
         setDocContent(doc.content || "");

@@ -26,6 +26,8 @@ V6 Workflow Engine    ✅
 V9 Multi-Agent    ✅
 ↓
 V11 Multimodal Video Conversation ✅
+↓
+Agent Runtime Refactor ✅ (customer-chat → agent-runtime, 2026-06-16)
 ```
 
 V1 的目标并不是实现一个简单聊天机器人，而是搭建未来所有 Agent 能力的基础设施。

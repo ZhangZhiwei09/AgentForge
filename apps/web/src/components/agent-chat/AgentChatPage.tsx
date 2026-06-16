@@ -8,20 +8,17 @@ import {
   ChevronUp,
   PanelRightClose,
   PanelRightOpen,
-  Video,
 } from "lucide-react";
-import { useCustomerChatStream } from "@/hooks/useCustomerChatStream";
-import type { CSMessage } from "@/hooks/useCustomerChatStream";
+import { useAgentChatStream } from "@/hooks/useAgentChatStream";
+import type { AgentMessage } from "@/hooks/useAgentChatStream";
 import { RichMessageRenderer } from "@/components/markdown/RichMessageRenderer";
-import { FAQSidebar } from "./FAQSidebar";
+import { FAQSidebar } from "@/components/customer-chat/FAQSidebar";
 import { WelcomeScreen } from "./WelcomeScreen";
-import { QuickReplies } from "./QuickReplies";
-import { SatisfactionRating } from "./SatisfactionRating";
-import { ChatSessionInfo } from "./ChatSessionInfo";
-import { CustomerServiceDashboard } from "./CustomerServiceDashboard";
-import { CustomerVideoCall } from "./CustomerVideoCall";
+import { QuickReplies } from "@/components/customer-chat/QuickReplies";
+import { SatisfactionRating } from "@/components/customer-chat/SatisfactionRating";
+import { ChatSessionInfo } from "@/components/customer-chat/ChatSessionInfo";
 
-export function CustomerChatPage() {
+export function AgentChatPage() {
   const {
     messages,
     isStreaming,
@@ -31,28 +28,23 @@ export function CustomerChatPage() {
     loadHistory,
     clearSession,
     abort,
-  } = useCustomerChatStream();
+  } = useAgentChatStream();
   const [input, setInput] = useState("");
   const [showRightPanel, setShowRightPanel] = useState(true);
-  const [showDashboard, setShowDashboard] = useState(false);
-  const [showVideoCall, setShowVideoCall] = useState(false);
   const [expandedKnowledge, setExpandedKnowledge] = useState<Set<string>>(
     new Set(),
   );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // 自动滚动
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isStreaming]);
 
-  // 加载历史消息
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
 
-  // 聚焦输入框
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
@@ -100,14 +92,13 @@ export function CustomerChatPage() {
       className="flex flex-1 overflow-hidden"
       style={{ height: "calc(100dvh - 48px)" }}
     >
-      {/* 左侧 FAQ 边栏 — 移动端隐藏 */}
+      {/* 左侧 FAQ 边栏 */}
       <div className="hidden md:block">
         <FAQSidebar onSelectQuestion={handleFAQSelect} />
       </div>
 
       {/* 中间聊天区域 */}
       <main className="flex flex-1 flex-col bg-[hsl(var(--cs-bg))]">
-        {/* 聊天消息 */}
         <div className="flex-1 overflow-y-auto">
           {!hasRealMessages ? (
             <WelcomeScreen onSend={handleFAQSelect} />
@@ -117,13 +108,11 @@ export function CustomerChatPage() {
                 .filter((m) => m.id !== "welcome")
                 .map((msg) => (
                   <div key={msg.id}>
-                    {/* 消息气泡 */}
                     <div
                       className={`flex ${
                         msg.role === "user" ? "justify-end" : "justify-start"
                       } animate-fade-in`}
                     >
-                      {/* AI 头像 */}
                       {msg.role === "assistant" && (
                         <div className="mr-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--cs-primary))] shadow-sm">
                           <MessageCircle className="h-4 w-4 text-white" />
@@ -150,7 +139,6 @@ export function CustomerChatPage() {
                         )}
                       </div>
 
-                      {/* 用户头像 */}
                       {msg.role === "user" && (
                         <div className="ml-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[hsl(var(--muted))] shadow-sm">
                           <span className="text-xs font-medium text-[hsl(var(--muted-foreground))]">
@@ -159,39 +147,6 @@ export function CustomerChatPage() {
                         </div>
                       )}
                     </div>
-
-                    {/* 工具调用展示 */}
-                    {msg.role === "assistant" &&
-                      msg.toolCalls &&
-                      msg.toolCalls.length > 0 && (
-                        <div className="ml-11 mt-1.5 space-y-1">
-                          {msg.toolCalls.map((tc) => (
-                            <div
-                              key={tc.id}
-                              className="flex items-center gap-1.5 text-[11px] text-[hsl(var(--muted-foreground))]"
-                            >
-                              {tc.status === "pending" ? (
-                                <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
-                              ) : (
-                                <span className="text-green-500">✓</span>
-                              )}
-                              <span className="font-medium">
-                                {tc.name === "get_current_time"
-                                  ? "获取当前时间"
-                                  : tc.name}
-                              </span>
-                              {tc.result && (
-                                <span className="text-muted-foreground/70">
-                                  →{" "}
-                                  {tc.result.length > 50
-                                    ? tc.result.slice(0, 50) + "..."
-                                    : tc.result}
-                                </span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
 
                     {/* 知识库参考来源 */}
                     {msg.role === "assistant" &&
@@ -238,7 +193,7 @@ export function CustomerChatPage() {
                         </div>
                       )}
 
-                    {/* 满意度评分（仅最后一条 AI 消息且流结束） */}
+                    {/* 满意度评分 */}
                     {msg.role === "assistant" &&
                       msg.id !== "__stream__" &&
                       msg.id !== "welcome" &&
@@ -254,7 +209,6 @@ export function CustomerChatPage() {
                   </div>
                 ))}
 
-              {/* 流式输出中正在输入提示 */}
               {isStreaming &&
                 messages[messages.length - 1]?.id !== "__stream__" && (
                   <div className="flex justify-start animate-fade-in">
@@ -271,7 +225,6 @@ export function CustomerChatPage() {
                   </div>
                 )}
 
-              {/* 快捷追问 */}
               {!isStreaming &&
                 currentMeta?.suggestions &&
                 currentMeta.suggestions.length > 0 &&
@@ -302,15 +255,6 @@ export function CustomerChatPage() {
                 placeholder="输入您的问题，Enter 发送..."
                 className="flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-gray-400"
               />
-              <button
-                onClick={() => setShowVideoCall(true)}
-                disabled={isStreaming}
-                className="flex-shrink-0 rounded-lg border border-[hsl(var(--cs-border))] bg-white p-2 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--cs-primary))] hover:border-[hsl(var(--cs-primary))] transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-                aria-label="开始视频通话"
-                title={isStreaming ? "请等待AI回复完成" : "视频客服"}
-              >
-                <Video className="h-4 w-4" />
-              </button>
               {isStreaming ? (
                 <button
                   onClick={abort}
@@ -331,22 +275,14 @@ export function CustomerChatPage() {
               )}
             </div>
             <p className="mt-2 text-center text-[10px] text-[hsl(var(--muted-foreground))]">
-              客服工作时间：工作日 9:00 - 18:00 · AI
-              客服可能产生不准确回复，重要问题请联系人工客服
+              AI 助手可能产生不准确回复，重要问题请联系人工客服
             </p>
           </div>
         </div>
       </main>
 
-      {/* 右侧面板：视频通话 或 会话信息 */}
-      {showVideoCall ? (
-        <div className="fixed inset-0 z-50 bg-gray-900 md:relative md:inset-auto md:w-[360px] md:border-l md:border-gray-700">
-          <CustomerVideoCall
-            sessionId={sessionId}
-            onClose={() => setShowVideoCall(false)}
-          />
-        </div>
-      ) : showRightPanel ? (
+      {/* 右侧面板 */}
+      {showRightPanel ? (
         <div className="w-56 border-l border-[hsl(var(--cs-border))] bg-white">
           <div className="flex items-center justify-between border-b border-[hsl(var(--cs-border))] px-3 py-2">
             <span className="text-xs font-medium text-[hsl(var(--muted-foreground))]">
@@ -361,15 +297,13 @@ export function CustomerChatPage() {
           </div>
           <ChatSessionInfo
             sessionId={sessionId}
-            messages={messages}
+            messages={messages as unknown as Array<{ id: string; role: string; content: string; timestamp: number }>}
             onClear={clearSession}
-            onDashboard={() => setShowDashboard(true)}
           />
         </div>
       ) : null}
 
-      {/* 展开右侧面板按钮 */}
-      {!showRightPanel && !showVideoCall && (
+      {!showRightPanel && (
         <button
           onClick={() => setShowRightPanel(true)}
           className="absolute right-4 top-16 rounded-lg border border-[hsl(var(--cs-border))] bg-white p-1.5 shadow-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
@@ -377,11 +311,6 @@ export function CustomerChatPage() {
         >
           <PanelRightOpen className="h-3.5 w-3.5" />
         </button>
-      )}
-
-      {/* 数据概览弹窗 */}
-      {showDashboard && (
-        <CustomerServiceDashboard onClose={() => setShowDashboard(false)} />
       )}
     </div>
   );

@@ -2,7 +2,7 @@
 // ============================================
 // 守护 AgentPhase / OutputState / ResponseEnvelope 的完整契约。
 // 这些测试验证的是 Runtime Contract，不是业务逻辑。
-// 任何人修改 ToolAgent 状态机行为，必须先让这些测试通过。
+// 任何人修改 AgentExecutor 状态机行为，必须先让这些测试通过。
 //
 // 契约文档：docs/agent-runtime.md
 // 冻结日期：2026-06-15
@@ -12,7 +12,7 @@ import type { AgentStreamEvent } from "@agentforge/shared-types";
 import type {
   RouteContext,
   RouteStreamEvent,
-} from "../services/customer-chat/types.js";
+} from "../services/agent-runtime/types.js";
 
 // ═══════════════════════════════════════════════════════
 // Mock AgentService：注入可控的事件序列
@@ -28,10 +28,17 @@ vi.mock("../services/agent.js", () => ({
   })),
 }));
 
+// Mock toolRegistry for AgentExecutor
+vi.mock("../tools/registry.js", () => ({
+  toolRegistry: {
+    listNames: vi.fn(() => ["search_knowledge_base", "get_current_time"]),
+  },
+}));
+
 import {
-  ToolAgent,
+  AgentExecutor,
   sanitizeReActJSON,
-} from "../services/customer-chat/tool-agent.js";
+} from "../services/agent-runtime/agent-executor.js";
 
 // ── Helper: 创建最小 RouteContext ──
 
@@ -60,7 +67,7 @@ function createContext(overrides: Partial<RouteContext> = {}): RouteContext {
 async function collectEvents(
   context: RouteContext,
 ): Promise<RouteStreamEvent[]> {
-  const agent = new ToolAgent();
+  const agent = new AgentExecutor();
   const events: RouteStreamEvent[] = [];
   for await (const event of agent.execute(context)) {
     events.push(event);
@@ -562,7 +569,7 @@ describe("Runtime Contract — 跨维度不变量", () => {
     });
   });
 
-  describe("不变量 5：ToolAgent.execute() 不应抛出未捕获异常", () => {
+  describe("不变量 5：AgentExecutor.execute() 不应抛出未捕获异常", () => {
     it("AgentService 抛出异常时，应优雅降级而非崩溃", async () => {
       mockAgentRun.mockReturnValue(
         (async function* () {

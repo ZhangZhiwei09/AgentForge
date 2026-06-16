@@ -23,7 +23,7 @@ export function SatisfactionRating({
     setSubmitted(true);
 
     try {
-      await fetch("/api/customer-chat/rate", {
+      await fetch("/api/agent/chat/rate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
