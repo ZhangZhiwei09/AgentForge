@@ -17,7 +17,7 @@ const {
   mockKnowledgeSearch: vi.fn<() => Promise<Array<Record<string, unknown>>>>(
     async () => [],
   ),
-  mockToolExecute: vi.fn(async () => "tool result"),
+  mockToolExecute: vi.fn(async () => ({ status: "success" as const, output: "tool result" })),
 }));
 
 // ---- Mock all external dependencies ----
@@ -297,7 +297,7 @@ describe("ChatService", () => {
           }
         });
 
-        mockToolExecute.mockResolvedValueOnce("4");
+        mockToolExecute.mockResolvedValueOnce({ status: "success", output: "4" });
 
         const events = await collectStreamEvents(
           service.streamChat("conv-test", "What is 2+2?", "gpt-4o", "", null, [
@@ -328,7 +328,7 @@ describe("ChatService", () => {
           };
         });
 
-        mockToolExecute.mockResolvedValue("result");
+        mockToolExecute.mockResolvedValue({ status: "success", output: "result" });
 
         const events = await collectStreamEvents(
           service.streamChat("conv-test", "Loop", "gpt-4o", "", null, [

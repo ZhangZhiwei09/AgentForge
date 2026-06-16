@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type { Message } from "@agentforge/shared-types";
 import { MarkdownRenderer } from "../markdown/MarkdownRenderer";
 import { Bot, User, Wrench, Check, Loader2 } from "lucide-react";
@@ -8,7 +9,7 @@ interface Props {
   message: Message;
 }
 
-export function MessageBubble({ message }: Props) {
+function MessageBubbleInner({ message }: Props) {
   const isUser = message.role === "user";
   const isStreaming = message.id === "__streaming__";
   const toolCalls = useChatStore((s) => s.toolCalls);
@@ -115,3 +116,14 @@ function ToolCallBadge({
 function formatToolName(name: string): string {
   return name.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+export const MessageBubble = memo(MessageBubbleInner, (prev, next) => {
+  // Re-render if message identity changed
+  if (prev.message.id !== next.message.id) return false;
+  // Re-render if content changed (streaming token append)
+  if (prev.message.content !== next.message.content) return false;
+  // Never skip the streaming placeholder
+  if (prev.message.id === "__streaming__" || next.message.id === "__streaming__") return false;
+  // Skip re-render for all other cases
+  return true;
+});

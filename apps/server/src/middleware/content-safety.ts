@@ -89,6 +89,7 @@ export const contentSafetyMiddleware: MiddlewareHandler<{
     c.req.path === "/api/chat" ||
     c.req.path === "/api/agent/run" ||
     c.req.path === "/api/agent/respond" ||
+    c.req.path === "/api/agent/chat" ||
     c.req.path === "/api/customer-chat";
 
   if (!isChatOrAgent || c.req.method !== "POST") {

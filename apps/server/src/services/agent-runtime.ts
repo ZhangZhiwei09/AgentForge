@@ -1,34 +1,35 @@
-// 客服聊天服务 —— Agent Router + RAG + Tools 架构
+// Agent Runtime 服务 —— Router + Agent 编排器
 //
 // 编排器职责：
 //   1. Session 管理（获取/创建会话、加载历史）
 //   2. 传统对话快速通道（正则零延迟匹配问候/感谢/道别）
-//   3. QueryRouter 分类（LLM 驱动 → SAFETY|SMALL_TALK|TOOL|HUMAN）
+//   3. QueryRouter 分类（Rule First + LLM Fallback → SAFETY|CHAT|TASK|HUMAN）
 //   4. 分发到对应 Agent 执行
 //   5. 后处理（保存消息、提取记忆）
 //
 // 每个 Agent 各自负责自己的 Prompt、校验、重试、fallback
+
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { resolveModel } from "../providers/registry.js";
 import type { ChatMessage } from "../providers/types.js";
 import { logger } from "@agentforge/logger";
 import {
-  csRouteClassificationTotal,
-  csRouteConfidence,
-  csRequestDurationMs,
+  agentRouteClassificationTotal,
+  agentRouteConfidence,
+  agentRequestDurationMs,
 } from "../observability/metrics.js";
 import { intentDetector } from "./intent-detector.js";
 import { MemoryEngine } from "./memory-engine.js";
 import { createExecutionScope } from "../runtime/scope.js";
 
-import { QueryRouter } from "./customer-chat/router.js";
-import { SafetyAgent } from "./customer-chat/safety-agent.js";
-import { SmallTalkAgent } from "./customer-chat/smalltalk-agent.js";
+import { QueryRouter } from "./agent-runtime/router.js";
+import { SafetyAgent } from "./agent-runtime/safety-agent.js";
+import { ChatAgent } from "./agent-runtime/chat-agent.js";
+import { AgentExecutor } from "./agent-runtime/agent-executor.js";
+import { HumanAgent } from "./agent-runtime/human-agent.js";
 
-import { injectMemories } from "./customer-chat/business-agent.js";
-import { ToolAgent } from "./customer-chat/tool-agent.js";
-import { HumanAgent } from "./customer-chat/human-agent.js";
+import { injectMemories } from "./agent-runtime/knowledge-context.js";
 
 import type {
   RouteName,
@@ -36,38 +37,38 @@ import type {
   RouteStreamEvent,
   RouteAgent,
   KnowledgeChunkResult,
-} from "./customer-chat/types.js";
+} from "./agent-runtime/types.js";
 import {
   SORRY_TEMPLATE,
   type ChatResponse,
-} from "./customer-chat/validation.js";
+} from "./agent-runtime/validation.js";
 
-// Re-export for backward compatibility with existing tests
+// Re-export for backward compatibility
 export {
   SORRY_TEMPLATE,
   FALLBACK_PREFIX,
   ChatResponseSchema,
   FORBIDDEN_PATTERNS,
-} from "./customer-chat/validation.js";
-export type { KnowledgeChunkResult } from "./customer-chat/types.js";
+} from "./agent-runtime/validation.js";
+export type { KnowledgeChunkResult } from "./agent-runtime/types.js";
 
 // ═══════════════════════════════════════════════════════
 // 常量
 // ═══════════════════════════════════════════════════════
 
-const CUSTOMER_USER_ID = "00000000-0000-0000-0000-000000000002";
+const AGENT_USER_ID = "00000000-0000-0000-0000-000000000002";
 const MAX_HISTORY_MESSAGES = 20;
 
-// 工作时间
+// 工作时间（通用配置）
 const SERVICE_HOURS_START = parseInt(
-  process.env.CS_SERVICE_HOURS_START || "9",
+  process.env.AGENT_SERVICE_HOURS_START || "9",
   10,
 );
 const SERVICE_HOURS_END = parseInt(
-  process.env.CS_SERVICE_HOURS_END || "18",
+  process.env.AGENT_SERVICE_HOURS_END || "18",
   10,
 );
-const SERVICE_DAYS = (process.env.CS_SERVICE_DAYS || "1,2,3,4,5")
+const SERVICE_DAYS = (process.env.AGENT_SERVICE_DAYS || "1,2,3,4,5")
   .split(",")
   .map(Number);
 
@@ -86,8 +87,8 @@ const CONVERSATIONAL_RULES: ConversationalRule[] = [
       /^(你好|hi|hello|嗨|您好|早上好|下午好|晚上好|在吗|在不在)[\s!！。.,，]*$/,
     response: {
       answer:
-        "您好！欢迎来到 AgentForge 智能客服中心 😊 请问有什么可以帮助您的？",
-      suggestions: ["查询订单", "退货退款政策", "联系人工客服"],
+        "您好！欢迎来到 AgentForge 智能助手 😊 请问有什么可以帮助您的？",
+      suggestions: ["知识库查询", "任务执行", "联系人工客服"],
     },
   },
   {
@@ -109,25 +110,18 @@ const CONVERSATIONAL_RULES: ConversationalRule[] = [
 ];
 
 // ═══════════════════════════════════════════════════════
-// CustomerChatService（薄编排器）
+// AgentRuntimeService（薄编排器）
 // ═══════════════════════════════════════════════════════
 
-export class CustomerChatService {
+export class AgentRuntimeService {
   private modelId: string | null;
   private router: QueryRouter;
   private safetyAgent: SafetyAgent;
-  private smallTalkAgent: SmallTalkAgent;
-  private toolAgent: ToolAgent;
+  private chatAgent: ChatAgent;
+  private agentExecutor: AgentExecutor;
   private humanAgent: HumanAgent;
 
-  // 会话级并发控制：同一 sessionId 的请求串行化，防止竞态条件
-  // 使用 Promise 链式串行化而非阻塞式互斥锁，避免饿死 Node 事件循环
-  //
-  // 内存安全：Map 上限 MAX_SESSION_LOCKS 条，超出时淘汰最旧的 entry（LRU 语义）。
-  // 正常路径下 finally 块会清理，上限仅在异常泄漏时触发（如客户端断连后锁未释放）。
-  //
-  // 超时保护：等待前一个同 session 请求超过 SESSION_LOCK_TIMEOUT_MS 时，
-  // 自动清理陈旧锁并继续执行，防止一个卡住的请求永久阻塞同 session 的所有后续请求。
+  // 会话级并发控制
   private static sessionLocks = new Map<string, Promise<void>>();
   private static readonly MAX_SESSION_LOCKS = 1000;
   private static readonly SESSION_LOCK_TIMEOUT_MS = 30_000;
@@ -136,15 +130,15 @@ export class CustomerChatService {
     this.modelId = modelId || null;
     this.router = new QueryRouter(modelId);
     this.safetyAgent = new SafetyAgent();
-    this.smallTalkAgent = new SmallTalkAgent();
-    this.toolAgent = new ToolAgent();
+    this.chatAgent = new ChatAgent();
+    this.agentExecutor = new AgentExecutor();
     this.humanAgent = new HumanAgent();
 
-    // 强类型路由注册表：确保每个 RouteName 都有对应 Agent 实现
+    // 强类型路由注册表
     this.agentRegistry = {
       SAFETY: this.safetyAgent,
-      SMALL_TALK: this.smallTalkAgent,
-      TOOL: this.toolAgent,
+      CHAT: this.chatAgent,
+      TASK: this.agentExecutor,
       HUMAN: this.humanAgent,
     };
   }
@@ -153,16 +147,16 @@ export class CustomerChatService {
   private async getOrCreateConversation(sessionId: string | null) {
     if (sessionId) {
       const existing = await prisma.conversation.findFirst({
-        where: { sessionId, type: "customer_service" },
+        where: { sessionId, type: "agent_chat" },
       });
       if (existing) return existing;
     }
     const conversation = await prisma.conversation.create({
       data: {
         id: randomUUID(),
-        title: "客服会话",
-        userId: CUSTOMER_USER_ID,
-        type: "customer_service",
+        title: "智能助手会话",
+        userId: AGENT_USER_ID,
+        type: "agent_chat",
         sessionId,
       },
     });
@@ -191,20 +185,13 @@ export class CustomerChatService {
     return null;
   }
 
-  // ── Agent 路由表 —— Rule First + LLM Fallback 架构 ──
-  // SAFETY / HUMAN: 规则命中直接处理
-  // SMALL_TALK: 简单 LLM 响应
-  // TOOL: 统一 Agent，有全部工具（RAG + 订单 + 物流 + 退货 + 工单）
-  //
-  // 使用 Record 强类型注册表替代 switch，确保每个 RouteName 都有对应的 Agent
+  // ── Agent 路由表 ──
   private readonly agentRegistry: Record<RouteName, RouteAgent>;
 
   private resolveAgent(route: RouteName): RouteAgent {
     const agent = this.agentRegistry[route];
     if (!agent) {
-      // 防御性编程：如果 RouteName 扩展了新值但忘记注册，这里会明确报错
-      // 而不是静默返回 undefined 导致 NPE
-      throw new Error(`[CustomerChatService] 未注册的 RouteAgent: ${route}`);
+      throw new Error(`[AgentRuntimeService] 未注册的 RouteAgent: ${route}`);
     }
     return agent;
   }
@@ -219,59 +206,58 @@ export class CustomerChatService {
     signal?: AbortSignal,
   ): AsyncGenerator<Record<string, unknown>> {
     // ── 0. 会话级并发控制：同一 sessionId 的请求串行化 ──
+    // 使用带时间戳的锁条目，超时时自动垃圾回收防止僵尸锁永久阻塞
     const lockKey = sessionId ?? `anonymous-${randomUUID()}`;
-    const previousLock =
-      CustomerChatService.sessionLocks.get(lockKey) ?? Promise.resolve();
+    const existingEntry = AgentRuntimeService.sessionLocks.get(lockKey);
+    const previousLock = existingEntry ?? Promise.resolve();
 
-    // 创建当前请求的完成信号（在 finally 中 resolve）
     let releaseLock: () => void = () => {};
     const currentLock = new Promise<void>((resolve) => {
       releaseLock = resolve;
     });
 
-    // 防御性淘汰：Map 超过上限时逐出最旧的 entry（防止异常泄漏导致 OOM）
+    // LRU 淘汰：Map 超过上限时逐出最旧的 entry
     if (
-      CustomerChatService.sessionLocks.size >=
-      CustomerChatService.MAX_SESSION_LOCKS
+      AgentRuntimeService.sessionLocks.size >=
+      AgentRuntimeService.MAX_SESSION_LOCKS
     ) {
-      const firstKey = CustomerChatService.sessionLocks.keys().next().value;
+      const firstKey = AgentRuntimeService.sessionLocks.keys().next().value;
       if (firstKey !== undefined) {
-        CustomerChatService.sessionLocks.delete(firstKey);
+        AgentRuntimeService.sessionLocks.delete(firstKey);
         logger.warn(
           {
             evictedKey: firstKey,
-            mapSize: CustomerChatService.sessionLocks.size,
+            mapSize: AgentRuntimeService.sessionLocks.size,
           },
           "Session lock map exceeded limit, evicted oldest entry",
         );
       }
     }
-    CustomerChatService.sessionLocks.set(lockKey, currentLock);
+    AgentRuntimeService.sessionLocks.set(lockKey, currentLock);
 
-    // 等待前一个同 session 的请求完成（带超时保护）
+    // 等待前一个同 session 的请求完成（带超时 + 僵尸锁 GC）
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     const lockResult = await Promise.race([
       previousLock.then(() => "resolved" as const),
       new Promise<"timeout">((resolve) => {
         timeoutTimer = setTimeout(
           () => resolve("timeout"),
-          CustomerChatService.SESSION_LOCK_TIMEOUT_MS,
+          AgentRuntimeService.SESSION_LOCK_TIMEOUT_MS,
         );
       }),
     ]);
-    // 及时清理计时器，防止高并发下 orphaned timer 积累
     if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
 
     if (lockResult === "timeout") {
+      // 前一个请求的 Promise 已僵尸（请求崩溃/挂起未释放锁）→ GC 陈旧锁
+      // 当前请求的 currentLock 已写入 Map，后续请求将等待 currentLock（健康锁）
       logger.warn(
         {
           lockKey,
-          timeoutMs: CustomerChatService.SESSION_LOCK_TIMEOUT_MS,
+          timeoutMs: AgentRuntimeService.SESSION_LOCK_TIMEOUT_MS,
         },
-        "Session lock timed out — proceeding with stale lock",
+        "Session lock timed out — stale lock garbage-collected, proceeding",
       );
-      // 不删除 currentLock：后续请求仍需排队等待当前请求的 finally resolve
-      // 删除会导致下一个请求发现空 Map 而直接并发执行
     }
 
     try {
@@ -280,7 +266,6 @@ export class CustomerChatService {
       const [providerName, resolvedModel] = resolveModel(this.modelId);
       const withinHours = this.isWithinServiceHours();
 
-      // 意图识别（用于日志和 fallback）
       const { intent } = intentDetector.detect(userMessage);
 
       // 加载历史
@@ -291,7 +276,6 @@ export class CustomerChatService {
       });
       const reversed = history.reverse();
 
-      // 历史消息转换为 ChatMessage[]
       const historyMessages: ChatMessage[] = reversed.map((msg) => ({
         role: msg.role,
         content: msg.content,
@@ -342,17 +326,15 @@ export class CustomerChatService {
           convMatch,
         );
 
-        // TTFT/TTLT：对话快速通道虽近瞬时，但需记录以保持指标覆盖完整
-        csRequestDurationMs.observe(
-          { route: "SMALL_TALK", phase: "ttft" },
+        agentRequestDurationMs.observe(
+          { route: "CHAT", phase: "ttft" },
           Date.now() - convStartTime,
         );
-        csRequestDurationMs.observe(
-          { route: "SMALL_TALK", phase: "ttlt" },
+        agentRequestDurationMs.observe(
+          { route: "CHAT", phase: "ttlt" },
           Date.now() - convStartTime,
         );
 
-        // 保存助手消息
         await prisma.message.create({
           data: {
             id: assistantMsgId,
@@ -375,22 +357,24 @@ export class CustomerChatService {
           confidence: decision.confidence,
           sessionId: conversation.sessionId,
         },
-        "Router classified customer message",
+        "Router classified message",
       );
 
-      // ── 路由分类指标埋点 ──
       const source = decision.reasoning.includes("关键词命中")
         ? "keyword"
         : decision.reasoning.includes("fallback")
           ? "fallback"
           : "llm";
-      csRouteClassificationTotal.inc({
+      agentRouteClassificationTotal.inc({
         route: decision.route,
         source,
       });
-      csRouteConfidence.observe({ route: decision.route }, decision.confidence);
+      agentRouteConfidence.observe(
+        { route: decision.route },
+        decision.confidence,
+      );
 
-      // ── 4. 构建 RouteContext（含 Intent Classifier 的工具推荐） ──
+      // ── 4. 构建 RouteContext ──
       let context: RouteContext = {
         conversationId: conversation.id,
         sessionId: conversation.sessionId,
@@ -406,13 +390,9 @@ export class CustomerChatService {
         withinServiceHours: withinHours,
         assistantMsgId,
         intent,
-        toolHints: decision.tools,
-        executionHint: decision.execution_order,
       };
 
-      // ── 5. KB 预加载（统一 Agent 架构：不再预加载，Agent 按需调用 search_knowledge_base 工具） ──
-
-      // ── 5b. Memory 注入（所有路由通用） ──
+      // ── 5. Memory 注入（所有路由通用） ──
       const [memCtx, mems] = await injectMemories(
         userMessage,
         conversation.sessionId,
@@ -420,7 +400,7 @@ export class CustomerChatService {
       context.memoryContext = memCtx;
       context.injectedMemories = mems;
 
-      // ── 6. 分发到对应 Agent，收集 answer ──
+      // ── 6. 分发到对应 Agent ──
       const agent = this.resolveAgent(decision.route);
       let streamedAnswer = "";
 
@@ -428,13 +408,11 @@ export class CustomerChatService {
       let firstTokenRecorded = false;
 
       for await (const event of agent.execute(context, scope)) {
-        // Runtime cancellation: stop forwarding events if interrupted
         if (scope.controller.shouldStop) break;
 
-        // TTFT：首 token 事件到达时记录（meta 事件在 Agent 启动时即发送，不代表实际响应就绪）
         if (!firstTokenRecorded && event.type === "token") {
           firstTokenRecorded = true;
-          csRequestDurationMs.observe(
+          agentRequestDurationMs.observe(
             { route: decision.route, phase: "ttft" },
             Date.now() - startTime,
           );
@@ -443,7 +421,7 @@ export class CustomerChatService {
           streamedAnswer += event.content;
         }
         if (event.type === "done") {
-          csRequestDurationMs.observe(
+          agentRequestDurationMs.observe(
             { route: decision.route, phase: "ttlt" },
             Date.now() - startTime,
           );
@@ -451,7 +429,7 @@ export class CustomerChatService {
         yield event;
       }
 
-      // Handle interruption: save partial content
+      // Handle interruption
       if (scope.controller.shouldStop) {
         const result = scope.controller.interrupt();
         if (streamedAnswer) {
@@ -481,7 +459,7 @@ export class CustomerChatService {
         });
       }
 
-      // ── 8. 提取记忆（fire-and-forget，不阻塞 generator return 和锁释放） ──
+      // ── 8. 提取记忆（fire-and-forget） ──
       if (conversation.sessionId && streamedAnswer) {
         const allMessages = [
           ...historyMessages.map((m) => ({
@@ -491,11 +469,10 @@ export class CustomerChatService {
           { role: "user" as const, content: userMessage },
           { role: "assistant" as const, content: streamedAnswer },
         ];
-        // 异步执行，不 await — 避免 1-3s 延迟阻塞锁释放
         new MemoryEngine()
           .extractAndStore(
             allMessages,
-            CUSTOMER_USER_ID,
+            AGENT_USER_ID,
             conversation.id,
             providerName,
             conversation.sessionId,
@@ -504,19 +481,18 @@ export class CustomerChatService {
             if (extracted.length > 0) {
               logger.info(
                 { count: extracted.length, sessionId: conversation.sessionId },
-                "Customer memories extracted",
+                "Agent memories extracted",
               );
             }
           })
           .catch((e) => {
-            logger.warn(e, "Customer memory extraction failed");
+            logger.warn(e, "Memory extraction failed");
           });
       }
     } finally {
-      // 释放会话锁：允许下一个同 sessionId 的请求进入
       releaseLock();
-      if (CustomerChatService.sessionLocks.get(lockKey) === currentLock) {
-        CustomerChatService.sessionLocks.delete(lockKey);
+      if (AgentRuntimeService.sessionLocks.get(lockKey) === currentLock) {
+        AgentRuntimeService.sessionLocks.delete(lockKey);
       }
     }
   }
@@ -565,13 +541,13 @@ export class CustomerChatService {
   }
 }
 
-// ── 单例工厂（复用实例，避免每个请求创建新的 Agent/Service 对象） ──
+// ── 单例工厂 ──
 
-let _defaultService: CustomerChatService | null = null;
+let _defaultService: AgentRuntimeService | null = null;
 
-export function getCustomerChatService(): CustomerChatService {
+export function getAgentRuntimeService(): AgentRuntimeService {
   if (!_defaultService) {
-    _defaultService = new CustomerChatService();
+    _defaultService = new AgentRuntimeService();
   }
   return _defaultService;
 }

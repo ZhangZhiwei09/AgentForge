@@ -8,6 +8,7 @@ import {
   MILVUS_KNOWLEDGE_COLLECTION,
   ensureKnowledgeCollection,
 } from "./milvus.js";
+import { invalidateCitationCache } from "./agent-runtime/citation-verifier.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
 import { RecursiveCharacterTextSplitter } from "./text-splitter.js";
 import { tokenize, getTokenCount } from "./tokenizer.js";
@@ -67,6 +68,7 @@ export class KnowledgeIngestionService {
       });
 
       logger.info({ title, chunks: chunks.length }, "Document ingested");
+      invalidateCitationCache();
       return (await prisma.knowledgeDocument.findUnique({
         where: { id: doc.id },
       }))!;
@@ -136,6 +138,9 @@ export class KnowledgeIngestionService {
         { docId, chunks: chunks.length },
         "Document processed by worker",
       );
+
+      // 知识库内容已变更 → 清除 CitationVerifier 的 embedding 缓存
+      invalidateCitationCache();
     } catch (e) {
       logger.error(
         { docId, error: (e as Error).message },
@@ -264,6 +269,7 @@ export class KnowledgeIngestionService {
     await prisma.knowledgeDocument.delete({ where: { id: docId } });
 
     logger.info({ docId, vectors: milvusIds.length }, "Document deleted");
+    invalidateCitationCache();
     return true;
   }
 

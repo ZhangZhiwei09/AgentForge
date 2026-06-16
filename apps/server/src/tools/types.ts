@@ -13,13 +13,15 @@ export const RISK_TIMEOUTS: Record<RiskLevel, number> = {
 };
 
 import type { RunContext } from "../runtime/context.js";
+import type { ExecutionResult } from "../runtime/results.js";
 
-// A tool executor function: receives parsed arguments and runtime context, returns result string
-// V2: Now accepts RunContext for cancellation (signal.aborted) and tracing (runId, ancestry)
+// A tool executor function: receives parsed arguments and runtime context, returns structured result
+// V3: Returns ExecutionResult instead of string — enables structured status-aware handling
+//   by the registry (circuit breaker), agent (degradation), and trace (observability)
 export type ToolExecutor = (
   args: Record<string, unknown>,
   context: RunContext,
-) => Promise<string>;
+) => Promise<ExecutionResult>;
 
 // Registered tool combines the definition with its executor and metadata
 export interface RegisteredTool {

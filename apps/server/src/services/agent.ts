@@ -21,6 +21,11 @@ import {
   buildDegradationMessage,
   getAlternativeTools,
 } from "./degradation-chain.js";
+import {
+  isDegradedResult,
+  executionResultToContent,
+  type ExecutionResult,
+} from "../runtime/results.js";
 import { AgentGuardService, DEFAULT_GUARD_CONFIG } from "./agent-guard.js";
 import type { AgentGuardConfig } from "./agent-guard.js";
 import {
@@ -155,6 +160,7 @@ export class AgentService {
       tools?: string[] | null;
       guardConfig?: Partial<AgentGuardConfig> | null;
       scope?: ExecutionScope;
+      skipUserMessageSave?: boolean;
     } = {},
   ): AsyncGenerator<AgentStreamEvent> {
     const maxIterations = options.maxIterations || DEFAULT_MAX_ITERATIONS;
@@ -237,17 +243,19 @@ export class AgentService {
     }));
     const conversationMessages = truncateHistory(rawMessages, 6000);
 
-    // 7. Add the user's task as the first user message (save to DB)
-    const taskMsgId = randomUUID();
-    await prisma.message.create({
-      data: {
-        id: taskMsgId,
-        conversationId,
-        role: "user",
-        content: task,
-        model: resolvedModel,
-      },
-    });
+    // 7. Save the task as a user message (skip if caller already persisted a clean version)
+    if (!options.skipUserMessageSave) {
+      const taskMsgId = randomUUID();
+      await prisma.message.create({
+        data: {
+          id: taskMsgId,
+          conversationId,
+          role: "user",
+          content: task,
+          model: resolvedModel,
+        },
+      });
+    }
 
     // 8. Send meta event
     yield {
@@ -335,7 +343,7 @@ export class AgentService {
       let nativeToolCalls: Array<{
         name: string;
         args: Record<string, unknown>;
-        result: string;
+        result: ExecutionResult;
       }> = []; // track native tool calls for ReAct loop continuation
       let llmAttempt = 0;
       const maxLlmAttempts = DEFAULT_LLM_RETRY.maxAttempts;
@@ -413,7 +421,7 @@ export class AgentService {
                 yield {
                   type: "agent_observe",
                   step: totalSteps,
-                  result: `Tool ${tc.name}: ${toolResult}`,
+                  result: executionResultToContent(toolResult),
                 };
               }
             }
@@ -526,7 +534,7 @@ export class AgentService {
         for (const tc of nativeToolCalls) {
           conversationMessages.push({
             role: "user",
-            content: `[工具返回] ${tc.name}: ${tc.result}`,
+            content: `[工具返回] ${tc.name}: ${executionResultToContent(tc.result)}`,
           });
         }
 
@@ -543,7 +551,7 @@ export class AgentService {
               args: tc.args,
               reason: "LLM通过原生tool calling直接调用",
             },
-            result: tc.result,
+            result: executionResultToContent(tc.result),
             timestamp: new Date().toISOString(),
           });
         }
@@ -840,12 +848,13 @@ export class AgentService {
           scope?.context,
         );
 
-        // Check if the result is a degradation message
-        const isDegraded = toolResult.startsWith("[工具执行失败]");
+        // Check if the result is degraded
+        const isDegraded = isDegradedResult(toolResult);
+        const toolResultContent = executionResultToContent(toolResult);
         if (isDegraded) {
           step.error = {
             category: "degradable",
-            message: toolResult,
+            message: toolResultContent,
             retried: true,
             attempts: DEFAULT_TOOL_RETRY.maxAttempts,
           };
@@ -855,11 +864,11 @@ export class AgentService {
         yield {
           type: "agent_observe",
           step: totalSteps,
-          result: toolResult,
+          result: toolResultContent,
         };
 
         // Record step in scratchpad
-        step.result = toolResult;
+        step.result = toolResultContent;
         scratchpad.push(step);
         // P0-3: Memory compression check
         if (scratchpad.length > SCRATCHPAD_COMPRESSION_THRESHOLD) {
@@ -1103,7 +1112,8 @@ export class AgentService {
       );
 
       // Record result
-      step.result = toolResult;
+      const approvalResultContent = executionResultToContent(toolResult);
+      step.result = approvalResultContent;
       conversationMessages.push({
         role: "assistant",
         content: null,
@@ -1123,7 +1133,7 @@ export class AgentService {
         tool_call_id:
           conversationMessages[conversationMessages.length - 1].tool_calls![0]
             .id,
-        content: toolResult,
+        content: approvalResultContent,
       });
 
       yield {
@@ -1133,13 +1143,13 @@ export class AgentService {
         step: approval.stepNumber,
         status: "approved",
         modified_args: modifiedArgs,
-        result: toolResult,
+        result: approvalResultContent,
       } satisfies AgentApprovalResultEvent;
 
       yield {
         type: "agent_observe",
         step: approval.stepNumber,
-        result: toolResult,
+        result: approvalResultContent,
       };
 
       // Save session as running and continue
@@ -1602,18 +1612,19 @@ export class AgentService {
           totalSteps,
           scope?.context, // Propagate parent context for cancellation
         );
-        // Check if the result is a degradation message
-        const isDegradedC = toolResult.startsWith("[工具执行失败]");
+        // Check if the result is degraded
+        const isDegradedC = isDegradedResult(toolResult);
+        const toolResultContentC = executionResultToContent(toolResult);
         if (isDegradedC) {
           step.error = {
             category: "degradable",
-            message: toolResult,
+            message: toolResultContentC,
             retried: true,
             attempts: DEFAULT_TOOL_RETRY.maxAttempts,
           };
         }
-        yield { type: "agent_observe", step: totalSteps, result: toolResult };
-        step.result = toolResult;
+        yield { type: "agent_observe", step: totalSteps, result: toolResultContentC };
+        step.result = toolResultContentC;
         scratchpad.push(step);
         // P0-3: Memory compression check
         if (scratchpad.length > SCRATCHPAD_COMPRESSION_THRESHOLD) {
@@ -1843,8 +1854,8 @@ export class AgentService {
     sessionId?: string,
     stepNumber?: number,
     parentContext?: RunContext,
-  ): Promise<string> {
-    let finalResult: string;
+  ): Promise<ExecutionResult> {
+    let finalResult: ExecutionResult;
     let attempts = 0;
     let lastError: string = "";
 
@@ -1857,7 +1868,7 @@ export class AgentService {
       try {
         finalResult = await toolRegistry.execute(toolName, args, toolContext);
 
-        // Success — record in conversation
+        // Success — record in conversation (convert to string for LLM context)
         conversationMessages.push({
           role: "assistant",
           content: null,
@@ -1874,7 +1885,7 @@ export class AgentService {
           tool_call_id:
             conversationMessages[conversationMessages.length - 1].tool_calls![0]
               .id,
-          content: finalResult,
+          content: executionResultToContent(finalResult),
         });
 
         if (attempts > 0) {
@@ -1958,7 +1969,15 @@ export class AgentService {
       });
     }
 
-    return degradationMsg;
+    // Return degraded result as structured failed ExecutionResult
+    return {
+      status: "failed",
+      error: {
+        code: "EXECUTION_ERROR" as any,
+        message: degradationMsg,
+        retryable: false,
+      },
+    } as ExecutionResult;
   }
 
   /**

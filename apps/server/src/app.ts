@@ -13,8 +13,7 @@ import { chatRoutes } from "./routes/chat.js";
 import { conversationRoutes } from "./routes/conversations.js";
 import { providerRoutes } from "./routes/providers.js";
 import { memoryRoutes } from "./routes/memories.js";
-import { customerChatRoutes } from "./routes/customer-chat.js";
-import { customerVideoRoutes } from "./routes/customer-video.js";
+import { agentRuntimeRoutes } from "./routes/agent-runtime.js";
 import { knowledgeRoutes } from "./routes/knowledge.js";
 import { toolRoutes } from "./routes/tools.js";
 import { agentRoutes } from "./routes/agent.js";
@@ -41,7 +40,7 @@ export async function createApp() {
   app.use("*", requestIdMiddleware);
   // 全局中间件：CORS 应用于所有路径
   app.use("*", corsMiddleware);
-  // 全局中间件：认证验证（白名单跳过 auth routes、health、customer-chat）
+  // 全局中间件：认证验证（白名单跳过 auth routes、health、agent chat）
   app.use("*", authMiddleware);
   // 全局中间件：速率限制
   app.use("*", globalRateLimiter);
@@ -49,6 +48,7 @@ export async function createApp() {
   app.use("/api/chat", chatRateLimiter);
   // 内容安全检测（防止 prompt injection 和超长消息）
   app.use("/api/chat", contentSafetyMiddleware);
+  app.use("/api/agent/chat", contentSafetyMiddleware);
   // 全局错误处理：所有未捕获异常在此统一返回 JSON
   app.onError(errorHandler);
 
@@ -65,8 +65,7 @@ export async function createApp() {
   app.route("/", conversationRoutes); // /api/conversations CRUD
   app.route("/", providerRoutes); // /api/providers
   app.route("/", memoryRoutes); // /api/memories, /api/memories/search
-  app.route("/", customerChatRoutes); // /api/customer-chat
-  app.route("/", customerVideoRoutes); // /api/customer-chat/video/stream (WS)
+  app.route("/", agentRuntimeRoutes); // /api/agent/chat, /api/agent/chat/history, etc.
   app.route("/", knowledgeRoutes); // /api/knowledge/*
   app.route("/", toolRoutes); // /api/tools
   app.route("/", agentRoutes); // /api/agent/*, /api/agent-sessions/*

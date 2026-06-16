@@ -91,7 +91,7 @@ This way each component is independently controllable — restart the backend wi
 
 AgentForge is a **pnpm + Turborepo monorepo** building a ChatGPT clone as the foundation (V1) for a progressive AI agent platform. The roadmap spans platform engineering (P0-P2) and agent capability phases (V5-V9, V11). Completed phases are marked with ✅ in both this file and `plan.md`.
 
-**Evolution path:** V1 ChatGPT Clone → V2 Memory → V3 RAG → V4 Tool Calling → P0 Platform Foundation → P1 Agent Kernel → V5 Voice → V6 Workflow → V9 Multi-Agent ✅ → V11 Video Conversation ✅
+**Evolution path:** V1 ChatGPT Clone → V2 Memory → V3 RAG → V4 Tool Calling → P0 Platform Foundation → P1 Agent Kernel → V5 Voice → V6 Workflow → V9 Multi-Agent ✅ → V11 Video Conversation ✅ → Agent Runtime Refactor ✅ (customer-chat → agent-runtime)
 
 ### Package Layout
 
@@ -110,16 +110,27 @@ AgentForge is a **pnpm + Turborepo monorepo** building a ChatGPT clone as the fo
 ```
 Browser (React) ←SSE/HTTP→ Hono (8000) → LLMProvider (abstract) → OpenAI | DeepSeek
                                     ↓
-                               ChatService
-                              ↙           ↘
-                 ToolRegistry          @agentforge/database (Prisma)
-                                           ↓
-                                     PostgreSQL 16
-                                           ↓
-                                   Milvus Vector DB
+                    ┌──────────────┼──────────────┐
+                    │              │              │
+               ChatService   AgentRuntime    Voice/Video
+               (/api/chat)   (/api/agent/chat)  (WebSocket)
+                    │              │
+                    ↓              ↓
+              ToolRegistry   AgentExecutor (ReAct)
+                    │         ├── Router (SAFETY/CHAT/TASK/HUMAN)
+                    │         ├── KnowledgeContextBuilder
+                    │         └── CitationVerifier
+                    ↓
+           @agentforge/database (Prisma)
+                    ↓
+              PostgreSQL 16
+                    ↓
+            Milvus Vector DB
 ```
 
-**Streaming path:** Frontend calls `POST /api/chat` → Hono SSE via `streamSSE()` yields `data: {json}\n\n` lines → `AgentForgeClient.streamChat()` parses the `ReadableStream` into an `AsyncGenerator<ChatStreamChunk>` → Zustand store accumulates tokens into messages.
+**Streaming paths:**
+- `/api/chat`: Frontend calls `POST /api/chat` → Hono SSE → `ChatService.streamChat()` → `AgentForgeClient.streamChat()` parses `AsyncGenerator<ChatStreamChunk>` → Zustand store
+- `/api/agent/chat`: Frontend calls `POST /api/agent/chat` → Hono SSE → `AgentRuntimeService.streamChat()` → Router → Agent → `useAgentChatStream` hook
 
 ### Key Design Decisions
 
@@ -154,6 +165,106 @@ Browser (React) ←SSE/HTTP→ Hono (8000) → LLMProvider (abstract) → OpenAI
 15. **Observability (P1-2 ✅):** Prometheus metrics at `GET /api/metrics` (HTTP request count/duration, LLM call/token counts, tool execution, memory extraction, Milvus search latency). OpenTelemetry tracing with conditional OTLP export to Jaeger (enable via `OTEL_ENABLED=true`). Grafana dashboard template at `apps/server/dashboards/agentforge.json`.
 
 16. **Voice Agent (V5 ✅):** WebSocket-based real-time voice via `WS /api/voice/stream`. Pipeline: Browser PCM → VAD → WebSocket → ASR (Whisper) → LLM (ChatService) → TTS (OpenAI, 6 voices) → MP3 playback. `VoiceService` (`apps/server/src/services/voice.ts`) manages turn state machine with `AbortController`-based interruption. Audio providers (`apps/server/src/services/audio-providers.ts`) follow lazy registry pattern. Voice sessions in `voice_sessions` table. Frontend: `VoicePanel` with mic, waveform, voice selector, transcript. HTTP: `POST /api/voice/transcribe`, `POST /api/voice/synthesize`, `GET /api/voice/voices`. Backward compatible — text chat unaffected.
+
+## Development Workflow: Multi-Agent Pipeline
+
+All non-trivial features follow a **5-stage gated pipeline** with four specialized agents. Each stage acts as a gate — the work cannot proceed until the current gate approves.
+
+```
+Architect ──→ Architecture Reviewer ──→ Code Agent ──→ Architect (Review) ──→ Professional Reviewer
+   │              │                        │               │                        │
+   │         CHANGES_REQUIRED          REWORK_REQUIRED  CHANGES_REQUIRED          APPROVED
+   └──────────────┘                        └───────────────┘                        │
+        (loop)               (loop)            (loop)                          ✅ Done
+```
+
+### Stage 1: Architect (Design)
+
+**Agent:** `principal-architect` (Design Mode)
+
+**Input:** Feature requirements or task description.
+
+**Output:** A design plan containing:
+- Architecture decisions and trade-offs
+- Component/file-level breakdown
+- Data flow and API contracts
+- Task decomposition with dependencies
+- Risk analysis and mitigation
+
+**Gate:** Output must be a complete, reviewable design document.
+
+### Stage 2: Architecture Reviewer
+
+**Agent:** `architecture-reviewer`
+
+**Input:** Architect's design plan.
+
+**Output:** A verdict:
+- **APPROVED** → proceed to Stage 3 (Code Agent)
+- **CHANGES_REQUIRED** → return to Stage 1 (Architect) with specific issues to address
+
+**What it checks:** Design soundness, trade-off合理性, consistency with existing architecture, scalability, security posture, and feasibility.
+
+### Stage 3: Code Agent (Implementation)
+
+**Agent:** `implementation-engineer`
+
+**Input:** Approved design plan from Stage 2.
+
+**Output:** Working code that faithfully implements the design. The implementation engineer does NOT redesign — it follows the plan exactly. If the plan has gaps, it flags them rather than improvising.
+
+**Gate:** All planned files created/modified, tests pass, no architectural drift.
+
+### Stage 4: Architect Review (Implementation Compliance)
+
+**Agent:** `principal-architect` (Review Mode)
+
+**Input:** The implemented code + the original approved design plan.
+
+**Output:** A compliance verdict:
+- **PASS** → proceed to Stage 5 (Professional Reviewer)
+- **REWORK_REQUIRED** → return to Stage 3 (Code Agent) with specific deviations listed
+
+**What it checks:** Does the code match the design? Are there unplanned architectural changes? Did any design assumptions break during implementation?
+
+### Stage 5: Professional Reviewer (Code Quality)
+
+**Agent:** `principal-code-reviewer`
+
+**Input:** The implemented code.
+
+**Output:** A structured review with issues classified as:
+- **P0 (Blocking):** Must fix before merge — correctness, security, data loss
+- **P1 (Must Fix):** Should fix — reliability, performance, maintainability
+- **P2 (Suggestion):** Nice to have — readability, style, minor optimizations
+
+**Gate:**
+- **APPROVED** (no P0 issues) → ✅ Task complete, ready to merge
+- **CHANGES_REQUIRED** (P0 issues present) → return to Stage 3 (Code Agent)
+
+### Agent Mapping Summary
+
+| Stage | Role | Agent Type | Mode |
+|-------|------|-----------|------|
+| 1 | Architect | `principal-architect` | Design |
+| 2 | Architecture Reviewer | `architecture-reviewer` | Review |
+| 3 | Code Agent | `implementation-engineer` | Implement |
+| 4 | Architect (Review) | `principal-architect` | Review |
+| 5 | Professional Reviewer | `principal-code-reviewer` | Review |
+
+### When to Use This Pipeline
+
+Use the full pipeline for:
+- New features (new routes, services, components)
+- Significant refactoring (changes spanning 3+ files)
+- API design changes
+- Database schema changes
+
+Skip to Stage 3 directly for:
+- Bug fixes with clear root cause
+- Small, well-defined changes following existing patterns
+- Configuration updates
+- Documentation changes
 
 ### Keeping CLAUDE.md in Sync with plan.md
 
@@ -193,6 +304,7 @@ The `plan.md` defines the full V1→V11 + P0-P2 roadmap. Completed phases are ma
 - **V6 Workflow Engine:** ✅ DAG-based orchestration, checkpoint/resume, 6 step types, 3 templates, 15 API endpoints
 - **V9 Multi-Agent:** ✅ Role-based agent teams, message bus, 3 collaboration patterns, blackboard, 4 templates, 16 API endpoints
 - **V11 Multimodal Video Conversation:** ✅ WebSocket-based video chat with AI customer service agent. Camera + mic → ASR + GPT-4o Vision → TTS. Canvas frame capture (1fps JPEG), multimodal LLM provider, VideoCallPanel UI. Phase 1 complete; Phase 2 (WebRTC/RTC upgrade) planned.
+- **Agent Runtime Refactor:** ✅ Renamed `customer-chat` → `agent-runtime`. 4-route classifier (SAFETY/CHAT/TASK/HUMAN). Unified `AgentExecutor` with dynamic tool fetching. Tool layering: Builtin (`search_knowledge_base`) vs Business (`create_support_ticket`). `KnowledgeContextBuilder` for structured KB context. Removed e-commerce tools, video chat, and order/policy cards. Conversation type: `agent_chat`. See `docs/agent-runtime-refactor-plan.md`.
 
 **Beyond V11:**
 

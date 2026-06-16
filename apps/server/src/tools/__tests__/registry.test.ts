@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { toolRegistry } from "../registry.js";
 import { createRunContext } from "../../runtime/context.js";
+import { executionResultToContent } from "../../runtime/results.js";
 
 // Shared test context for tool execution
 const testCtx = createRunContext(new AbortController().signal);
@@ -45,37 +46,38 @@ describe("ToolRegistry", () => {
     const result = await toolRegistry.execute("calculator", {
       expression: "2 + 3 * 4",
     }, testCtx);
-    expect(result).toBe("14");
+    expect(result.status).toBe("success");
+    expect(executionResultToContent(result)).toBe("14");
   });
 
   it("should execute get_current_time tool", async () => {
     const result = await toolRegistry.execute("get_current_time", {
       timezone: "UTC",
     }, testCtx);
-    expect(result).toBeTruthy();
-    expect(typeof result).toBe("string");
-    expect(result.length).toBeGreaterThan(5);
+    expect(result.status).toBe("success");
+    expect(executionResultToContent(result).length).toBeGreaterThan(5);
   });
 
   it("should execute web_search (stub)", async () => {
     const result = await toolRegistry.execute("web_search", {
       query: "test",
     }, testCtx);
-    expect(result).toContain("test");
-    expect(result).toContain("query");
+    const content = executionResultToContent(result);
+    expect(content).toContain("test");
+    expect(content).toContain("query");
   });
 
   it("should return error for unknown tool", async () => {
     const result = await toolRegistry.execute("unknown_tool", {}, testCtx);
-    expect(result).toContain("Error");
-    expect(result).toContain("unknown tool");
+    expect(result.status).toBe("failed");
+    expect(executionResultToContent(result).toLowerCase()).toContain("unknown tool");
   });
 
   it("should return error for calculator with invalid expression", async () => {
     const result = await toolRegistry.execute("calculator", {
       expression: "foo + bar",
     }, testCtx);
-    expect(result).toContain("Error");
+    expect(result.status).toBe("failed");
   });
 
   it("should list all registered tool names", () => {

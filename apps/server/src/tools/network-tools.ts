@@ -2,6 +2,13 @@
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
 import type { RunContext } from "../runtime/context.js";
+import type { ExecutionResult } from "../runtime/results.js";
+import {
+  successResult,
+  partialResult,
+  failedResult,
+  ExecutionErrorCode,
+} from "../runtime/results.js";
 import { logger } from "@agentforge/logger";
 
 // Tool definition for web_fetch
@@ -32,19 +39,16 @@ const webFetchDef: ToolDefinition = {
 async function webFetchExecute(
   args: Record<string, unknown>,
   context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const url = (args.url as string) || "";
   const maxChars = Math.min((args.max_chars as number) || 10_000, 50_000);
 
-  // Validate URL
   if (!/^https?:\/\/.+/i.test(url)) {
-    return `Error: Invalid URL "${url}". URL must start with http:// or https://.`;
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, `Invalid URL "${url}". URL must start with http:// or https://.`);
   }
 
   const start = Date.now();
 
-  // Registry already handles timeout + cancellation via executeWithTimeout;
-  // use context.signal directly to avoid redundant timeout signal allocation.
   try {
     const response = await fetch(url, {
       method: "GET",
@@ -60,7 +64,7 @@ async function webFetchExecute(
     const status = response.status;
 
     if (!response.ok) {
-      return `Error: HTTP ${status} — ${response.statusText} for URL "${url}"`;
+      return failedResult(ExecutionErrorCode.API_ERROR, `HTTP ${status} — ${response.statusText} for URL "${url}"`);
     }
 
     const rawBody = await response.text();
@@ -79,7 +83,7 @@ async function webFetchExecute(
       "web_fetch executed",
     );
 
-    return JSON.stringify(
+    const output = JSON.stringify(
       {
         url,
         status,
@@ -93,16 +97,22 @@ async function webFetchExecute(
       null,
       2,
     );
+
+    if (bodyLength > maxChars) {
+      return partialResult(output, `Content truncated from ${bodyLength} to ${maxChars} characters`);
+    }
+
+    return successResult(output, { contentLength: bodyLength, durationMs: duration });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Unknown error";
 
     if ((err as Error)?.name === "AbortError") {
       logger.warn({ url }, "web_fetch timed out");
-      return `Error: Request timed out for URL "${url}" (15s timeout)`;
+      return failedResult(ExecutionErrorCode.TIMEOUT, `Request timed out for URL "${url}"`, true);
     }
 
     logger.error({ url, error: msg }, "web_fetch failed");
-    return `Error fetching URL "${url}": ${msg}`;
+    return failedResult(ExecutionErrorCode.NETWORK_ERROR, `Error fetching URL "${url}": ${msg}`, true);
   }
 }
 

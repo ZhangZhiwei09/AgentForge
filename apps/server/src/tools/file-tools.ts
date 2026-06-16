@@ -7,6 +7,13 @@ import { glob } from "node:fs/promises"; // Note: glob is available in Node 22+
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
 import type { RunContext } from "../runtime/context.js";
+import type { ExecutionResult } from "../runtime/results.js";
+import {
+  successResult,
+  partialResult,
+  failedResult,
+  ExecutionErrorCode,
+} from "../runtime/results.js";
 
 // Workspace root — all file operations are restricted to this directory
 // Default: project root. Override with FILE_WORKSPACE env var.
@@ -55,20 +62,22 @@ const fileReadDef: ToolDefinition = {
 async function fileReadExecute(
   args: Record<string, unknown>,
   _context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const userPath = (args.path as string) || "";
   const maxLines = Math.min(
     Math.max(1, (args.max_lines as number) || 500),
     2000,
   );
 
-  if (!userPath.trim()) return "Error: file path is required";
+  if (!userPath.trim()) {
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, "File path is required");
+  }
 
   try {
     const filePath = safeResolve(userPath);
 
     if (!existsSync(filePath)) {
-      return `Error: file not found: "${userPath}"`;
+      return failedResult(ExecutionErrorCode.NOT_FOUND, `File not found: "${userPath}"`);
     }
 
     const content = await readFile(filePath, "utf-8");
@@ -76,13 +85,17 @@ async function fileReadExecute(
 
     if (lines.length > maxLines) {
       const truncated = lines.slice(0, maxLines).join("\n");
-      return `${truncated}\n\n... (truncated — ${lines.length - maxLines} more lines. Use max_lines to read more.)`;
+      return partialResult(
+        truncated,
+        `Truncated — ${lines.length - maxLines} more lines. Use max_lines to read more.`,
+        { totalLines: lines.length, shownLines: maxLines },
+      );
     }
 
-    return content;
+    return successResult(content, { totalLines: lines.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
-    return `Error reading file "${userPath}": ${msg}`;
+    return failedResult(ExecutionErrorCode.EXECUTION_ERROR, `Error reading file "${userPath}": ${msg}`);
   }
 }
 
@@ -117,11 +130,13 @@ const fileWriteDef: ToolDefinition = {
 async function fileWriteExecute(
   args: Record<string, unknown>,
   _context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const userPath = (args.path as string) || "";
   const content = (args.content as string) || "";
 
-  if (!userPath.trim()) return "Error: file path is required";
+  if (!userPath.trim()) {
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, "File path is required");
+  }
 
   try {
     const filePath = safeResolve(userPath);
@@ -138,10 +153,13 @@ async function fileWriteExecute(
     }
 
     await writeFile(filePath, content, "utf-8");
-    return `File written successfully: "${userPath}" (${content.length} characters)`;
+    return successResult(
+      `File written successfully: "${userPath}" (${content.length} characters)`,
+      { path: userPath, size: content.length },
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
-    return `Error writing file "${userPath}": ${msg}`;
+    return failedResult(ExecutionErrorCode.EXECUTION_ERROR, `Error writing file "${userPath}": ${msg}`);
   }
 }
 
@@ -181,7 +199,7 @@ const fileSearchDef: ToolDefinition = {
 async function fileSearchExecute(
   args: Record<string, unknown>,
   _context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const pattern = (args.pattern as string) || "**/*";
   const contains = (args.contains as string) || undefined;
   const maxResults = Math.min(
@@ -190,14 +208,9 @@ async function fileSearchExecute(
   );
 
   try {
-    // Use glob to find files matching the pattern
-    const searchPattern = join(WORKSPACE_ROOT, pattern).replace(/\\/g, "/");
-
-    // Simple glob-based file search using Node's fs
     let matches: string[] = [];
 
-    // Use a simplified approach — scan for files matching the pattern
-    const { readdir, stat } = await import("node:fs/promises");
+    const { readdir } = await import("node:fs/promises");
 
     async function scanDir(dir: string, currentPattern: string): Promise<void> {
       if (matches.length >= maxResults) return;
@@ -216,9 +229,7 @@ async function fileSearchExecute(
             const relPath = fullPath
               .replace(WORKSPACE_ROOT, "")
               .replace(/^[\/\\]/, "");
-            // Simple glob matching
             if (matchSimpleGlob(relPath, currentPattern)) {
-              // If content search is requested, check file contents
               if (contains) {
                 try {
                   const content = await readFile(fullPath, "utf-8");
@@ -241,15 +252,21 @@ async function fileSearchExecute(
 
     await scanDir(WORKSPACE_ROOT, pattern);
 
-    return JSON.stringify({
+    const output = JSON.stringify({
       pattern,
       contains: contains || null,
       matches: matches.slice(0, maxResults),
       total: matches.length,
     });
+
+    if (matches.length > maxResults) {
+      return partialResult(output, `Results truncated to ${maxResults} of ${matches.length} total matches`);
+    }
+
+    return successResult(output, { totalMatches: matches.length });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
-    return `Error searching files: ${msg}`;
+    return failedResult(ExecutionErrorCode.EXECUTION_ERROR, `Error searching files: ${msg}`);
   }
 }
 

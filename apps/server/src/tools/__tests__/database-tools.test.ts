@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRunContext } from "../../runtime/context.js";
+import { executionResultToContent } from "../../runtime/results.js";
 
 // Mock prisma before importing the tool module
 const mockQueryRawUnsafe = vi.fn();
@@ -33,7 +34,7 @@ describe("db_query tool", () => {
     mockQueryRawUnsafe.mockResolvedValue([{ id: 1, name: "test" }]);
 
     const result = await dbQueryTool.execute({ query: "SELECT * FROM users" }, testCtx);
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(executionResultToContent(result));
 
     expect(parsed.row_count).toBe(1);
     expect(parsed.rows).toHaveLength(1);
@@ -63,8 +64,8 @@ describe("db_query tool", () => {
 
   it("should reject empty query", async () => {
     const result = await dbQueryTool.execute({ query: "" }, testCtx);
-    expect(result).toContain("Error");
-    expect(result).toContain("empty");
+    expect(result.status).toBe("failed");
+    expect(executionResultToContent(result)).toContain("empty");
     expect(mockQueryRawUnsafe).not.toHaveBeenCalled();
   });
 
@@ -72,8 +73,8 @@ describe("db_query tool", () => {
     const result = await dbQueryTool.execute({
       query: "INSERT INTO users VALUES (1)",
     }, testCtx);
-    expect(result).toContain("Error");
-    expect(result).toContain("SELECT");
+    expect(result.status).toBe("failed");
+    expect(executionResultToContent(result)).toContain("SELECT");
     expect(mockQueryRawUnsafe).not.toHaveBeenCalled();
   });
 
@@ -81,19 +82,19 @@ describe("db_query tool", () => {
     const result = await dbQueryTool.execute({
       query: "UPDATE users SET name = 'x'",
     }, testCtx);
-    expect(result).toContain("Error");
+    expect(result.status).toBe("failed");
     expect(mockQueryRawUnsafe).not.toHaveBeenCalled();
   });
 
   it("should reject DELETE queries", async () => {
     const result = await dbQueryTool.execute({ query: "DELETE FROM users" }, testCtx);
-    expect(result).toContain("Error");
+    expect(result.status).toBe("failed");
     expect(mockQueryRawUnsafe).not.toHaveBeenCalled();
   });
 
   it("should reject DROP queries", async () => {
     const result = await dbQueryTool.execute({ query: "DROP TABLE users" }, testCtx);
-    expect(result).toContain("Error");
+    expect(result.status).toBe("failed");
     expect(mockQueryRawUnsafe).not.toHaveBeenCalled();
   });
 
@@ -101,8 +102,8 @@ describe("db_query tool", () => {
     const result = await dbQueryTool.execute({
       query: "SELECT * FROM users; DROP TABLE users",
     }, testCtx);
-    expect(result).toContain("Error");
-    expect(result).toContain("DROP");
+    expect(result.status).toBe("failed");
+    expect(executionResultToContent(result)).toContain("DROP");
     expect(mockQueryRawUnsafe).not.toHaveBeenCalled();
   });
 
@@ -110,13 +111,13 @@ describe("db_query tool", () => {
     mockQueryRawUnsafe.mockRejectedValue(new Error("Connection refused"));
 
     const result = await dbQueryTool.execute({ query: "SELECT 1" }, testCtx);
-    expect(result).toContain("Error");
-    expect(result).toContain("Connection refused");
+    expect(result.status).toBe("failed");
+    expect(executionResultToContent(result)).toContain("Connection refused");
   });
 
   it("should return error for missing query parameter", async () => {
     const result = await dbQueryTool.execute({}, testCtx);
-    expect(result).toContain("Error");
+    expect(result.status).toBe("failed");
   });
 
   it("should handle empty result set", async () => {
@@ -125,7 +126,7 @@ describe("db_query tool", () => {
     const result = await dbQueryTool.execute({
       query: "SELECT * FROM users WHERE id = 999",
     }, testCtx);
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(executionResultToContent(result));
 
     expect(parsed.row_count).toBe(0);
     expect(parsed.rows).toHaveLength(0);

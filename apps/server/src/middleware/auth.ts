@@ -10,11 +10,15 @@ const PUBLIC_PATHS = [
   "/api/auth/signin",
   "/api/auth/refresh",
   "/api/health",
+  "/api/agent/chat", // Anonymous agent SSE chat
+  "/api/agent/chat/history", // Load session history
+  "/api/agent/chat/rate", // Submit satisfaction rating
 ];
 
 // Prefix-based public paths (any path starting with these is public)
+// NOTE: Only FAQ sub-tree is public via prefix — feedback/analytics are protected by auth
 const PUBLIC_PREFIXES = [
-  "/api/customer-chat", // Anonymous customer chat + FAQ + rate + analytics
+  "/api/agent/chat/faq", // Anonymous FAQ browsing
 ];
 
 export const authMiddleware: MiddlewareHandler<{

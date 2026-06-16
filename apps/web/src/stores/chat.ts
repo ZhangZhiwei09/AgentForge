@@ -113,7 +113,22 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setConversations: (convs) => set({ conversations: convs }),
   setCurrentConversation: (id) => set({ currentConversationId: id }),
-  setMessages: (msgs) => set({ messages: msgs }),
+  setMessages: (msgs) =>
+    set((s) => {
+      const seen = new Set<string>();
+      const deduped = msgs.filter((m) => {
+        if (m.id === "__streaming__") return true;
+        if (seen.has(m.id)) return false;
+        seen.add(m.id);
+        return true;
+      });
+      // Skip state update if nothing changed
+      if (deduped.length === s.messages.length) {
+        const unchanged = deduped.every((m, i) => m.id === s.messages[i]?.id);
+        if (unchanged) return {};
+      }
+      return { messages: deduped };
+    }),
   appendMessage: (msg) => set((s) => ({ messages: [...s.messages, msg] })),
   appendStreamToken: (token) => {
     const msgs = get().messages;

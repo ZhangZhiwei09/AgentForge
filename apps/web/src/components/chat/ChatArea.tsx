@@ -1,8 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useChatStore } from "@/stores/chat";
 import { useMessages, useCreateConversation } from "@/hooks/useApi";
 import { ChatInput } from "./ChatInput";
-import { MessageBubble } from "./MessageBubble";
+import { MessageList } from "./MessageList";
 import { ModelSelector } from "./ModelSelector";
 import { MessageSquare, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -16,12 +16,10 @@ const AVAILABLE_TOOLS = [
 
 export function ChatArea() {
   const currentId = useChatStore((s) => s.currentConversationId);
-  const messages = useChatStore((s) => s.messages);
   const setMessages = useChatStore((s) => s.setMessages);
   const isStreaming = useChatStore((s) => s.isStreaming);
   const enabledTools = useChatStore((s) => s.enabledTools);
   const toggleTool = useChatStore((s) => s.toggleTool);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const { data: apiMessages } = useMessages(currentId);
   const createConv = useCreateConversation();
 
@@ -30,10 +28,6 @@ export function ChatArea() {
       setMessages(apiMessages);
     }
   }, [apiMessages, setMessages]);
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isStreaming]);
 
   if (!currentId) {
     return (
@@ -86,21 +80,7 @@ export function ChatArea() {
         <ModelSelector />
       </div>
 
-      <div className="flex-1 overflow-y-auto px-4 py-6">
-        {messages.length === 0 && (
-          <div className="flex h-full items-center justify-center">
-            <p className="text-sm text-muted-foreground">
-              Send a message to start the conversation
-            </p>
-          </div>
-        )}
-        <div className="mx-auto max-w-3xl space-y-4">
-          {messages.map((msg) => (
-            <MessageBubble key={msg.id} message={msg} />
-          ))}
-        </div>
-        <div ref={bottomRef} />
-      </div>
+      <MessageList />
 
       <div className="border-t border-[hsl(var(--border))] p-4">
         <div className="mx-auto max-w-3xl">

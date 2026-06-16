@@ -133,56 +133,56 @@ export const workflowSuccessRate = new Gauge({
   registers: [registry],
 });
 
-// ---- Customer Chat Metrics ----
+// ---- Agent Runtime Metrics ----
 
-/** 客服消息路由分类统计（按路由和分类来源） */
-export const csRouteClassificationTotal = new Counter({
-  name: "cs_route_classification_total",
-  help: "Customer chat route classification count by route and source",
-  labelNames: ["route", "source"], // route = SAFETY | SMALL_TALK | TOOL | HUMAN; source = keyword | llm | fallback
+/** Agent Runtime 消息路由分类统计 */
+export const agentRouteClassificationTotal = new Counter({
+  name: "agent_route_classification_total",
+  help: "Agent Runtime route classification count by route and source",
+  labelNames: ["route", "source"],
   registers: [registry],
 });
 
-/** 客服路由分类置信度分布 */
-export const csRouteConfidence = new Histogram({
-  name: "cs_route_confidence",
-  help: "Customer chat route classification confidence distribution",
+/** Agent Runtime 路由分类置信度分布 */
+export const agentRouteConfidence = new Histogram({
+  name: "agent_route_confidence",
+  help: "Agent Runtime route classification confidence distribution",
   labelNames: ["route"],
   buckets: [0.1, 0.3, 0.5, 0.7, 0.8, 0.9, 0.95, 1.0],
   registers: [registry],
 });
 
-/** 客服 Agent ReAct 循环迭代次数分布 */
-export const csReActIterations = new Histogram({
-  name: "cs_react_iterations",
-  help: "Customer chat Agent ReAct loop iteration count",
-  labelNames: ["agent_type"], // agent_type = tool_agent
+/** Agent Runtime ReAct 循环迭代次数分布 */
+export const agentReActIterations = new Histogram({
+  name: "agent_react_iterations",
+  help: "Agent Runtime ReAct loop iteration count",
+  labelNames: ["agent_type"],
   buckets: [1, 2, 3, 4, 5, 7, 10],
   registers: [registry],
 });
 
-/** 客服回复引证覆盖率（Citation Coverage） */
-export const csCitationCoverage = new Histogram({
-  name: "cs_citation_coverage",
-  help: "Customer chat response citation coverage rate",
-  labelNames: ["level"], // level = embedding | keyword_fallback
+/** Agent Runtime 回复引证覆盖率 */
+export const agentCitationCoverage = new Histogram({
+  name: "agent_citation_coverage",
+  help: "Agent Runtime response citation coverage rate",
+  labelNames: ["level"],
   buckets: [0, 0.25, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
   registers: [registry],
 });
 
-/** 客服场景工具调用统计 */
-export const csToolCallsTotal = new Counter({
-  name: "cs_tool_calls_total",
-  help: "Customer chat tool execution count",
-  labelNames: ["tool_name", "status", "route"], // route = TOOL
+/** Agent Runtime 工具调用统计 */
+export const agentToolCallsTotal = new Counter({
+  name: "agent_tool_calls_total",
+  help: "Agent Runtime tool execution count",
+  labelNames: ["tool_name", "status", "route"],
   registers: [registry],
 });
 
-/** 客服请求端到端延迟（TTFT = 首token时间, TTLT = 末token时间） */
-export const csRequestDurationMs = new Histogram({
-  name: "cs_request_duration_ms",
-  help: "Customer chat end-to-end request latency (TTFT and TTLT)",
-  labelNames: ["route", "phase"], // phase = ttft | ttlt
+/** Agent Runtime 请求端到端延迟 */
+export const agentRequestDurationMs = new Histogram({
+  name: "agent_request_duration_ms",
+  help: "Agent Runtime end-to-end request latency (TTFT and TTLT)",
+  labelNames: ["route", "phase"],
   buckets: [
     5, 10, 25, 50, 100, 200, 300, 500, 800, 1000, 2500, 5000, 10000, 15000,
     30000,

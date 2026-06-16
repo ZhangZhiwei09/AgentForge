@@ -1,5 +1,4 @@
-// SmallTalkAgent —— 处理社交对话（问候、自我介绍、感谢、道别、能力询问）
-// 替代 CONVERSATIONAL_RULES 数组的 LLM 方案
+// ChatAgent —— 处理社交对话（问候、自我介绍、感谢、道别、能力询问）
 // 用聚焦的对话 prompt + jsonMode，不查知识库，不调工具
 // 天然多语言：LLM 理解 "Who are you?"、"你是谁"、"あなたは誰？"
 
@@ -14,18 +13,18 @@ import { streamTokens } from "./types.js";
 
 // ── Zod Schema ──
 
-const SmallTalkResponseSchema = z.object({
+const ChatResponseSchema = z.object({
   answer: z.string().min(1).max(2000),
   suggestions: z.array(z.string().max(50)).max(3).default([]),
 });
 
-// ── SmallTalk System Prompt ──
+// ── Chat System Prompt ──
 
-const SMALLTALK_SYSTEM_PROMPT = `你是 AgentForge 平台的智能客服助手，当前正在进行基本社交对话。
+const CHAT_SYSTEM_PROMPT = `你是 AgentForge 平台的智能助手，当前正在进行基本社交对话。
 
 你的身份：
-- 你是 AgentForge 智能客服助手，由 AI 驱动
-- 你可以帮助客户解答：订单与物流、退换货政策、支付与优惠券、账户与会员等问题
+- 你是 AgentForge 智能助手，由 AI 驱动
+- 你可以帮助用户解答各类问题，包括知识查询、任务执行等
 
 ## 规则
 1. 自然友好地回复，不需要引用知识库
@@ -40,15 +39,15 @@ const SMALLTALK_SYSTEM_PROMPT = `你是 AgentForge 平台的智能客服助手�
 严格按照以下 JSON 格式输出，不要任何前言后记：
 {"answer": "你的回答文本（可含 Markdown 格式）", "suggestions": ["建议追问1", "建议追问2"]}
 
-- answer: 给客户的回答，1-2000 字符
+- answer: 给用户的回答，1-2000 字符
 - suggestions: 2-3 个建议后续问题，每个不超过 50 字符。无法生成时写空数组 []`;
 
 // ═══════════════════════════════════════════════════════
-// SmallTalkAgent
+// ChatAgent
 // ═══════════════════════════════════════════════════════
 
-export class SmallTalkAgent implements RouteAgent {
-  readonly route = "SMALL_TALK" as const;
+export class ChatAgent implements RouteAgent {
+  readonly route = "CHAT" as const;
 
   async *execute(
     context: RouteContext,
@@ -73,7 +72,7 @@ export class SmallTalkAgent implements RouteAgent {
       intent: context.intent,
       within_service_hours: context.withinServiceHours,
       memory_count: 0,
-      route: "SMALL_TALK",
+      route: "CHAT",
     };
 
     // LLM 调用
@@ -88,7 +87,7 @@ export class SmallTalkAgent implements RouteAgent {
       const result = await provider.chatSync(
         messages,
         resolvedModel,
-        SMALLTALK_SYSTEM_PROMPT,
+        CHAT_SYSTEM_PROMPT,
         0.3,
         512,
         true, // jsonMode
@@ -104,8 +103,8 @@ export class SmallTalkAgent implements RouteAgent {
         fallbackUsed = answer === "您好！有什么可以帮助您的吗？"; // 空内容兜底
       }
     } catch (e) {
-      logger.warn(e, "SmallTalkAgent LLM call failed, using fallback");
-      answer = "您好！我是 AgentForge 智能客服助手，有什么可以帮助您的吗？";
+      logger.warn(e, "ChatAgent LLM call failed, using fallback");
+      answer = "您好！我是 AgentForge 智能助手，有什么可以帮助您的吗？";
       fallbackUsed = true;
     }
 
@@ -121,7 +120,7 @@ export class SmallTalkAgent implements RouteAgent {
       memory: { injected: 0, extracted: 0 },
       validated: true,
       fallback_used: fallbackUsed || undefined,
-      route: "SMALL_TALK" as const,
+      route: "CHAT" as const,
     };
   }
 
@@ -131,7 +130,7 @@ export class SmallTalkAgent implements RouteAgent {
     try {
       const jsonStr = extractJSONFromLLMResponse(raw);
       const parsed = JSON.parse(jsonStr);
-      const result = SmallTalkResponseSchema.safeParse(parsed);
+      const result = ChatResponseSchema.safeParse(parsed);
       return result.success ? result.data : null;
     } catch {
       return null;

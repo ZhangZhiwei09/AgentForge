@@ -1,10 +1,8 @@
-// BusinessAgent 校验管线
-// 从 CustomerChatService 中提取，用于校验 LLM 生成的业务回复质量
+// Agent Runtime 校验管线
 // 5 层校验：JSON 可解析 → Schema 校验 → 禁止行为扫描 → Citation 引证校验 → 事实性声明检查
 //
-// L4 已从关键词重叠升级为 CitationVerifier 的逐句语义引证校验。
+// L4 使用 CitationVerifier 的逐句语义引证校验。
 // 当 embedding provider 可用时使用余弦相似度，否则回退到增强版关键词+实体匹配。
-// 详见: decisions/004-tradeoffs-citation-vs-keyword.md
 
 import { z } from "zod";
 import { extractJSONFromLLMResponse } from "../../lib/json-utils.js";
@@ -26,16 +24,12 @@ export const ChatResponseSchema = z.object({
 
 export type ChatResponse = z.infer<typeof ChatResponseSchema>;
 
-// ── Layer 3：禁止行为扫描列表 ──
+// ── Layer 3：禁止行为扫描列表（通用版） ──
 
 export const FORBIDDEN_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   { pattern: /根据(我司|公司|平台)规定/g, label: "虚假权威引用" },
   { pattern: /经查询[^，。]*[，。]/g, label: "虚假查询陈述" },
   { pattern: /可能是(因为|由于)/g, label: "无依据推测原因" },
-  {
-    pattern: /您的(订单|物流|快递)[^，。]{0,10}(可能|应该)/g,
-    label: "推测客户信息",
-  },
   { pattern: /建议您(自行|自己)[^，。]*[，。]/g, label: "推卸责任式建议" },
 ];
 
@@ -47,25 +41,24 @@ export interface ValidationResult {
   layer: number;
 }
 
-// ── 5 层校验管线（L4 已升级为 Citation-based 语义对齐） ──
+// ── 5 层校验管线 ──
 
 export function validateBusinessResponse(
   rawText: string,
   knowledgeChunks: string[],
   citationReport?: CitationReport,
 ): ValidationResult {
-  // ── 尝试 JSON 解析（兼容旧 BusinessAgent 格式） ──
-  // 新的 ToolAgent 输出自然语言文本而非 JSON，此时跳过 L1/L2 直接进 L3/L4/L5
+  // ── 尝试 JSON 解析 ──
   let parsed: unknown;
   let isJSON = false;
   try {
     parsed = JSON.parse(extractJSONFromLLMResponse(rawText));
     isJSON = true;
   } catch {
-    // 非 JSON 格式（自然语言文本）→ 跳过 L1/L2，以 rawText 作为校验目标
+    // 非 JSON 格式 → 跳过 L1/L2
   }
 
-  // Layer 1-2: JSON 格式校验（仅 JSON 输入）
+  // Layer 1-2: JSON 格式校验
   if (isJSON) {
     const schemaResult = ChatResponseSchema.safeParse(parsed);
     if (!schemaResult.success) {
@@ -80,10 +73,9 @@ export function validateBusinessResponse(
     }
   }
 
-  // 校验目标文本：JSON 格式用 answer 字段，自然语言直接用原文本
   const answerText = isJSON ? (parsed as { answer: string }).answer : rawText;
 
-  // Layer 3: 禁止行为扫描（JSON 和自然语言均适用）
+  // Layer 3: 禁止行为扫描
   const forbiddenHits: string[] = [];
   for (const { pattern, label } of FORBIDDEN_PATTERNS) {
     pattern.lastIndex = 0;
@@ -99,14 +91,11 @@ export function validateBusinessResponse(
     };
   }
 
-  // Layer 4: Citation 引证校验（软告警，不阻止）
-  // 优先使用 CitationVerifier 的语义对齐结果，
-  // 降级时回退到旧版关键词重叠检测
+  // Layer 4: Citation 引证校验（软告警）
   const layer4Errors: string[] = [];
 
   if (knowledgeChunks.length > 0 && answerText !== SORRY_TEMPLATE) {
     if (citationReport) {
-      // ── 新版 Citation-based 语义对齐 ──
       const uncitedFactuals = citationReport.sentences.filter(
         (s) => s.isFactual && s.status === "uncited",
       );
@@ -125,7 +114,7 @@ export function validateBusinessResponse(
         );
       }
     } else {
-      // ── 旧版关键词回退（CitationVerifier 不可用时的保底） ──
+      // 旧版关键词回退
       const answerLower = answerText.toLowerCase();
       const hitCount = knowledgeChunks.filter((chunk) => {
         const keywords = chunk.match(/[一-鿿\w]{3,}/g) || [];
@@ -141,13 +130,13 @@ export function validateBusinessResponse(
     }
   }
 
-  // Layer 5: KB 为空但回复包含业务事实性内容 → 疑似编造
+  // Layer 5: KB 为空但回复包含业务事实性内容 → 疑似编造（通用关键词）
   if (knowledgeChunks.length === 0 && answerText !== SORRY_TEMPLATE) {
     const factualIndicators = [
       /[0-9]+\s*(天|个工作日|小时|分钟)/,
       /[0-9]+\s*(元|块|折|%|折)/,
-      /(退货|退款|换货|物流|快递|发货|运费)/,
-      /(会员|积分|等级|优惠券|折扣)/,
+      /(策略|配置|部署|监控|错误|告警|状态|版本)/,
+      /(用户|权限|角色|审批|流程|规则)/,
     ];
     const hasFactualClaims = factualIndicators.some((p) => p.test(answerText));
     if (hasFactualClaims) {
@@ -162,7 +151,7 @@ export function validateBusinessResponse(
   return { valid: true, errors: layer4Errors, layer: 0 };
 }
 
-// ── 解析 LLM 响应为 ChatResponse ──
+// ── 解析 LLM 响应 ──
 
 export function parseChatResponse(rawText: string): ChatResponse | null {
   try {

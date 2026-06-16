@@ -3,6 +3,13 @@
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
 import type { RunContext } from "../runtime/context.js";
+import type { ExecutionResult } from "../runtime/results.js";
+import {
+  successResult,
+  failedResult,
+  partialResult,
+  ExecutionErrorCode,
+} from "../runtime/results.js";
 
 // ---------------------------------------------------------------------------
 // 1. get_current_time — returns current date/time with optional timezone
@@ -31,7 +38,7 @@ const getCurrentTimeDef: ToolDefinition = {
 async function getCurrentTimeExecute(
   args: Record<string, unknown>,
   _context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const timezone = (args.timezone as string) || "UTC";
   try {
     const now = new Date();
@@ -47,10 +54,13 @@ async function getCurrentTimeExecute(
       hour12: true,
       timeZoneName: "short",
     });
-    return formatter.format(now);
+    return successResult(formatter.format(now));
   } catch {
     const now = new Date();
-    return `Invalid timezone "${timezone}". Current UTC time: ${now.toISOString()}`;
+    return partialResult(
+      `Invalid timezone "${timezone}". Current UTC time: ${now.toISOString()}`,
+      `Timezone "${timezone}" not recognized, fell back to UTC`,
+    );
   }
 }
 
@@ -81,19 +91,22 @@ const calculatorDef: ToolDefinition = {
 async function calculatorExecute(
   args: Record<string, unknown>,
   _context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const expression = (args.expression as string) || "";
 
   if (!expression.trim()) {
-    return "Error: empty expression";
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, "Empty expression");
   }
   if (expression.length > 500) {
-    return "Error: expression too long (max 500 characters)";
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, "Expression too long (max 500 characters)");
   }
 
   const safeRegex = /^[\d+\-*/%().\s\w]+$/;
   if (!safeRegex.test(expression)) {
-    return `Error: expression contains disallowed characters. Allowed: digits, + - * / % ** ( ) . math functions`;
+    return failedResult(
+      ExecutionErrorCode.INVALID_PARAM,
+      "Expression contains disallowed characters. Allowed: digits, + - * / % ** ( ) . math functions",
+    );
   }
 
   try {
@@ -114,7 +127,6 @@ async function calculatorExecute(
       E: Math.E,
     };
 
-    const fnNames = Object.keys(mathContext).join(", ");
     const fnValues = Object.values(mathContext);
 
     const safeEval = new Function(
@@ -125,17 +137,17 @@ async function calculatorExecute(
     const result = safeEval(...fnValues);
 
     if (typeof result !== "number" || !isFinite(result)) {
-      return `Error: result is not a finite number (got: ${result})`;
+      return failedResult(ExecutionErrorCode.EXECUTION_ERROR, `Result is not a finite number (got: ${result})`);
     }
 
     const formatted = Number.isInteger(result)
       ? String(result)
       : parseFloat(result.toPrecision(12)).toString();
 
-    return formatted;
+    return successResult(formatted);
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Unknown error";
-    return `Error evaluating expression: ${msg}`;
+    return failedResult(ExecutionErrorCode.EXECUTION_ERROR, `Error evaluating expression: ${msg}`);
   }
 }
 
@@ -170,34 +182,37 @@ const webSearchDef: ToolDefinition = {
 async function webSearchExecute(
   args: Record<string, unknown>,
   context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const query = (args.query as string) || "";
   const maxResults = Math.min(
     Math.max(1, (args.max_results as number) || 5),
     10,
   );
 
-  if (!query.trim()) return "Error: empty search query";
+  if (!query.trim()) {
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, "Empty search query");
+  }
 
   const apiKey =
     process.env.TAVILY_API_KEY || process.env.SERPAPI_API_KEY || "";
 
   if (!apiKey) {
-    return JSON.stringify({
-      note: "Web search API key not configured. Set TAVILY_API_KEY or SERPAPI_API_KEY in .env. Results below are simulated.",
-      query,
-      results: [
-        {
-          title: `Search results for: ${query}`,
-          snippet: `Real web search requires a Tavily API key (free tier available at https://tavily.com). Set TAVILY_API_KEY in your .env file to enable.`,
-          url: "https://tavily.com",
-        },
-      ],
-    });
+    return partialResult(
+      JSON.stringify({
+        note: "Web search API key not configured. Set TAVILY_API_KEY or SERPAPI_API_KEY in .env. Results below are simulated.",
+        query,
+        results: [
+          {
+            title: `Search results for: ${query}`,
+            snippet: `Real web search requires a Tavily API key (free tier available at https://tavily.com). Set TAVILY_API_KEY in your .env file to enable.`,
+            url: "https://tavily.com",
+          },
+        ],
+      }),
+      "API key not configured, using simulated results",
+    );
   }
 
-  // Registry already handles timeout + cancellation via executeWithTimeout;
-  // use context.signal directly to avoid redundant timeout signal allocation.
   try {
     const response = await fetch("https://api.tavily.com/search", {
       method: "POST",
@@ -236,19 +251,19 @@ async function webSearchExecute(
       score: r.score,
     }));
 
-    return JSON.stringify({
+    return successResult(JSON.stringify({
       query,
       answer: data.answer || null,
       results,
       total: results.length,
-    });
+    }));
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
-    return JSON.stringify({
-      error: `Web search failed: ${msg}`,
-      query,
-      results: [],
-    });
+    return failedResult(
+      ExecutionErrorCode.API_ERROR,
+      `Web search failed: ${msg}`,
+      true,
+    );
   }
 }
 
@@ -292,19 +307,19 @@ const httpRequestDef: ToolDefinition = {
 async function httpRequestExecute(
   args: Record<string, unknown>,
   context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const url = (args.url as string) || "";
   const method = ((args.method as string) || "GET").toUpperCase();
   const body = args.body as string | undefined;
   const headers = (args.headers as Record<string, string>) || {};
 
-  if (!url) return "Error: URL is required";
+  if (!url) {
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, "URL is required");
+  }
   if (!url.startsWith("http://") && !url.startsWith("https://")) {
-    return "Error: URL must start with http:// or https://";
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, "URL must start with http:// or https://");
   }
 
-  // Registry already handles timeout + cancellation via executeWithTimeout;
-  // use context.signal directly to avoid redundant timeout signal allocation.
   try {
     const fetchOptions: RequestInit = {
       method,
@@ -340,19 +355,25 @@ async function httpRequestExecute(
         ? responseBody.slice(0, 5000) + "... (truncated)"
         : responseBody;
 
-    return JSON.stringify({
+    const output = JSON.stringify({
       status: response.status,
       statusText: response.statusText,
       headers: Object.fromEntries(response.headers.entries()),
       body: truncated,
     });
+
+    if (responseBody.length > 5000) {
+      return partialResult(output, "Response body truncated to 5000 characters");
+    }
+
+    return successResult(output);
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown error";
-    return JSON.stringify({
-      error: `HTTP request failed: ${msg}`,
-      url,
-      method,
-    });
+    return failedResult(
+      ExecutionErrorCode.NETWORK_ERROR,
+      `HTTP request failed: ${msg}`,
+      true,
+    );
   }
 }
 

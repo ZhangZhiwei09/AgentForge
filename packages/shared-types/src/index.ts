@@ -215,3 +215,7 @@ export type {
   CSMessage,
   CSStreamMeta,
 } from "./customer-chat";
+export type {
+  AgentMessage,
+  AgentStreamMeta,
+} from "./agent-chat";

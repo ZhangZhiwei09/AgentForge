@@ -10,7 +10,7 @@ const {
   mockTruncateHistory,
 } = vi.hoisted(() => ({
   mockAgentStreamChat: vi.fn(),
-  mockToolExecute: vi.fn(async () => "tool result"),
+  mockToolExecute: vi.fn(async () => ({ status: "success" as const, output: "tool result" })),
   mockToolListNames: vi.fn(() => ["calculator", "web_search"]),
   mockToolGetDefinitions: vi.fn(() => []),
   mockTruncateHistory: vi.fn((msgs: Array<unknown>) => msgs),
@@ -284,7 +284,7 @@ describe("AgentService", () => {
         }
       });
 
-      mockToolExecute.mockResolvedValueOnce("4");
+      mockToolExecute.mockResolvedValueOnce({ status: "success", output: "4" });
 
       const events = await collectAgentEvents(
         service.run("conv-agent", "Calculate 2+2"),
@@ -400,7 +400,7 @@ describe("AgentService", () => {
         };
       });
 
-      mockToolExecute.mockResolvedValue("ok");
+      mockToolExecute.mockResolvedValue({ status: "success", output: "ok" });
 
       const events = await collectAgentEvents(
         service.run("conv-agent", "Infinite loop task", { maxIterations: 3 }),

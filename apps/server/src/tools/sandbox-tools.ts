@@ -2,6 +2,13 @@
 import type { ToolDefinition } from "@agentforge/shared-types";
 import type { RegisteredTool } from "./types.js";
 import type { RunContext } from "../runtime/context.js";
+import type { ExecutionResult } from "../runtime/results.js";
+import {
+  successResult,
+  partialResult,
+  failedResult,
+  ExecutionErrorCode,
+} from "../runtime/results.js";
 import { logger } from "@agentforge/logger";
 
 // Tool definition for code_execute
@@ -38,22 +45,20 @@ const codeExecuteDef: ToolDefinition = {
 async function codeExecuteExecute(
   args: Record<string, unknown>,
   _context: RunContext,
-): Promise<string> {
+): Promise<ExecutionResult> {
   const language = (args.language as string) || "";
   const code = (args.code as string) || "";
 
-  // Validate language
   if (!["python", "javascript"].includes(language)) {
-    return `Error: Unsupported language "${language}". Supported: python, javascript.`;
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, `Unsupported language "${language}". Supported: python, javascript.`);
   }
 
-  // Validate code
   if (!code || code.trim().length === 0) {
-    return "Error: Code cannot be empty.";
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, "Code cannot be empty.");
   }
 
   if (code.length > 50_000) {
-    return `Error: Code too long (${code.length} chars). Maximum is 50,000 characters.`;
+    return failedResult(ExecutionErrorCode.INVALID_PARAM, `Code too long (${code.length} chars). Maximum is 50,000 characters.`);
   }
 
   try {
@@ -61,17 +66,20 @@ async function codeExecuteExecute(
     const { sandboxManager } = await import("../services/sandbox.js");
 
     if (!sandboxManager.isAvailable()) {
-      return JSON.stringify(
-        {
-          error: "Docker is not available on this server.",
-          hint:
-            "The code_execute tool requires Docker to be installed and running. " +
-            "Build the sandbox image with: docker build -t agentforge-sandbox:latest -f infra/docker/Dockerfile.sandbox .",
-          language,
-          code_preview: code.slice(0, 200),
-        },
-        null,
-        2,
+      return partialResult(
+        JSON.stringify(
+          {
+            error: "Docker is not available on this server.",
+            hint:
+              "The code_execute tool requires Docker to be installed and running. " +
+              "Build the sandbox image with: docker build -t agentforge-sandbox:latest -f infra/docker/Dockerfile.sandbox .",
+            language,
+            code_preview: code.slice(0, 200),
+          },
+          null,
+          2,
+        ),
+        "Docker sandbox not available, returning error details",
       );
     }
 
@@ -85,7 +93,7 @@ async function codeExecuteExecute(
       code,
     );
 
-    return JSON.stringify(
+    const output = JSON.stringify(
       {
         language,
         exit_code: result.exitCode,
@@ -97,10 +105,20 @@ async function codeExecuteExecute(
       null,
       2,
     );
+
+    if (result.timedOut) {
+      return partialResult(output, "Code execution timed out in sandbox");
+    }
+
+    if (result.exitCode !== 0) {
+      return partialResult(output, `Code exited with non-zero code: ${result.exitCode}`);
+    }
+
+    return successResult(output, { exitCode: result.exitCode, durationMs: result.durationMs });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Unknown error";
     logger.error({ language, error: msg }, "code_execute failed");
-    return `Error executing code (${language}): ${msg}`;
+    return failedResult(ExecutionErrorCode.EXECUTION_ERROR, `Error executing code (${language}): ${msg}`);
   }
 }
 
