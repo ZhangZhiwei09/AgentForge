@@ -23,8 +23,8 @@ vi.mock("../../lib/audio-utils.js", () => ({
   estimateDuration: vi.fn(() => 0.01),
 }));
 
-vi.mock("../chat.js", () => ({
-  ChatService: vi.fn().mockImplementation(() => ({
+vi.mock("../providers/registry.js", () => ({
+  getProvider: vi.fn(() => ({
     streamChat: vi.fn().mockImplementation(async function* () {
       yield { type: "token", content: "Hello" };
       yield { type: "token", content: " there!" };
@@ -34,15 +34,32 @@ vi.mock("../chat.js", () => ({
       };
     }),
   })),
+  resolveModel: vi.fn(() => ["openai", "gpt-4o"]),
 }));
 
-vi.mock("../../db.js", () => ({
-  prisma: {
-    voiceSession: {
-      upsert: vi.fn().mockResolvedValue({}),
-    },
-  },
+vi.mock("./memory-engine.js", () => ({
+  MemoryEngine: vi.fn().mockImplementation(() => ({
+    search: vi.fn().mockResolvedValue([]),
+  })),
 }));
+
+vi.mock("../../db.js", () => {
+  const messageStore: Array<Record<string, unknown>> = [];
+  return {
+    prisma: {
+      voiceSession: {
+        upsert: vi.fn().mockResolvedValue({}),
+      },
+      message: {
+        create: vi.fn().mockImplementation(async (args: { data: Record<string, unknown> }) => {
+          messageStore.push(args.data);
+          return args.data;
+        }),
+        findMany: vi.fn().mockResolvedValue([]),
+      },
+    },
+  };
+});
 
 import { VoiceService } from "../voice.js";
 

@@ -1,10 +1,12 @@
 // Voice Service — WebSocket turn management for real-time voice interaction
-// Pipeline: Browser PCM → ASR (Whisper) → LLM (ChatService) → TTS → Browser MP3
+// Pipeline: Browser PCM → ASR (Whisper) → LLM → TTS → Browser MP3
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { logger } from "@agentforge/logger";
 import { getASRProvider, getTTSProvider } from "./audio-providers.js";
-import { ChatService } from "./chat.js";
+import { getProvider, resolveModel } from "../providers/registry.js";
+import type { ChatMessage } from "../providers/types.js";
+import { MemoryEngine } from "./memory-engine.js";
 import { pcmToWav, estimateDuration } from "../lib/audio-utils.js";
 import { settings } from "../config.js";
 
@@ -208,23 +210,64 @@ export class VoiceService {
       this.transcript.push({ role: "user", content: userText });
       this.send({ type: "transcript", text: userText, is_final: true });
 
-      // Step 2: LLM — reuse ChatService for memory injection + tool calling
+      // Step 2: LLM — memory injection + streaming response
       if (signal.aborted) return;
 
-      const chatService = new ChatService();
       const assistantMsgId = randomUUID();
       let fullResponse = "";
 
+      // Resolve model
+      const [providerName, resolvedModel] = resolveModel(null);
+      const provider = getProvider(providerName);
+
+      // Inject user memory into system prompt
+      let systemPrompt = "";
+      try {
+        const engine = new MemoryEngine();
+        const memories = await engine.search(userText, this.userId, 5);
+        const relevant = memories.filter((m) => m.score > 0.3);
+        if (relevant.length > 0) {
+          const memoryText = relevant.map((m) => `- ${m.content}`).join("\n");
+          systemPrompt = "\n\n# User Context (from memory)\nThe following is what you know about the user from past conversations:\n" + memoryText;
+        }
+      } catch (e) {
+        logger.warn(e, "Voice memory injection failed");
+      }
+
+      // Save user message
+      await prisma.message.create({
+        data: {
+          id: randomUUID(),
+          conversationId: this.conversationId,
+          role: "user",
+          content: userText,
+          model: resolvedModel,
+        },
+      });
+
+      // Load history for context
+      const history = await prisma.message.findMany({
+        where: { conversationId: this.conversationId },
+        orderBy: { createdAt: "desc" },
+        take: 20,
+      });
+      history.reverse();
+
+      const conversationMessages: ChatMessage[] = history.map((msg) => ({
+        role: msg.role,
+        content: msg.content,
+      }));
+
       this.send({ type: "status", status: "processing" });
 
-      for await (const chunk of chatService.streamChat(
-        this.conversationId,
-        userText,
-        null, // modelId (use default)
-        "", // systemPrompt (use built-in)
-        null, // kbIds
-        null, // enabledTools
-        signal, // AbortSignal for cancellation
+      for await (const chunk of provider.streamChat(
+        conversationMessages,
+        resolvedModel,
+        systemPrompt,
+        undefined,
+        undefined,
+        undefined,
+        signal,
       )) {
         if (signal.aborted) break;
 
@@ -236,6 +279,19 @@ export class VoiceService {
             message_id: assistantMsgId,
           });
         }
+      }
+
+      // Save assistant message
+      if (fullResponse && !signal.aborted) {
+        await prisma.message.create({
+          data: {
+            id: assistantMsgId,
+            conversationId: this.conversationId,
+            role: "assistant",
+            content: fullResponse,
+            model: resolvedModel,
+          },
+        });
       }
 
       if (signal.aborted) {

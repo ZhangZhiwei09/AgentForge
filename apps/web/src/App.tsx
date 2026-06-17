@@ -1,5 +1,4 @@
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
-import { ChatLayout } from "./components/layout/ChatLayout";
 import { TopNav } from "./components/layout/TopNav";
 import { LoginPage } from "./components/auth/LoginPage";
 import { AgentChatPage } from "./components/agent-chat/AgentChatPage";
@@ -32,14 +31,6 @@ export default function App() {
     <AppShell>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
-        <Route
-          path="/assistant/*"
-          element={
-            <AuthGuard>
-              <ChatLayout />
-            </AuthGuard>
-          }
-        />
         <Route
           path="/projects/new"
           element={
