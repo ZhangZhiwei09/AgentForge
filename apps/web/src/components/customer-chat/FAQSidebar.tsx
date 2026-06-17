@@ -25,6 +25,41 @@ interface FAQSidebarProps {
   onSelectQuestion: (question: string) => void;
 }
 
+/** 校验 FAQ 文档数组是否为有效数据 */
+function isFAQDocumentArray(raw: unknown): raw is FAQDocument[] {
+  if (!Array.isArray(raw)) return false;
+  return raw.every(
+    (item: unknown) =>
+      typeof item === "object" &&
+      item !== null &&
+      typeof (item as Record<string, unknown>).id === "string" &&
+      typeof (item as Record<string, unknown>).title === "string",
+  );
+}
+
+/** 校验 FAQ 分类数组是否为有效数据 */
+function isFAQCategoryArray(raw: unknown): raw is FAQCategory[] {
+  if (!Array.isArray(raw)) return false;
+  return raw.every(
+    (item: unknown) =>
+      typeof item === "object" &&
+      item !== null &&
+      typeof (item as Record<string, unknown>).name === "string" &&
+      typeof (item as Record<string, unknown>).count === "number",
+  );
+}
+
+/** 校验 FAQ 文档详情是否为有效数据 */
+function isFAQDetail(
+  raw: unknown,
+): raw is { content: string } {
+  return (
+    typeof raw === "object" &&
+    raw !== null &&
+    typeof (raw as Record<string, unknown>).content === "string"
+  );
+}
+
 export function FAQSidebar({ onSelectQuestion }: FAQSidebarProps) {
   const [categories, setCategories] = useState<FAQCategory[]>([]);
   const [loading, setLoading] = useState(true);
@@ -38,7 +73,6 @@ export function FAQSidebar({ onSelectQuestion }: FAQSidebarProps) {
   useEffect(() => {
     async function loadFAQs() {
       try {
-        // Fetch categories and documents in parallel
         const [catRes, docsRes] = await Promise.all([
           fetch("/api/agent/chat/faq/categories"),
           fetch("/api/agent/chat/faq"),
@@ -46,18 +80,31 @@ export function FAQSidebar({ onSelectQuestion }: FAQSidebarProps) {
 
         if (!catRes.ok || !docsRes.ok) throw new Error("Failed to fetch FAQs");
 
-        const { categories: catList } = await catRes.json();
-        const { documents: docList } = await docsRes.json();
+        const catData: unknown = await catRes.json();
+        const docsData: unknown = await docsRes.json();
 
-        const completedDocs = (docList as FAQDocument[]).filter(
-          (d) => d.status === "completed",
-        );
+        // 边界校验：提取并验证嵌套的数组字段
+        const catList: unknown =
+          typeof catData === "object" && catData !== null
+            ? (catData as Record<string, unknown>).categories
+            : undefined;
+        const docList: unknown =
+          typeof docsData === "object" && docsData !== null
+            ? (docsData as Record<string, unknown>).documents
+            : undefined;
+
+        if (!isFAQCategoryArray(catList) || !isFAQDocumentArray(docList)) {
+          console.error("Invalid FAQ API response shape");
+          return;
+        }
+
+        const completedDocs = docList.filter((d) => d.status === "completed");
 
         const cats: FAQCategory[] = catList
-          .filter((cat: FAQCategory) => cat.count > 0)
-          .map((cat: FAQCategory) => ({
+          .filter((cat) => cat.count > 0)
+          .map((cat) => ({
             ...cat,
-            documents: completedDocs, // All docs available for each category
+            documents: completedDocs,
           }));
 
         setCategories(cats);
@@ -77,10 +124,16 @@ export function FAQSidebar({ onSelectQuestion }: FAQSidebarProps) {
     try {
       const res = await fetch(`/api/agent/chat/faq/${docId}`);
       if (res.ok) {
-        const doc = await res.json();
-        setDocContent(doc.content || "");
+        const raw: unknown = await res.json();
+        if (isFAQDetail(raw)) {
+          setDocContent(raw.content);
+        } else {
+          console.error("Invalid FAQ detail response shape");
+          setDocContent("加载失败");
+        }
       }
-    } catch {
+    } catch (err) {
+      console.error("Failed to load FAQ detail:", err);
       setDocContent("加载失败");
     } finally {
       setDocLoading(false);
