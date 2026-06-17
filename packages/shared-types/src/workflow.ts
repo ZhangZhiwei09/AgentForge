@@ -141,14 +141,16 @@ export interface StepResult {
 }
 
 export interface WorkflowCheckpoint {
-  workflowId: string;
   runId: string;
+  workflowId: string;
   completedSteps: string[];
   currentStep: string | null;
   pendingSteps: string[];
-  stepResults: Record<string, StepResult>;
+  stepLogs: StepResult[];
   variables: Record<string, unknown>;
+  stepResults: Record<string, unknown>;
   savedAt: string;
+  totalSteps: number;
 }
 
 export interface ProgressSummary {

@@ -281,7 +281,7 @@ export class WorkflowService {
 
           // Update run progress
           const progress: ProgressSummary = {
-            completed: completedStepIds.length,
+            completed: completedStepIds.filter((id) => stepStatuses.get(id) === "completed").length,
             total: totalSteps,
             failed: completedStepIds.filter((id) => stepStatuses.get(id) === "failed").length,
             skipped: completedStepIds.filter((id) => stepStatuses.get(id) === "skipped").length,

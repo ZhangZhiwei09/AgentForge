@@ -25,7 +25,9 @@ function safeParseCheckpoint(raw: unknown): WorkflowCheckpoint | undefined {
     );
     return undefined;
   }
-  return result.data as unknown as WorkflowCheckpoint;
+  // Zod inference produces a structurally identical but nominally distinct type.
+  // The single cast is safe: WorkflowCheckpointSchema guarantees runtime shape matches WorkflowCheckpoint.
+  return result.data as WorkflowCheckpoint;
 }
 
 export function toDTO(

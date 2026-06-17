@@ -132,10 +132,10 @@ export async function getSessions(conversationId: string): Promise<
   } catch (err: unknown) {
     if (isPrismaErrorCode(err, "P2021")) {
       logger.warn({ err }, "AgentSession table does not exist yet");
-    } else {
-      logger.error({ err }, "Failed to query agent sessions");
+      return [];
     }
-    return [];
+    logger.error({ err }, "Failed to query agent sessions");
+    throw err;
   }
 }
 
@@ -169,9 +169,9 @@ export async function getSession(id: string): Promise<{
   } catch (err: unknown) {
     if (isPrismaErrorCode(err, "P2021")) {
       logger.warn({ err, sessionId: id }, "AgentSession table does not exist yet");
-    } else {
-      logger.error({ err, sessionId: id }, "Failed to query agent session");
+      return null;
     }
-    return null;
+    logger.error({ err, sessionId: id }, "Failed to query agent session");
+    throw err;
   }
 }
