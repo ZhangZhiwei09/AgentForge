@@ -1,0 +1,3 @@
+- [SSE Protocol Types](sse-protocol-types.md) — Backend RouteStreamEvent (5 types) vs frontend expectations (7 types), /api/customer-chat routing
+- [shared-types No Zod](shared-types-no-zod.md) — shared-types is pure type-only, no Zod dependency; adding it changes package role
+- [Customer Chat Code Duplication](customer-chat-code-duplication.md) — CustomerChat.tsx and useCustomerChatStream.ts have ~90% duplicate SSE parsing
