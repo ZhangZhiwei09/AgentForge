@@ -170,3 +170,39 @@ export type ValidatedWorkflowDefinition = z.infer<
   typeof WorkflowDefinitionSchema
 >;
 export type ValidatedCreateWorkflow = z.infer<typeof CreateWorkflowSchema>;
+
+// ---- Runtime Schemas (not part of DSL validation) ----
+
+/**
+ * Validates the shape of a StepResult produced by step handlers.
+ * Used to validate checkpoint stepLogs and step log persistence.
+ */
+export const StepResultSchema = z.object({
+  status: z.enum(["completed", "failed", "skipped"]),
+  output: z.unknown(),
+  error: z.string().optional(),
+  retryCount: z.number().int().nonnegative().optional(),
+  durationMs: z.number().nonnegative().optional(),
+  tokensUsed: z.number().int().nonnegative().optional(),
+  reason: z.string().optional(),
+});
+
+/**
+ * Validates the shape of a checkpoint stored in the workflow_run.checkpoint JSONB column.
+ * Matches the CheckpointData interface from checkpoint.ts exactly.
+ */
+export const WorkflowCheckpointSchema = z.object({
+  runId: z.string().min(1),
+  workflowId: z.string().min(1),
+  completedSteps: z.array(z.string()),
+  currentStep: z.string().nullable(),
+  pendingSteps: z.array(z.string()),
+  stepLogs: z.array(StepResultSchema),
+  variables: z.record(z.string(), z.unknown()),
+  stepResults: z.record(z.string(), z.unknown()),
+  savedAt: z.string().min(1),
+  totalSteps: z.number().int().nonnegative(),
+});
+
+export type ValidatedStepResult = z.infer<typeof StepResultSchema>;
+export type ValidatedWorkflowCheckpoint = z.infer<typeof WorkflowCheckpointSchema>;

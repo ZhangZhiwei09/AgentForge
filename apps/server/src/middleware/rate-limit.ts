@@ -61,9 +61,3 @@ export const globalRateLimiter = createRateLimiter({
   max: 60, // 每分钟 60 次
   keyPrefix: "global",
 });
-
-export const chatRateLimiter = createRateLimiter({
-  windowMs: 60_000, // 1 分钟
-  max: 20, // 每分钟 20 次
-  keyPrefix: "chat",
-});

@@ -5,8 +5,30 @@ import type {
   WorkflowRunDTO,
   WorkflowStepLogDTO,
   WorkflowDefinition,
+  WorkflowCheckpoint,
   ProgressSummary,
 } from "@agentforge/shared-types";
+import { WorkflowCheckpointSchema } from "./schema.js";
+import { logger } from "@agentforge/logger";
+
+/**
+ * Safely parse a raw checkpoint from the JSONB column.
+ * Returns undefined on missing, corrupt, or schema-mismatched data.
+ */
+function safeParseCheckpoint(raw: unknown): WorkflowCheckpoint | undefined {
+  if (!raw) return undefined;
+  const result = WorkflowCheckpointSchema.safeParse(raw);
+  if (!result.success) {
+    logger.warn(
+      { issues: result.error.issues },
+      "Corrupted checkpoint data in DB, returning undefined",
+    );
+    return undefined;
+  }
+  // Zod inference produces a structurally identical but nominally distinct type.
+  // The single cast is safe: WorkflowCheckpointSchema guarantees runtime shape matches WorkflowCheckpoint.
+  return result.data as WorkflowCheckpoint;
+}
 
 export function toDTO(
   w: Prisma.WorkflowGetPayload<Record<string, never>>,
@@ -37,7 +59,7 @@ export function runToDTO(
     status: r.status as WorkflowRunDTO["status"],
     input: (r.input as Record<string, unknown>) || {},
     output: (r.output as Record<string, unknown>) || undefined,
-    checkpoint: r.checkpoint ? (r.checkpoint as unknown as any) : undefined,
+    checkpoint: safeParseCheckpoint(r.checkpoint),
     currentStepId: r.currentStepId || undefined,
     progress: (r.progress as unknown as ProgressSummary) || {
       completed: 0,

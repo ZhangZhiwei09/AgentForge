@@ -7,7 +7,6 @@ describe("useChatStore", () => {
     // Reset store to initial state before each test
     useChatStore.getState().resetChat();
     useChatStore.setState({
-      conversations: [],
       currentConversationId: null,
       messages: [],
       isStreaming: false,

@@ -41,22 +41,6 @@ export const httpRequestDurationMs = new Histogram({
   registers: [registry],
 });
 
-// ---- Chat / LLM Metrics ----
-
-export const chatMessagesTotal = new Counter({
-  name: "chat_messages_total",
-  help: "Total number of chat completions",
-  labelNames: ["provider", "model"],
-  registers: [registry],
-});
-
-export const chatTokensTotal = new Counter({
-  name: "chat_tokens_total",
-  help: "Total LLM tokens consumed",
-  labelNames: ["provider", "type"], // type = prompt | completion
-  registers: [registry],
-});
-
 // ---- Tool Metrics ----
 
 export const toolCallsTotal = new Counter({

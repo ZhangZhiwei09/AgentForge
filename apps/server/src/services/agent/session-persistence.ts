@@ -1,7 +1,16 @@
 // Agent session persistence — save/load/get agent sessions to/from the database
 import { prisma } from "../../db.js";
+import { Prisma } from "@agentforge/database";
 import { logger } from "@agentforge/logger";
 import type { AgentStep } from "@agentforge/shared-types";
+
+/**
+ * Type-narrow Prisma error codes without relying on any-casted error shapes.
+ * P2021 = table does not exist (migration not yet applied — graceful degrade).
+ */
+function isPrismaErrorCode(err: unknown, code: string): boolean {
+  return err instanceof Prisma.PrismaClientKnownRequestError && err.code === code;
+}
 
 /**
  * Represents an in-memory session record used for tracking during a ReAct loop.
@@ -81,11 +90,11 @@ export async function saveSession(
     record.finalSummary = finalSummary;
     record.completedAt = completedAt;
   } catch (err) {
-    // Table might not exist yet (before migration) — gracefully degrade
-    logger.warn(
-      { error: err instanceof Error ? err.message : "Unknown error" },
-      "Failed to save agent session (table may not exist yet)",
-    );
+    if (isPrismaErrorCode(err, "P2021")) {
+      logger.warn({ err }, "AgentSession table does not exist yet, skipping save");
+    } else {
+      logger.error({ err }, "Failed to save agent session");
+    }
   }
 }
 
@@ -121,9 +130,12 @@ export async function getSessions(conversationId: string): Promise<
       completedAt: s.completedAt,
     }));
   } catch (err: unknown) {
-    // Table might not exist yet
+    if (isPrismaErrorCode(err, "P2021")) {
+      logger.warn({ err }, "AgentSession table does not exist yet");
+      return [];
+    }
     logger.error({ err }, "Failed to query agent sessions");
-    return [];
+    throw err;
   }
 }
 
@@ -155,7 +167,11 @@ export async function getSession(id: string): Promise<{
       completedAt: s.completedAt,
     };
   } catch (err: unknown) {
+    if (isPrismaErrorCode(err, "P2021")) {
+      logger.warn({ err, sessionId: id }, "AgentSession table does not exist yet");
+      return null;
+    }
     logger.error({ err, sessionId: id }, "Failed to query agent session");
-    return null;
+    throw err;
   }
 }

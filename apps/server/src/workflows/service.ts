@@ -217,6 +217,7 @@ export class WorkflowService {
 
     const stepResults: Record<string, unknown> = {};
     const completedStepIds: string[] = [];
+    const stepStatuses = new Map<string, "completed" | "failed" | "skipped">();
     const allStepIds = definition.steps.map((s) => s.id);
 
     // Approval handler
@@ -268,19 +269,22 @@ export class WorkflowService {
           const stepId = ev.stepId;
           if (stepId) {
             completedStepIds.push(stepId);
+            // Track step status independently from stepResults (which stores raw output)
+            const status: "completed" | "failed" | "skipped" =
+              ev.type === "workflow_step_failed"
+                ? "failed"
+                : (ev as any).status === "skipped"
+                  ? "skipped"
+                  : "completed";
+            stepStatuses.set(stepId, status);
           }
 
           // Update run progress
           const progress: ProgressSummary = {
-            completed: completedStepIds.length,
+            completed: completedStepIds.filter((id) => stepStatuses.get(id) === "completed").length,
             total: totalSteps,
-            failed: completedStepIds.filter((id) => {
-              const r = stepResults[id];
-              return (
-                r && typeof r === "object" && (r as any).status === "failed"
-              );
-            }).length,
-            skipped: 0,
+            failed: completedStepIds.filter((id) => stepStatuses.get(id) === "failed").length,
+            skipped: completedStepIds.filter((id) => stepStatuses.get(id) === "skipped").length,
             running: 0,
           };
 
@@ -327,10 +331,10 @@ export class WorkflowService {
               durationMs,
               completedAt: new Date(),
               progress: {
-                completed: totalSteps,
+                completed: completedStepIds.filter((id) => stepStatuses.get(id) === "completed").length,
                 total: totalSteps,
-                failed: 0,
-                skipped: 0,
+                failed: completedStepIds.filter((id) => stepStatuses.get(id) === "failed").length,
+                skipped: completedStepIds.filter((id) => stepStatuses.get(id) === "skipped").length,
                 running: 0,
               } as any,
             },
@@ -486,6 +490,7 @@ export class WorkflowService {
     const checkpoint = (run.checkpoint || {}) as Record<string, unknown>;
     const completedStepIds: string[] =
       (checkpoint.completedSteps as string[]) || [];
+    const stepStatuses = new Map<string, "completed" | "failed" | "skipped">();
     const savedVariables =
       (checkpoint.variables as Record<string, unknown>) || {};
     const savedStepResults =
@@ -532,7 +537,9 @@ export class WorkflowService {
 
     // Re-execute DAG — skip completed steps
     for (const stepId of completedStepIds) {
-      // Ensure completed steps are in stepResults to signal "already done"
+      // NOTE: Current checkpoint format does not store per-step status
+      // (completed/failed/skipped). All checkpointed steps default to "completed".
+      stepStatuses.set(stepId, "completed");
       if (!(stepId in stepResults)) {
         stepResults[stepId] = { status: "completed", result: "(resumed)" };
       }
@@ -552,11 +559,18 @@ export class WorkflowService {
         const stepId = event.stepId as string;
         if (stepId && !completedStepIds.includes(stepId)) {
           completedStepIds.push(stepId);
+          const status: "completed" | "failed" | "skipped" =
+            event.type === "workflow_step_failed"
+              ? "failed"
+              : (event as any).status === "skipped"
+                ? "skipped"
+                : "completed";
+          stepStatuses.set(stepId, status);
           const progress: ProgressSummary = {
-            completed: completedStepIds.length,
+            completed: completedStepIds.filter((id) => stepStatuses.get(id) === "completed").length,
             total: totalSteps,
-            failed: 0,
-            skipped: 0,
+            failed: completedStepIds.filter((id) => stepStatuses.get(id) === "failed").length,
+            skipped: completedStepIds.filter((id) => stepStatuses.get(id) === "skipped").length,
             running: 0,
           };
           await prisma.workflowRun.update({
@@ -598,10 +612,10 @@ export class WorkflowService {
             output: stepResults as any,
             completedAt: new Date(),
             progress: {
-              completed: totalSteps,
+              completed: completedStepIds.filter((id) => stepStatuses.get(id) === "completed").length,
               total: totalSteps,
-              failed: 0,
-              skipped: 0,
+              failed: completedStepIds.filter((id) => stepStatuses.get(id) === "failed").length,
+              skipped: completedStepIds.filter((id) => stepStatuses.get(id) === "skipped").length,
               running: 0,
             } as any,
           },

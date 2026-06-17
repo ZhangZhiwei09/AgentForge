@@ -1,26 +1,20 @@
 import type {
-  Conversation,
   DebugInfo,
   Memory,
   MemoryInfo,
   MemorySearchResult,
   Message,
-  ModelInfo,
-  ProviderType,
   ToolDefinition,
   ToolCall,
   ToolResult,
 } from "@agentforge/shared-types";
 
 export type {
-  Conversation,
   DebugInfo,
   Memory,
   MemoryInfo,
   MemorySearchResult,
   Message,
-  ModelInfo,
-  ProviderType,
   ToolDefinition,
   ToolCall,
   ToolResult,

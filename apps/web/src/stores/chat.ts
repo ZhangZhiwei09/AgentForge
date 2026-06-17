@@ -1,10 +1,8 @@
 import { create } from "zustand";
 import type {
-  Conversation,
   DebugInfo,
   Message,
   MemoryInfo,
-  ProviderType,
   ToolCallRecord,
 } from "@/types";
 
@@ -31,14 +29,12 @@ export interface PendingApproval {
 }
 
 interface ChatState {
-  conversations: Conversation[];
   currentConversationId: string | null;
   messages: Message[];
   isStreaming: boolean;
   debugInfo: DebugInfo | null;
   memoryInfo: MemoryInfo | null;
   selectedModel: string;
-  selectedProvider: ProviderType;
   isDebugOpen: boolean;
   panelMode: PanelMode;
   toolCalls: ToolCallRecord[];
@@ -55,7 +51,6 @@ interface ChatState {
   videoTranscript: Array<{ role: string; content: string }>;
   videoVisionContext: string;
 
-  setConversations: (convs: Conversation[]) => void;
   setCurrentConversation: (id: string | null) => void;
   setMessages: (msgs: Message[]) => void;
   appendMessage: (msg: Message) => void;
@@ -65,7 +60,6 @@ interface ChatState {
   setDebugInfo: (info: DebugInfo | null) => void;
   setMemoryInfo: (info: MemoryInfo | null) => void;
   setSelectedModel: (model: string) => void;
-  setSelectedProvider: (provider: ProviderType) => void;
   toggleDebugPanel: () => void;
   setPanelMode: (mode: PanelMode) => void;
   resetChat: () => void;
@@ -90,14 +84,12 @@ interface ChatState {
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
-  conversations: [],
   currentConversationId: null,
   messages: [],
   isStreaming: false,
   debugInfo: null,
   memoryInfo: null,
   selectedModel: "deepseek-chat",
-  selectedProvider: "deepseek",
   isDebugOpen: true,
   panelMode: "debug",
   toolCalls: [],
@@ -111,7 +103,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   videoTranscript: [],
   videoVisionContext: "",
 
-  setConversations: (convs) => set({ conversations: convs }),
   setCurrentConversation: (id) => set({ currentConversationId: id }),
   setMessages: (msgs) =>
     set((s) => {
@@ -163,7 +154,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setDebugInfo: (info) => set({ debugInfo: info }),
   setMemoryInfo: (info) => set({ memoryInfo: info }),
   setSelectedModel: (model) => set({ selectedModel: model }),
-  setSelectedProvider: (provider) => set({ selectedProvider: provider }),
   toggleDebugPanel: () => set((s) => ({ isDebugOpen: !s.isDebugOpen })),
   setPanelMode: (mode) => set({ panelMode: mode }),
   resetChat: () =>
