@@ -96,11 +96,15 @@ vi.mock("../../db.js", () => ({
   },
 }));
 
-import { AgentService } from "../agent.js";
+import { AgentService } from "../agent/index.js";
 import {
   MemoryCompressor,
   SCRATCHPAD_COMPRESSION_THRESHOLD,
 } from "../memory-compressor.js";
+import {
+  buildIterationContext,
+  formatStepForContext,
+} from "../agent/prompts.js";
 import type { AgentStep } from "@agentforge/shared-types";
 
 describe("Agent Memory Compression", () => {
@@ -250,8 +254,7 @@ describe("Agent Memory Compression", () => {
 
   describe("AgentService buildIterationContext with compression", () => {
     it("builds context with compressed summary when provided", () => {
-      // Access private method via prototype for testing
-      const context = (service as any).buildIterationContext(
+      const context = buildIterationContext(
         "System prompt",
         "Do the task",
         [], // empty scratchpad
@@ -265,7 +268,7 @@ describe("Agent Memory Compression", () => {
     });
 
     it("handles undefined compression params gracefully", () => {
-      const context = (service as any).buildIterationContext(
+      const context = buildIterationContext(
         "System prompt",
         "Do the task",
         [],
@@ -296,7 +299,7 @@ describe("Agent Memory Compression", () => {
         },
       ];
 
-      const context = (service as any).buildIterationContext(
+      const context = buildIterationContext(
         "Sys",
         "Task",
         steps,
@@ -342,7 +345,7 @@ describe("Agent Memory Compression", () => {
 
       const keptStepNumbers = new Set([1]); // only keep step 1
 
-      const context = (service as any).buildIterationContext(
+      const context = buildIterationContext(
         "Sys",
         "Task",
         steps,
@@ -382,7 +385,7 @@ describe("Agent Memory Compression", () => {
         },
       ];
 
-      const context = (service as any).buildIterationContext(
+      const context = buildIterationContext(
         "Sys",
         "Task",
         steps,
