@@ -13,9 +13,9 @@ import {
 import { QuickReplies } from "./QuickReplies";
 import { RichMessageRenderer } from "@/components/markdown/RichMessageRenderer";
 import { extractCardBlocks } from "@/components/markdown/card-parser";
+import { parseSSEChunk, dedupeBlocks } from "@/lib/sse-guards";
 import type {
   KnowledgeResult,
-  ToolCallRecord,
   CSMessage,
   ContentBlock,
 } from "@agentforge/shared-types";
@@ -119,7 +119,7 @@ export function CustomerChat() {
       abortRef.current?.abort();
       abortRef.current = new AbortController();
 
-      const res = await fetch("/api/customer-chat", {
+      const res = await fetch("/api/agent/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ session_id: sessionId, message: trimmed }),
@@ -128,7 +128,10 @@ export function CustomerChat() {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(err.detail ?? `HTTP ${res.status}`);
+        const errDetail = (err as Record<string, unknown>).detail;
+        throw new Error(
+          typeof errDetail === "string" ? errDetail : `HTTP ${res.status}`,
+        );
       }
 
       const reader = res.body?.getReader();
@@ -138,7 +141,6 @@ export function CustomerChat() {
       let buffer = "";
       let streamContent = "";
       let knowledgeResults: KnowledgeResult[] | undefined;
-      const toolCalls: ToolCallRecord[] = [];
       const contentBlocks: ContentBlock[] = [];
 
       while (true) {
@@ -156,72 +158,77 @@ export function CustomerChat() {
           const data = trimmedLine.slice(6);
           if (data === "[DONE]") continue;
 
+          // 边界校验：JSON.parse + Type Guard 替代裸 any
+          let chunk;
           try {
-            const chunk = JSON.parse(data);
+            const raw: unknown = JSON.parse(data);
+            chunk = parseSSEChunk(raw);
+          } catch {
+            console.warn("SSE JSON parse failed:", data.slice(0, 100));
+            continue;
+          }
 
-            // meta 事件：携带知识库检索结果
-            if (chunk.type === "meta") {
-              if (chunk.session_id) {
-                localStorage.setItem(
-                  "customer_chat_session_id",
-                  chunk.session_id,
-                );
-                setSessionId(chunk.session_id);
-              }
-              if (chunk.knowledge && Array.isArray(chunk.knowledge)) {
-                knowledgeResults = chunk.knowledge;
-              }
-              continue;
-            }
+          if (!chunk) {
+            console.warn("Invalid SSE chunk:", data.slice(0, 100));
+            continue;
+          }
 
-            // tool_call 事件：LLM 请求调用工具
-            if (chunk.type === "tool_call" && chunk.tool_call) {
-              toolCalls.push({
-                id: chunk.tool_call.id,
-                name: chunk.tool_call.name,
-                arguments: chunk.tool_call.arguments,
-                status: "pending",
-              });
-              // 更新流消息以显示工具调用状态
-              setMessages((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.id === "__stream__") {
-                  return [
-                    ...prev.slice(0, -1),
-                    {
-                      ...last,
-                      content: streamContent,
-                      toolCalls: [...toolCalls],
-                    },
-                  ];
-                }
-                return [
-                  ...prev,
-                  {
-                    id: "__stream__",
-                    role: "assistant" as const,
-                    content: streamContent,
-                    timestamp: Date.now(),
-                    knowledge: knowledgeResults,
-                    toolCalls: [...toolCalls],
-                  },
-                ];
-              });
-              continue;
-            }
-
-            // tool_result 事件：工具执行完成
-            if (chunk.type === "tool_result" && chunk.tool_result) {
-              const idx = toolCalls.findIndex(
-                (tc) => tc.id === chunk.tool_result!.tool_call_id,
+          // chunk 已通过 parseSSEChunk 校验，类型自动 narrowing
+          // meta 事件：携带知识库检索结果
+          if (chunk.type === "meta") {
+            if (chunk.session_id) {
+              localStorage.setItem(
+                "customer_chat_session_id",
+                chunk.session_id,
               );
-              if (idx >= 0) {
-                toolCalls[idx] = {
-                  ...toolCalls[idx],
-                  result: chunk.tool_result.result,
-                  status: "done",
-                };
+              setSessionId(chunk.session_id);
+            }
+            if (chunk.knowledge && Array.isArray(chunk.knowledge)) {
+              knowledgeResults = chunk.knowledge;
+            }
+            continue;
+          }
+
+          // content_block 事件：ToolAgent 产出的结构化卡片
+          if (chunk.type === "content_block") {
+            contentBlocks.push(chunk.block);
+            continue;
+          }
+
+          if (chunk.type === "token") {
+            streamContent += chunk.content;
+            setMessages((prev) => {
+              const last = prev[prev.length - 1];
+              if (last?.id === "__stream__") {
+                return [
+                  ...prev.slice(0, -1),
+                  { ...last, content: streamContent },
+                ];
               }
+              return [
+                ...prev,
+                {
+                  id: "__stream__",
+                  role: "assistant" as const,
+                  content: streamContent,
+                  timestamp: Date.now(),
+                  knowledge: knowledgeResults,
+                },
+              ];
+            });
+          } else if (chunk.type === "done") {
+            if (chunk.suggestions && Array.isArray(chunk.suggestions)) {
+              setSuggestions(chunk.suggestions);
+            }
+
+            // 解析 markdown 中的卡片围栏
+            const { blocks: parsedBlocks } = extractCardBlocks(streamContent);
+            const allBlocks = dedupeBlocks([
+              ...contentBlocks,
+              ...parsedBlocks.map((b) => b.block),
+            ]);
+
+            if (chunk.message_id) {
               setMessages((prev) => {
                 const last = prev[prev.length - 1];
                 if (last?.id === "__stream__") {
@@ -229,81 +236,19 @@ export function CustomerChat() {
                     ...prev.slice(0, -1),
                     {
                       ...last,
+                      id: chunk.message_id,
                       content: streamContent,
-                      toolCalls: [...toolCalls],
+                      knowledge: knowledgeResults,
+                      contentBlocks:
+                        allBlocks.length > 0 ? allBlocks : undefined,
                     },
                   ];
                 }
                 return prev;
               });
-              continue;
             }
-
-            // content_block 事件：ToolAgent 产出的结构化卡片
-            if (chunk.type === "content_block" && chunk.block) {
-              contentBlocks.push(chunk.block as ContentBlock);
-              continue;
-            }
-
-            if (chunk.type === "token" && chunk.content) {
-              streamContent += chunk.content;
-              setMessages((prev) => {
-                const last = prev[prev.length - 1];
-                if (last?.id === "__stream__") {
-                  return [
-                    ...prev.slice(0, -1),
-                    { ...last, content: streamContent },
-                  ];
-                }
-                return [
-                  ...prev,
-                  {
-                    id: "__stream__",
-                    role: "assistant" as const,
-                    content: streamContent,
-                    timestamp: Date.now(),
-                    knowledge: knowledgeResults,
-                    toolCalls: [...toolCalls],
-                  },
-                ];
-              });
-            } else if (chunk.type === "done") {
-              if (chunk.suggestions && Array.isArray(chunk.suggestions)) {
-                setSuggestions(chunk.suggestions);
-              }
-
-              // ── 解析 markdown 中的卡片围栏 ──
-              const { blocks: parsedBlocks } = extractCardBlocks(streamContent);
-              const allBlocks = dedupeBlocks([
-                ...contentBlocks,
-                ...parsedBlocks.map((b) => b.block),
-              ]);
-
-              if (chunk.message_id) {
-                setMessages((prev) => {
-                  const last = prev[prev.length - 1];
-                  if (last?.id === "__stream__") {
-                    return [
-                      ...prev.slice(0, -1),
-                      {
-                        ...last,
-                        id: chunk.message_id as string,
-                        content: streamContent,
-                        knowledge: knowledgeResults,
-                        contentBlocks:
-                          allBlocks.length > 0 ? allBlocks : undefined,
-                        toolCalls: [...toolCalls],
-                      },
-                    ];
-                  }
-                  return prev;
-                });
-              }
-            } else if (chunk.type === "error") {
-              console.error("Stream error:", chunk.content);
-            }
-          } catch {
-            continue;
+          } else if (chunk.type === "error") {
+            console.error("Stream error:", chunk.content);
           }
         }
       }
@@ -425,39 +370,6 @@ export function CustomerChat() {
                   </div>
                 </div>
 
-                {/* 工具调用展示（仅 assistant 消息 + 有工具调用时显示） */}
-                {msg.role === "assistant" &&
-                  msg.toolCalls &&
-                  msg.toolCalls.length > 0 && (
-                    <div className="mt-1.5 space-y-1">
-                      {msg.toolCalls.map((tc) => (
-                        <div
-                          key={tc.id}
-                          className="ml-1 flex items-center gap-1.5 text-[11px] text-muted-foreground"
-                        >
-                          {tc.status === "pending" ? (
-                            <span className="inline-block h-2.5 w-2.5 animate-spin rounded-full border-2 border-blue-400 border-t-transparent" />
-                          ) : (
-                            <span className="text-green-500">✓</span>
-                          )}
-                          <span className="font-medium">
-                            {tc.name === "get_current_time"
-                              ? "获取当前时间"
-                              : tc.name}
-                          </span>
-                          {tc.result && (
-                            <span className="text-muted-foreground/70">
-                              →{" "}
-                              {tc.result.length > 50
-                                ? tc.result.slice(0, 50) + "..."
-                                : tc.result}
-                            </span>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
                 {/* 知识库参考来源（仅 assistant 消息 + 有检索结果时显示） */}
                 {msg.role === "assistant" &&
                   msg.knowledge &&
@@ -570,21 +482,4 @@ export function CustomerChat() {
       )}
     </>
   );
-}
-
-/** 去重 ContentBlock：避免 SSE content_block 和 Markdown fence 双重渲染 */
-function dedupeBlocks(blocks: ContentBlock[]): ContentBlock[] {
-  const seen = new Set<string>();
-  return blocks.filter((b) => {
-    let key = b.type;
-    if ("data" in b && b.data) {
-      const d = b.data as unknown as Record<string, unknown>;
-      if (d.orderId) key += ":" + d.orderId;
-      else if (d.title) key += ":" + d.title;
-      else key += ":" + JSON.stringify(d);
-    }
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
 }
