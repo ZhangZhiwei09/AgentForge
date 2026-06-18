@@ -450,20 +450,59 @@ export class AgentService {
         }
 
         // Switch to respond-only mode for next iteration (LLM will output clean Markdown)
+        // Note: agent_responding is deferred until LLM output is confirmed non-JSON
         respondOnly = true;
-        yield {
-          type: "agent_responding",
-          step: totalSteps,
-        };
 
         // Continue to next ReAct iteration so LLM can use the tool result
         continue;
       }
 
-      // 9b-respondOnly. If in respond-only mode, the LLM output is clean Markdown
-      // No decision parsing needed — streamed tokens are the final answer
+      // 9b-respondOnly. LLM should output clean Markdown, but may still emit ReAct JSON.
+      // Defensive: if output is JSON, extract natural language; otherwise stream as-is.
       if (respondOnly) {
-        finalContent = llmResponse;
+        // Screen for leaked ReAct JSON — if so, try to salvage natural language from it
+        const trimmed = llmResponse.trim();
+        const looksLikeReAct =
+          trimmed.startsWith("{") &&
+          trimmed.includes('"observation"') &&
+          trimmed.includes('"decision"');
+
+        if (looksLikeReAct) {
+          const extracted = tryExtractRespondContent(llmResponse);
+          if (extracted) {
+            finalContent = extracted;
+          } else {
+            // Cannot salvage — use degradation fallback
+            logger.warn(
+              { sessionId, llmResponse: llmResponse.slice(0, 200) },
+              "Respond-only LLM output is ReAct JSON, using fallback",
+            );
+            finalContent =
+              "抱歉，暂时无法处理您的请求，请稍后再试或联系人工客服。";
+          }
+
+          // Clear any accumulated (non-streamed) tokens from agent-executor buffer
+          yield {
+            type: "agent_clear_stream",
+            message_id: streamMsgId,
+            step: totalSteps,
+          };
+        } else {
+          finalContent = llmResponse;
+        }
+
+        // Yield responding + tokens for the cleaned content
+        yield {
+          type: "agent_responding",
+          step: totalSteps,
+        };
+        for (const char of finalContent) {
+          yield {
+            type: "agent_token",
+            content: char,
+            message_id: streamMsgId,
+          };
+        }
 
         // Save assistant message
         await prisma.message.create({
@@ -509,21 +548,53 @@ export class AgentService {
           { sessionId, response: llmResponse.slice(0, 200) },
           "Failed to parse agent decision — treating as respond",
         );
-        // Parsing failed: the raw text was already streamed to the frontend.
+
+        // 防御：检查 llmResponse 是否为 ReAct JSON，尝试提取可读内容
+        const trimmed = llmResponse.trim();
+        const looksLikeReActJSON =
+          trimmed.startsWith("{") &&
+          trimmed.includes('"observation"') &&
+          trimmed.includes('"decision"');
+
+        let responseContent: string;
+        if (looksLikeReActJSON) {
+          const extracted = tryExtractRespondContent(llmResponse);
+          responseContent = extracted ||
+            "抱歉，暂时无法处理您的请求，请稍后再试或联系人工客服。";
+        } else {
+          responseContent = llmResponse;
+        }
+
         // Save it as the assistant message.
         await prisma.message.create({
           data: {
             id: streamMsgId,
             conversationId,
             role: "assistant",
-            content: llmResponse,
+            content: responseContent,
             model: resolvedModel,
           },
         });
 
         yield {
+          type: "agent_clear_stream",
+          message_id: streamMsgId,
+          step: totalSteps,
+        };
+        yield {
+          type: "agent_responding",
+          step: totalSteps,
+        };
+        for (const char of responseContent) {
+          yield {
+            type: "agent_token",
+            content: char,
+            message_id: streamMsgId,
+          };
+        }
+        yield {
           type: "agent_respond",
-          content: llmResponse,
+          content: responseContent,
           summary: "Agent completed (unstructured)",
           message_id: streamMsgId,
         };
@@ -771,6 +842,12 @@ export class AgentService {
             keptStepNumbers = new Set(compResult.keptSteps.map((s) => s.step));
           }
         }
+
+        // Switch to respond-only mode so LLM outputs clean Markdown (not ReAct JSON)
+        respondOnly = true;
+
+        // Continue to next ReAct iteration to generate the response
+        continue;
       } else if (decision.action === "ask_user") {
         // Agent needs clarification — pause and wait
         scratchpad.push(step);
@@ -1598,5 +1675,47 @@ export class AgentService {
     completedAt: Date | null;
   } | null> {
     return getSessionFn(id);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// Respond-Only JSON Salvage
+// ═══════════════════════════════════════════════════════
+
+/**
+ * 尝试从 respond-only 模式下泄漏的 ReAct JSON 中提取自然语言内容。
+ * LLM 有时不遵循 respond-only prompt，仍然输出 ReAct 格式的 JSON。
+ * 此函数尝试从 decision.content / plan / observation 字段中提取有用文本。
+ *
+ * @returns 可展示给用户的自然语言文本，或 null（无法提取）
+ */
+function tryExtractRespondContent(llmResponse: string): string | null {
+  try {
+    const trimmed = llmResponse.trim();
+    const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+
+    const parsed = JSON.parse(jsonMatch[0]);
+
+    // 如果 decision 包含 content 字段（LLM 尝试回答）
+    if (parsed.decision && typeof parsed.decision === "object") {
+      if (typeof parsed.decision.content === "string" && parsed.decision.content.trim()) {
+        return parsed.decision.content.trim();
+      }
+    }
+
+    // plan 字段可能包含自然语言总结
+    if (typeof parsed.plan === "string" && parsed.plan.trim()) {
+      return parsed.plan.trim();
+    }
+
+    // observation 字段可能包含分析
+    if (typeof parsed.observation === "string" && parsed.observation.trim()) {
+      return parsed.observation.trim();
+    }
+
+    return null;
+  } catch {
+    return null;
   }
 }

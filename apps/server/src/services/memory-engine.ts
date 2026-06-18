@@ -21,6 +21,7 @@ import {
 } from "../observability/metrics.js";
 import { getProvider, listProviders } from "../providers/registry.js";
 import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
+import { settings } from "../config.js";
 
 // 记忆创建参数
 export interface MemoryCreate {
@@ -276,7 +277,7 @@ export class MemoryEngine {
     let model: string;
 
     if (providerName === "openai") {
-      model = "gpt-4o-mini"; // 记忆提取是后台任务，用便宜模型
+      model = settings.defaultModel; // 通过 .env 配置，DashScope 用 qwen-coder-turbo
     } else {
       model = "deepseek-chat";
     }

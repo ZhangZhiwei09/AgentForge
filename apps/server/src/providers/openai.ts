@@ -35,6 +35,12 @@ export class OpenAIProvider implements LLMProvider {
         provider: "openai",
         max_tokens: 128000,
       },
+      {
+        id: "qwen-coder-turbo",
+        name: "Qwen Coder Turbo",
+        provider: "openai",
+        max_tokens: 128000,
+      },
     ];
   }
 

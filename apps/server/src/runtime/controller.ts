@@ -146,8 +146,9 @@ export class ExecutionNode {
 
   // ── 生命周期方法 ──
 
-  /** 开始执行：CREATED → RUNNING */
+  /** 开始执行：CREATED → RUNNING（已运行时幂等） */
   start(): void {
+    if (this._state === ExecutionState.RUNNING) return;
     this.setState(ExecutionState.RUNNING);
     this._startedAt = Date.now();
   }

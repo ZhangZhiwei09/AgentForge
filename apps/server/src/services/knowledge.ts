@@ -13,6 +13,7 @@ import { getProvider } from "../providers/registry.js";
 import { logger } from "@agentforge/logger";
 import { milvusSearchDurationMs } from "../observability/metrics.js";
 import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
+import { settings } from "../config.js";
 
 const DENSE_WEIGHT = 0.6; // 语义向量权重
 const SPARSE_WEIGHT = 0.4; // 关键词匹配权重
@@ -303,7 +304,7 @@ export class KnowledgeService {
     const userMessage = `查询：${query}\n\n候选文档：\n${candidateTexts.join("\n\n")}`;
 
     // 通过provider抽象层调用，不直接依赖具体厂商SDK
-    const model = providerName === "openai" ? "gpt-4o-mini" : "deepseek-chat";
+    const model = providerName === "openai" ? settings.defaultModel : "deepseek-chat";
 
     const result = await provider.chatSync(
       [{ role: "user", content: userMessage }],
