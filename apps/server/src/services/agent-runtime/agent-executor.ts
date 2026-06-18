@@ -443,19 +443,30 @@ export function sanitizeReActJSON(text: string): string | null {
     const parsed = JSON.parse(trimmed);
     const decision = parsed.decision;
 
+    // 优先：decision 中的 content 字段（LLM 尝试回答）
     if (typeof decision === "object" && decision?.content) {
       return String(decision.content);
     }
 
+    // decision 是动作（如 search_knowledge_base）但没有 content → 无法直接展示
     if (typeof decision === "string") {
       return null;
     }
 
+    // 次选：顶层的 content / summary 字段
     if (parsed.content && typeof parsed.content === "string") {
       return parsed.content;
     }
     if (parsed.summary && typeof parsed.summary === "string") {
       return parsed.summary;
+    }
+
+    // 再次：plan 或 observation 可能包含可读信息
+    if (typeof parsed.plan === "string" && parsed.plan.trim()) {
+      return parsed.plan.trim();
+    }
+    if (typeof parsed.observation === "string" && parsed.observation.trim()) {
+      return parsed.observation.trim();
     }
 
     return null;
