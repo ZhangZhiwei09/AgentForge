@@ -843,11 +843,14 @@ export class AgentService {
           }
         }
 
-        // Switch to respond-only mode so LLM outputs clean Markdown (not ReAct JSON)
-        respondOnly = true;
-
-        // Continue to next ReAct iteration to generate the response
-        continue;
+        // 仅在文本解析路径强制 respondOnly：qwen-coder-turbo 等模型输出
+        // ReAct JSON 作为文本，下一轮必须用 respond-only prompt 避免再次泄漏。
+        // native agent_decide tool call 路径不受影响，遵循原有逻辑。
+        if (parsedFromText) {
+          respondOnly = true;
+          continue;
+        }
+        // native agent_decide 路径：fall through 到循环末尾，正常进入下一轮
       } else if (decision.action === "ask_user") {
         // Agent needs clarification — pause and wait
         scratchpad.push(step);
