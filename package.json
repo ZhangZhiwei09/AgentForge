@@ -7,7 +7,7 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "dev": "turbo dev --filter=@agentforge/server --filter=@agentforge/web",
+    "dev": "turbo dev --filter=@agentforge/server --filter=@agentforge/customer-service --filter=@agentforge/app-creator --filter=@agentforge/data-admin",
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
@@ -19,7 +19,9 @@
     "infra:restart": "docker compose -f infra/docker/docker-compose.yml down && docker compose -f infra/docker/docker-compose.yml up -d",
     "server:dev": "pnpm --filter @agentforge/server dev",
     "server:worker": "pnpm --filter @agentforge/server worker",
-    "web:dev": "pnpm --filter @agentforge/web dev",
+    "cs:dev": "pnpm --filter @agentforge/customer-service dev",
+    "creator:dev": "pnpm --filter @agentforge/app-creator dev",
+    "admin:dev": "pnpm --filter @agentforge/data-admin dev",
     "db:migrate": "pnpm --filter @agentforge/database db:migrate",
     "db:seed": "pnpm --filter @agentforge/database db:seed",
     "db:studio": "pnpm --filter @agentforge/database db:studio",
