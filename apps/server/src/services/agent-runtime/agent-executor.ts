@@ -132,6 +132,7 @@ export class AgentExecutor implements RouteAgent {
         tools: enabledTools,
         scope,
         skipUserMessageSave: true,
+        skipAssistantMessageSave: true,
         guardConfig: {
           maxTokens: 2000,
           maxCostCents: 5,

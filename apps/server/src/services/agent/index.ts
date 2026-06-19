@@ -71,12 +71,14 @@ export class AgentService {
       guardConfig?: Partial<AgentGuardConfig> | null;
       scope?: ExecutionScope;
       skipUserMessageSave?: boolean;
+      skipAssistantMessageSave?: boolean;
     } = {},
   ): AsyncGenerator<AgentStreamEvent> {
     const maxIterations = options.maxIterations || DEFAULT_MAX_ITERATIONS;
     const enabledTools = options.tools?.length ? options.tools : null;
     const scope = options.scope;
     const signal = scope?.context.signal;
+    const skipAssistantSave = options.skipAssistantMessageSave === true;
 
     // Transition controller from Pending → Running so state machine is accurate
     scope?.controller.start();
@@ -176,7 +178,7 @@ export class AgentService {
         logger.info({ sessionId, iteration: totalSteps }, "Agent interrupted by runtime signal");
         const result = scope.controller.interrupt();
         // Save partial content if any
-        if (finalContent) {
+        if (finalContent && !skipAssistantSave) {
           await prisma.message.create({
             data: {
               id: randomUUID(),
@@ -409,20 +411,22 @@ export class AgentService {
         }
 
         // Save assistant message with tool calls
-        await prisma.message.create({
-          data: {
-            id: streamMsgId,
-            conversationId,
-            role: "assistant",
-            content: JSON.stringify({
-              tool_calls: nativeToolCalls.map((tc) => ({
-                name: tc.name,
-                arguments: tc.args,
-              })),
-            }),
-            model: resolvedModel,
-          },
-        });
+        if (!skipAssistantSave) {
+          await prisma.message.create({
+            data: {
+              id: streamMsgId,
+              conversationId,
+              role: "assistant",
+              content: JSON.stringify({
+                tool_calls: nativeToolCalls.map((tc) => ({
+                  name: tc.name,
+                  arguments: tc.args,
+                })),
+              }),
+              model: resolvedModel,
+            },
+          });
+        }
 
         // Feed tool results back as user messages for next iteration
         for (const tc of nativeToolCalls) {
@@ -500,15 +504,17 @@ export class AgentService {
         }
 
         // Save assistant message
-        await prisma.message.create({
-          data: {
-            id: streamMsgId,
-            conversationId,
-            role: "assistant",
-            content: finalContent,
-            model: resolvedModel,
-          },
-        });
+        if (!skipAssistantSave) {
+          await prisma.message.create({
+            data: {
+              id: streamMsgId,
+              conversationId,
+              role: "assistant",
+              content: finalContent,
+              model: resolvedModel,
+            },
+          });
+        }
 
         yield {
           type: "agent_respond",
@@ -555,15 +561,17 @@ export class AgentService {
         }
 
         // Save it as the assistant message.
-        await prisma.message.create({
-          data: {
-            id: streamMsgId,
-            conversationId,
-            role: "assistant",
-            content: responseContent,
-            model: resolvedModel,
-          },
-        });
+        if (!skipAssistantSave) {
+          await prisma.message.create({
+            data: {
+              id: streamMsgId,
+              conversationId,
+              role: "assistant",
+              content: responseContent,
+              model: resolvedModel,
+            },
+          });
+        }
 
         yield {
           type: "agent_clear_stream",
@@ -651,15 +659,17 @@ export class AgentService {
         const safeContent = responseGuard.sanitizedContent;
 
         // Save assistant message (ID matches the streamed tokens)
-        await prisma.message.create({
-          data: {
-            id: streamMsgId,
-            conversationId,
-            role: "assistant",
-            content: safeContent,
-            model: resolvedModel,
-          },
-        });
+        if (!skipAssistantSave) {
+          await prisma.message.create({
+            data: {
+              id: streamMsgId,
+              conversationId,
+              role: "assistant",
+              content: safeContent,
+              model: resolvedModel,
+            },
+          });
+        }
 
         // Complete step
         step.result = decision.summary;
