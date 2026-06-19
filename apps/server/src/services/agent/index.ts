@@ -25,6 +25,7 @@ import {
   MemoryCompressor,
   SCRATCHPAD_COMPRESSION_THRESHOLD,
 } from "../memory-compressor.js";
+import { looksLikeReActJSON } from "../agent-runtime/react-json-utils.js";
 import type {
   AgentStep,
   AgentStreamEvent,
@@ -70,12 +71,14 @@ export class AgentService {
       guardConfig?: Partial<AgentGuardConfig> | null;
       scope?: ExecutionScope;
       skipUserMessageSave?: boolean;
+      skipAssistantMessageSave?: boolean;
     } = {},
   ): AsyncGenerator<AgentStreamEvent> {
     const maxIterations = options.maxIterations || DEFAULT_MAX_ITERATIONS;
     const enabledTools = options.tools?.length ? options.tools : null;
     const scope = options.scope;
     const signal = scope?.context.signal;
+    const skipAssistantSave = options.skipAssistantMessageSave === true;
 
     // Transition controller from Pending → Running so state machine is accurate
     scope?.controller.start();
@@ -175,7 +178,7 @@ export class AgentService {
         logger.info({ sessionId, iteration: totalSteps }, "Agent interrupted by runtime signal");
         const result = scope.controller.interrupt();
         // Save partial content if any
-        if (finalContent) {
+        if (finalContent && !skipAssistantSave) {
           await prisma.message.create({
             data: {
               id: randomUUID(),
@@ -408,20 +411,22 @@ export class AgentService {
         }
 
         // Save assistant message with tool calls
-        await prisma.message.create({
-          data: {
-            id: streamMsgId,
-            conversationId,
-            role: "assistant",
-            content: JSON.stringify({
-              tool_calls: nativeToolCalls.map((tc) => ({
-                name: tc.name,
-                arguments: tc.args,
-              })),
-            }),
-            model: resolvedModel,
-          },
-        });
+        if (!skipAssistantSave) {
+          await prisma.message.create({
+            data: {
+              id: streamMsgId,
+              conversationId,
+              role: "assistant",
+              content: JSON.stringify({
+                tool_calls: nativeToolCalls.map((tc) => ({
+                  name: tc.name,
+                  arguments: tc.args,
+                })),
+              }),
+              model: resolvedModel,
+            },
+          });
+        }
 
         // Feed tool results back as user messages for next iteration
         for (const tc of nativeToolCalls) {
@@ -461,13 +466,7 @@ export class AgentService {
       // Defensive: if output is JSON, extract natural language; otherwise stream as-is.
       if (respondOnly) {
         // Screen for leaked ReAct JSON — if so, try to salvage natural language from it
-        const trimmed = llmResponse.trim();
-        const looksLikeReAct =
-          trimmed.startsWith("{") &&
-          trimmed.includes('"observation"') &&
-          trimmed.includes('"decision"');
-
-        if (looksLikeReAct) {
+        if (looksLikeReActJSON(llmResponse)) {
           const extracted = tryExtractRespondContent(llmResponse);
           if (extracted) {
             finalContent = extracted;
@@ -505,15 +504,17 @@ export class AgentService {
         }
 
         // Save assistant message
-        await prisma.message.create({
-          data: {
-            id: streamMsgId,
-            conversationId,
-            role: "assistant",
-            content: finalContent,
-            model: resolvedModel,
-          },
-        });
+        if (!skipAssistantSave) {
+          await prisma.message.create({
+            data: {
+              id: streamMsgId,
+              conversationId,
+              role: "assistant",
+              content: finalContent,
+              model: resolvedModel,
+            },
+          });
+        }
 
         yield {
           type: "agent_respond",
@@ -550,14 +551,8 @@ export class AgentService {
         );
 
         // 防御：检查 llmResponse 是否为 ReAct JSON，尝试提取可读内容
-        const trimmed = llmResponse.trim();
-        const looksLikeReActJSON =
-          trimmed.startsWith("{") &&
-          trimmed.includes('"observation"') &&
-          trimmed.includes('"decision"');
-
         let responseContent: string;
-        if (looksLikeReActJSON) {
+        if (looksLikeReActJSON(llmResponse)) {
           const extracted = tryExtractRespondContent(llmResponse);
           responseContent = extracted ||
             "抱歉，暂时无法处理您的请求，请稍后再试或联系人工客服。";
@@ -566,15 +561,17 @@ export class AgentService {
         }
 
         // Save it as the assistant message.
-        await prisma.message.create({
-          data: {
-            id: streamMsgId,
-            conversationId,
-            role: "assistant",
-            content: responseContent,
-            model: resolvedModel,
-          },
-        });
+        if (!skipAssistantSave) {
+          await prisma.message.create({
+            data: {
+              id: streamMsgId,
+              conversationId,
+              role: "assistant",
+              content: responseContent,
+              model: resolvedModel,
+            },
+          });
+        }
 
         yield {
           type: "agent_clear_stream",
@@ -662,15 +659,17 @@ export class AgentService {
         const safeContent = responseGuard.sanitizedContent;
 
         // Save assistant message (ID matches the streamed tokens)
-        await prisma.message.create({
-          data: {
-            id: streamMsgId,
-            conversationId,
-            role: "assistant",
-            content: safeContent,
-            model: resolvedModel,
-          },
-        });
+        if (!skipAssistantSave) {
+          await prisma.message.create({
+            data: {
+              id: streamMsgId,
+              conversationId,
+              role: "assistant",
+              content: safeContent,
+              model: resolvedModel,
+            },
+          });
+        }
 
         // Complete step
         step.result = decision.summary;
@@ -853,6 +852,18 @@ export class AgentService {
         // native agent_decide 路径：fall through 到循环末尾，正常进入下一轮
       } else if (decision.action === "ask_user") {
         // Agent needs clarification — pause and wait
+        // P0: Clear streamed ReAct JSON tokens before pausing.
+        // Without this, the accumulated JSON text leaks to the user via
+        // AgentExecutor's post-processing fallback (sanitizeReActJSON).
+        // Pattern matches respond and tool_call branches in main loop.
+        if (parsedFromText) {
+          yield {
+            type: "agent_clear_stream",
+            message_id: streamMsgId,
+            step: totalSteps,
+          };
+        }
+
         scratchpad.push(step);
 
         await saveSession(
@@ -1210,6 +1221,12 @@ export class AgentService {
     const systemPrompt = REACT_PROMPT_WITH_TOOLS;
     const maxIterations = DEFAULT_MAX_ITERATIONS;
 
+    // Track whether tools have been used — same as main run() loop.
+    // Once set, LLM outputs clean Markdown (no JSON wrapping) for real streaming.
+    let respondOnly = false;
+
+    let finalContent = "";
+
     // Memory compression state (P0-3) — minimal tracking for continue loop
     let compressedSummary: string = "";
     let keptStepNumbers: Set<number> = new Set();
@@ -1273,16 +1290,23 @@ export class AgentService {
         null,
       );
 
+      const iterationSystemPrompt = respondOnly
+        ? getRespondOnlySystemPrompt()
+        : systemPrompt;
+
+      const iterationTools = respondOnly ? undefined : toolDefs;
+
       const iterationMessages: ChatMessage[] = [
         {
           role: "system",
           content: buildIterationContext(
-            systemPrompt,
+            iterationSystemPrompt,
             task,
             scratchpad,
             totalSteps,
             compressedSummary,
             keptStepNumbers,
+            respondOnly,
           ),
         },
         ...conversationMessages,
@@ -1315,7 +1339,7 @@ export class AgentService {
             undefined,
             undefined,
             undefined,
-            toolDefs,
+            iterationTools,
             signal, // Pass AbortSignal for cancellation support
           )) {
             if (chunk.type === "token" && chunk.content) {
@@ -1444,19 +1468,36 @@ export class AgentService {
       }
 
       const step = agentDecision || parseStep(llmResponse, totalSteps);
+      const parsedFromText = !agentDecision;
       if (!step) {
+        // P0: ReAct JSON leak prevention — try to extract natural language
+        // before saving raw LLM output. Mirrors the defense in run() main loop
+        // Mirrors the defense in run() main loop unstructured-response branch:
+        // tryExtractRespondContent → agent_clear_stream → re-emit.
+        const extracted = tryExtractRespondContent(llmResponse);
+        const safeContent = extracted ?? llmResponse;
+
+        if (extracted && parsedFromText) {
+          // Clear streamed JSON tokens before re-emitting clean content
+          yield {
+            type: "agent_clear_stream",
+            message_id: streamMsgId,
+            step: totalSteps,
+          };
+        }
+
         await prisma.message.create({
           data: {
             id: streamMsgId,
             conversationId,
             role: "assistant",
-            content: llmResponse,
+            content: safeContent,
             model: resolvedModel,
           },
         });
         yield {
           type: "agent_respond",
-          content: llmResponse,
+          content: safeContent,
           summary: "Agent completed (unstructured)",
           message_id: streamMsgId,
         };
@@ -1466,6 +1507,77 @@ export class AgentService {
           "completed",
           "Task completed",
         );
+        yield {
+          type: "agent_done",
+          total_steps: totalSteps,
+          final_summary: "Task completed",
+          session_id: sessionId,
+        };
+        return;
+      }
+
+      // respondOnly 模式：LLM 应输出干净 Markdown，但可能仍输出 ReAct JSON。
+      // 防御逻辑与主循环 run() 的 respondOnly 分支对称。
+      if (respondOnly) {
+        if (looksLikeReActJSON(llmResponse)) {
+          const extracted = tryExtractRespondContent(llmResponse);
+          if (extracted) {
+            finalContent = extracted;
+          } else {
+            logger.warn(
+              { sessionId, llmResponse: llmResponse.slice(0, 200) },
+              "Respond-only LLM output is ReAct JSON in continue loop, using fallback",
+            );
+            finalContent =
+              "抱歉，暂时无法处理您的请求，请稍后再试或联系人工客服。";
+          }
+
+          yield {
+            type: "agent_clear_stream",
+            message_id: streamMsgId,
+            step: totalSteps,
+          };
+        } else {
+          finalContent = llmResponse;
+        }
+
+        yield {
+          type: "agent_responding",
+          step: totalSteps,
+        };
+        for (const char of finalContent) {
+          yield {
+            type: "agent_token",
+            content: char,
+            message_id: streamMsgId,
+          };
+        }
+
+        await prisma.message.create({
+          data: {
+            id: streamMsgId,
+            conversationId,
+            role: "assistant",
+            content: finalContent,
+            model: resolvedModel,
+          },
+        });
+
+        yield {
+          type: "agent_respond",
+          content: finalContent,
+          summary: "Agent completed (respond-only)",
+          message_id: streamMsgId,
+        };
+
+        await saveSession(
+          createSessionRecord(sessionId, conversationId, task),
+          scratchpad,
+          "completed",
+          "Task completed",
+          compressedSummary,
+        );
+
         yield {
           type: "agent_done",
           total_steps: totalSteps,
@@ -1612,7 +1724,23 @@ export class AgentService {
             keptStepNumbers = new Set(cResult.keptSteps.map((s) => s.step));
           }
         }
+
+        // 文本解析路径下切换到 respond-only 模式（与主循环 tool_call 分支一致）
+        if (parsedFromText) {
+          respondOnly = true;
+          continue;
+        }
       } else if (decision.action === "ask_user") {
+        // P0: Clear streamed ReAct JSON tokens before pausing.
+        // Pattern matches main loop ask_user branch.
+        if (parsedFromText) {
+          yield {
+            type: "agent_clear_stream",
+            message_id: streamMsgId,
+            step: totalSteps,
+          };
+        }
+
         scratchpad.push(step);
         // P0-3: Compression check before pausing
         const cResultPause = this.compressor.compress(scratchpad);
@@ -1705,9 +1833,22 @@ function tryExtractRespondContent(llmResponse: string): string | null {
       if (typeof parsed.decision.content === "string" && parsed.decision.content.trim()) {
         return parsed.decision.content.trim();
       }
+      // P0: decision.question — LLM 需要向用户提问澄清
+      // ask_user 路径中 question 是面向用户的问题文本，优先级高于 plan/observation
+      if (typeof parsed.decision.question === "string" && parsed.decision.question.trim()) {
+        return parsed.decision.question.trim();
+      }
     }
 
-    // plan 字段可能包含自然语言总结
+    // 次选：顶层 content / summary（与 sanitizeReActJSON 统一优先级）
+    if (typeof parsed.content === "string" && parsed.content.trim()) {
+      return parsed.content.trim();
+    }
+    if (typeof parsed.summary === "string" && parsed.summary.trim()) {
+      return parsed.summary.trim();
+    }
+
+    // 再次：plan 或 observation（与 sanitizeReActJSON 统一优先级）
     if (typeof parsed.plan === "string" && parsed.plan.trim()) {
       return parsed.plan.trim();
     }

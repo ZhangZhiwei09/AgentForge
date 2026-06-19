@@ -133,8 +133,39 @@ export function parseStep(
       return null;
     }
 
-    // Type-narrow after validation
-    const validDecision = decision as unknown as AgentDecision;
+    // 构造 AgentDecision — 与 parseAgentDecideFromArgs 保持一致的字段映射
+    let validDecision: AgentDecision;
+    if (action === "tool_call") {
+      validDecision = {
+        action: "tool_call",
+        tool: String(decision.tool || ""),
+        args: typeof decision.args === "object" && decision.args !== null
+          ? (decision.args as Record<string, unknown>)
+          : (() => {
+              // 尝试从 args_json 解析
+              try {
+                return JSON.parse(String(decision.args_json || "{}"));
+              } catch {
+                return {};
+              }
+            })(),
+        reason: String(decision.reason || ""),
+      };
+    } else if (action === "ask_user") {
+      validDecision = {
+        action: "ask_user",
+        // LLM 可能使用 clarify_context（tool schema 参数名）或 context
+        question: String(decision.question || ""),
+        context: String(decision.clarify_context || decision.context || ""),
+      };
+    } else {
+      // respond
+      validDecision = {
+        action: "respond",
+        content: String(decision.content || ""),
+        summary: String(decision.summary || ""),
+      };
+    }
 
     return {
       step: stepNumber,

@@ -11,6 +11,16 @@ import type {
   CreateProjectRequest,
   UpdateProjectRequest,
   GenerateAppRequest,
+  KnowledgeBaseDTO,
+  CreateKnowledgeBaseRequest,
+  UpdateKnowledgeBaseRequest,
+  KnowledgeDocumentDTO,
+  KnowledgeSearchResponse,
+  KnowledgeStatsDTO,
+  AnalyticsDTO,
+  FeedbackResponse,
+  FAQDocumentDTO,
+  FAQCategoryDTO,
 } from "@agentforge/shared-types";
 import { VoiceService } from "./services/voice.js";
 
@@ -227,6 +237,108 @@ export class AgentForgeClient {
   ): Promise<{ runs: AppGenRunDTO[]; count: number }> {
     return this.request<{ runs: AppGenRunDTO[]; count: number }>(
       `/api/projects/${projectId}/generations`,
+    );
+  }
+
+  // ---- Knowledge Bases ----
+
+  async listKnowledgeBases(): Promise<KnowledgeBaseDTO[]> {
+    return this.request<KnowledgeBaseDTO[]>("/api/knowledge/bases");
+  }
+
+  async getKnowledgeBase(kbId: string): Promise<KnowledgeBaseDTO> {
+    return this.request<KnowledgeBaseDTO>(`/api/knowledge/bases/${kbId}`);
+  }
+
+  async createKnowledgeBase(
+    input: CreateKnowledgeBaseRequest,
+  ): Promise<KnowledgeBaseDTO> {
+    return this.request<KnowledgeBaseDTO>("/api/knowledge/bases", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async updateKnowledgeBase(
+    kbId: string,
+    input: UpdateKnowledgeBaseRequest,
+  ): Promise<KnowledgeBaseDTO> {
+    return this.request<KnowledgeBaseDTO>(`/api/knowledge/bases/${kbId}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async deleteKnowledgeBase(kbId: string): Promise<void> {
+    await this.request<void>(`/api/knowledge/bases/${kbId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // ---- Knowledge Documents ----
+
+  async listDocuments(kbId: string): Promise<KnowledgeDocumentDTO[]> {
+    return this.request<KnowledgeDocumentDTO[]>(
+      `/api/knowledge/bases/${kbId}/documents`,
+    );
+  }
+
+  async getDocument(docId: string): Promise<KnowledgeDocumentDTO> {
+    return this.request<KnowledgeDocumentDTO>(
+      `/api/knowledge/documents/${docId}`,
+    );
+  }
+
+  async deleteDocument(docId: string): Promise<void> {
+    await this.request<void>(`/api/knowledge/documents/${docId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async searchKnowledge(
+    query: string,
+    kbIds?: string[] | null,
+    topK?: number,
+  ): Promise<KnowledgeSearchResponse> {
+    return this.request<KnowledgeSearchResponse>("/api/knowledge/search", {
+      method: "POST",
+      body: JSON.stringify({ query, kb_ids: kbIds, top_k: topK ?? 3 }),
+    });
+  }
+
+  async getKnowledgeStats(): Promise<KnowledgeStatsDTO> {
+    return this.request<KnowledgeStatsDTO>("/api/knowledge/stats");
+  }
+
+  // ---- Analytics & Feedback ----
+
+  async getAnalytics(): Promise<AnalyticsDTO> {
+    return this.request<AnalyticsDTO>("/api/agent/chat/analytics");
+  }
+
+  async getFeedback(
+    type: "all" | "positive" | "negative" = "all",
+    page = 1,
+    limit = 20,
+  ): Promise<FeedbackResponse> {
+    const params = new URLSearchParams({ type, page: String(page), limit: String(limit) });
+    return this.request<FeedbackResponse>(
+      `/api/agent/chat/feedback?${params.toString()}`,
+    );
+  }
+
+  // ---- FAQ ----
+
+  async getFAQ(category?: string): Promise<{ documents: FAQDocumentDTO[] }> {
+    const url = category
+      ? `/api/agent/chat/faq?category=${encodeURIComponent(category)}`
+      : "/api/agent/chat/faq";
+    return this.request<{ documents: FAQDocumentDTO[] }>(url);
+  }
+
+  async getFAQCategories(): Promise<{ categories: FAQCategoryDTO[] }> {
+    return this.request<{ categories: FAQCategoryDTO[] }>(
+      "/api/agent/chat/faq/categories",
     );
   }
 }

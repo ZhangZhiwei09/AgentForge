@@ -207,3 +207,21 @@ export type {
   AgentMessage,
   AgentStreamMeta,
 } from "./agent-chat";
+export type {
+  KnowledgeBaseDTO,
+  CreateKnowledgeBaseRequest,
+  UpdateKnowledgeBaseRequest,
+  KnowledgeDocumentDTO,
+  CreateDocumentRequest,
+  BatchCreateDocumentsRequest,
+  KnowledgeSearchRequest,
+  KnowledgeSearchResultDTO,
+  KnowledgeSearchResponse,
+  KnowledgeStatsDTO,
+  AnalyticsDTO,
+  FeedbackDTO,
+  FeedbackQueryParams,
+  FeedbackResponse,
+  FAQDocumentDTO,
+  FAQCategoryDTO,
+} from "./knowledge";

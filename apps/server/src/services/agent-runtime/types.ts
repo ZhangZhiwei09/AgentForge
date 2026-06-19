@@ -114,6 +114,10 @@ export type RouteStreamEvent =
       message_id: string;
     }
   | {
+      type: "clear_stream";
+      message_id: string;
+    }
+  | {
       type: "error";
       content: string;
     };
