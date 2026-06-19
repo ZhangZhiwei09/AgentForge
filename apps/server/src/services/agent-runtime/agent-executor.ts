@@ -20,6 +20,7 @@ import {
   agentCitationCoverage,
 } from "../../observability/metrics.js";
 import { AgentService } from "../agent.js";
+import { sanitizeReActJSON } from "./react-json-utils.js";
 import type { CitationReport } from "./citation-verifier.js";
 import { getCitationVerifier } from "./citation-verifier.js";
 import { validateBusinessResponse } from "./validation.js";
@@ -29,6 +30,9 @@ import { toolRegistry } from "../../tools/registry.js";
 // ── 硬编码最终兜底文案 ──
 const HARDCODED_FALLBACK =
   "抱歉，暂时无法处理您的请求，请稍后再试或联系人工客服。";
+
+// ── ask_user 空 question 时的兜底提问文案 ──
+const ASK_USER_FALLBACK = "请问您能提供更多信息吗？";
 
 // ── Agent 业务阶段 ──
 type AgentPhase =
@@ -222,7 +226,68 @@ export class AgentExecutor implements RouteAgent {
             phase = "finished";
             break;
 
+          // P0: agent_ask_user — Agent 需要向用户提问澄清。
+          // 将 question 文本转换为 RouteStreamEvent token 流，避免
+          // ReAct JSON 泄露到 fallback 路径。
+          case "agent_ask_user": {
+            const question = event.question;
+            if (!question) {
+              logger.warn(
+                { eventType: "agent_ask_user", conversationId },
+                "agent_ask_user event received with empty question, using fallback",
+              );
+            }
+            // 向下游发送 clear_stream 信号，确保前端也清除残留 token
+            yield {
+              type: "clear_stream",
+              message_id: assistantMsgId,
+            };
+            // 清除之前累积的 ReAct JSON token，确保 fallback 不使用脏数据
+            accumulatedContent = "";
+            phase = "responding";
+            outputState.responseStarted = true;
+            const displayText = question || ASK_USER_FALLBACK;
+            for (const char of displayText) {
+              yield {
+                type: "token",
+                content: char,
+                message_id: assistantMsgId,
+              };
+              outputState.visibleChars++;
+            }
+            envelope.finalContent = displayText;
+            outputState.responseCompleted = true;
+            break;
+          }
+
+          // ── 显式未处理事件（AgentService 内部事件，不映射到 RouteStreamEvent）──
+          // agent_think: Agent 推理步骤（observation/analysis/plan），开发调试用，
+          //   通过 AgentPanel REST API 加载 scratchpad 查看，不需要在聊天流中展示。
+          // agent_act: Agent 行动决策，仅用于 AgentPanel 展示 scratchpad。
+          // agent_meta: AgentService 元信息（session_id/model/provider/tools_enabled），
+          //   AgentExecutor 已在 L77-88 独立产出 meta 事件。
+          // agent_approval_required: 工具审批请求，通过独立 API（POST /api/agent/approve）
+          //   流程处理，不经过本路由的 SSE 流。
+          // agent_approval_result: 审批结果通知，通过审批 API 自身 SSE 返回。
+          // agent_degraded: LLM 降级通知，降级消息已注入 conversationMessages，
+          //   无需额外前端事件。
+          // agent_guard_block: 安全守卫拦截通知，阻塞消息已注入 conversationMessages。
+          case "agent_think":
+          case "agent_act":
+          case "agent_meta":
+          case "agent_approval_required":
+          case "agent_approval_result":
+          case "agent_degraded":
+          case "agent_guard_block":
+            break;
+
           default:
+            // 未识别的 AgentStreamEvent 类型 — 记录警告以便发现未来新增事件的遗漏映射
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- exhaustive check makes event: never
+            logger.warn(
+              { eventType: (event as any).type },
+              "AgentExecutor received unrecognized AgentStreamEvent type",
+            );
             break;
         }
       }
@@ -235,7 +300,18 @@ export class AgentExecutor implements RouteAgent {
 
       // ── Interruption ──
       if (scope?.controller.shouldStop) {
-        const partialContent = accumulatedContent || envelope.finalContent || "";
+        // P0: Sanitize partial content before streaming.
+        // accumulatedContent may contain raw ReAct JSON tokens from the
+        // planning/executing phase that were never cleared by agent_clear_stream.
+        // Without sanitization, cancelling during planning leaks internal JSON to users.
+        const rawPartial = accumulatedContent || envelope.finalContent || "";
+        const sanitizedPartial = sanitizeReActJSON(rawPartial);
+        // sanitizeReActJSON returns null when content IS ReAct JSON but no
+        // extractable text found — must NOT fall back to rawPartial (that
+        // would leak internal JSON).  Only use rawPartial when the content
+        // doesn't look like ReAct JSON at all (sanitizeReActJSON returns
+        // the original string unchanged).
+        const partialContent = sanitizedPartial ?? HARDCODED_FALLBACK;
         if (partialContent) {
           // 持久化部分内容到 DB
           try {
@@ -425,56 +501,8 @@ export class AgentExecutor implements RouteAgent {
 // 工具函数
 // ═══════════════════════════════════════════════════════
 
-/**
- * 检测并清理 ReAct Agent 内部 JSON 输出（防止泄漏到用户界面）
- */
-export function sanitizeReActJSON(text: string): string | null {
-  const trimmed = text.trim();
-
-  const looksLikeReActJSON =
-    trimmed.startsWith("{") &&
-    /"observation"\s*:/.test(trimmed) &&
-    /"analysis"\s*:/.test(trimmed) &&
-    /"plan"\s*:/.test(trimmed);
-
-  if (!looksLikeReActJSON) return text;
-
-  try {
-    const parsed = JSON.parse(trimmed);
-    const decision = parsed.decision;
-
-    // 优先：decision 中的 content 字段（LLM 尝试回答）
-    if (typeof decision === "object" && decision?.content) {
-      return String(decision.content);
-    }
-
-    // decision 是动作（如 search_knowledge_base）但没有 content → 无法直接展示
-    if (typeof decision === "string") {
-      return null;
-    }
-
-    // 次选：顶层的 content / summary 字段
-    if (parsed.content && typeof parsed.content === "string") {
-      return parsed.content;
-    }
-    if (parsed.summary && typeof parsed.summary === "string") {
-      return parsed.summary;
-    }
-
-    // 再次：plan 或 observation 可能包含可读信息
-    if (typeof parsed.plan === "string" && parsed.plan.trim()) {
-      return parsed.plan.trim();
-    }
-    if (typeof parsed.observation === "string" && parsed.observation.trim()) {
-      return parsed.observation.trim();
-    }
-
-    return null;
-  } catch {
-    // Expected: ReAct JSON extraction is best-effort — returns null for non-JSON content
-    return null;
-  }
-}
+// sanitizeReActJSON 和 looksLikeReActJSON 已提取到 ./react-json-utils.ts
+// 避免与 ../agent.js 之间的循环依赖
 
 /**
  * 检测工具输出是否为 search_knowledge_base 的返回结果。

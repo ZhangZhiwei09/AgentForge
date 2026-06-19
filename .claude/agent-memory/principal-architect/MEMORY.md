@@ -1,3 +1,4 @@
 - [Customer Chat SSE Protocol](project_customer-chat-sse-protocol.md) — 5 chunk types, tool_call/tool_result are dead code
 - [Shared Types Pure Type Package](project_shared-types-pure-type-package.md) — Zero runtime deps; adding Zod is deliberate tradeoff
 - [Customer Chat Route Mismatch](project_customer-chat-route-mismatch.md) — Frontend calls /api/customer-chat, server has /api/agent/chat
+- [ReAct ask_user Handling Gap](architecture_react-ask-user-handling-gap.md) — AgentExecutor ignores agent_ask_user events, causing raw JSON leakage

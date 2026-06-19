@@ -37,8 +37,8 @@ vi.mock("../tools/registry.js", () => ({
 
 import {
   AgentExecutor,
-  sanitizeReActJSON,
 } from "../services/agent-runtime/agent-executor.js";
+import { sanitizeReActJSON } from "../services/agent-runtime/react-json-utils.js";
 
 // ── Helper: 创建最小 RouteContext ──
 
@@ -810,6 +810,40 @@ describe("Runtime Contract — 状态机规则（可执行规范）", () => {
         envelope.finalContent ?? envelope.fallbackContent ?? "硬编码";
       expect(result).toBe("兜底文案");
     });
+
+    it("Rule: sanitize 提取 decision.question — ask_user 路径", () => {
+      // P0 回归：ask_user 路径中 question 是面向用户的问题文本
+      const askUserJSON = JSON.stringify({
+        observation: "用户请求不明确",
+        analysis: "需要更多信息",
+        plan: "向用户提问澄清",
+        decision: {
+          action: "ask_user",
+          question: "您需要查询哪个订单？",
+          context: "发现多个订单",
+        },
+      });
+
+      const sanitized = sanitizeReActJSON(askUserJSON);
+      expect(sanitized).toBe("您需要查询哪个订单？");
+    });
+
+    it("Rule: sanitize 优先级 — decision.content > decision.question > parsed.content", () => {
+      // decision.content 优先于 decision.question
+      const bothFieldsJSON = JSON.stringify({
+        observation: "obs",
+        analysis: "an",
+        plan: "pl",
+        decision: {
+          action: "respond",
+          content: "这是最终回答",
+          question: "这是问题",
+        },
+      });
+
+      const sanitized = sanitizeReActJSON(bothFieldsJSON);
+      expect(sanitized).toBe("这是最终回答");
+    });
   });
 });
 
@@ -973,5 +1007,75 @@ describe("Runtime Contract — 混合事件序列", () => {
     if (done && done.type === "done") {
       expect(done.fallback_used).toBe(true);
     }
+  });
+
+  // ── P0 回归：agent_ask_user 事件处理 ──
+
+  it("agent_ask_user 应将 question 文本流式输出，不泄漏 ReAct JSON", async () => {
+    mockAgentRun.mockReturnValue(
+      generateEvents([
+        // 前置 ReAct JSON token（应被 clear_stream 清除）
+        { type: "agent_token", content: '{"observation":', message_id: "m-ask" },
+        { type: "agent_token", content: '"some data"', message_id: "m-ask" },
+        // ask_user 事件
+        {
+          type: "agent_ask_user",
+          question: "您需要查询哪个订单？",
+          context: "发现多个订单",
+          session_id: "sess-ask",
+        } as AgentStreamEvent,
+        {
+          type: "agent_done",
+          total_steps: 1,
+          final_summary: "",
+          session_id: "sess-ask",
+        },
+      ]),
+    );
+
+    const events = await collectEvents(createContext());
+    const tokens = events.filter((e) => e.type === "token");
+    const fullText = tokens
+      .map((t) => ("content" in t ? (t.content as string) : ""))
+      .join("");
+    const done = events.find((e) => e.type === "done");
+
+    // 应包含 question 文本
+    expect(fullText).toContain("您需要查询哪个订单？");
+    // 不应包含 ReAct JSON 泄漏
+    expect(fullText).not.toContain('"observation"');
+    expect(fullText).not.toContain('"some data"');
+    // 应有 clear_stream 事件
+    const clearStream = events.find((e) => e.type === "clear_stream");
+    expect(clearStream).toBeDefined();
+    expect(done).toBeDefined();
+  });
+
+  it("agent_ask_user 空 question 时应显示 fallback 文案", async () => {
+    mockAgentRun.mockReturnValue(
+      generateEvents([
+        {
+          type: "agent_ask_user",
+          question: "",
+          context: "",
+          session_id: "sess-ask2",
+        } as AgentStreamEvent,
+        {
+          type: "agent_done",
+          total_steps: 1,
+          final_summary: "",
+          session_id: "sess-ask2",
+        },
+      ]),
+    );
+
+    const events = await collectEvents(createContext());
+    const tokens = events.filter((e) => e.type === "token");
+    const fullText = tokens
+      .map((t) => ("content" in t ? (t.content as string) : ""))
+      .join("");
+
+    // 应显示 fallback 文案
+    expect(fullText.length).toBeGreaterThan(0);
   });
 });
