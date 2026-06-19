@@ -47,4 +47,11 @@ export const settings = {
   videoEnabled: process.env.VIDEO_ENABLED !== "false",
   videoModel: process.env.VIDEO_MODEL || "gpt-4o-mini",
   videoVisionFps: parseInt(process.env.VIDEO_VISION_FPS || "1", 10),
+  // Langfuse LLM Observability（自托管）
+  langfuseEnabled: process.env.LANGFUSE_ENABLED !== "false",
+  langfuseBaseUrl: process.env.LANGFUSE_BASE_URL || "http://localhost:3000",
+  langfusePublicKey:
+    process.env.LANGFUSE_PUBLIC_KEY || "pk-not-used-selfhosted",
+  langfuseSecretKey:
+    process.env.LANGFUSE_SECRET_KEY || "sk-not-used-selfhosted",
 };

@@ -26,6 +26,7 @@ import {
   SCRATCHPAD_COMPRESSION_THRESHOLD,
 } from "../memory-compressor.js";
 import { looksLikeReActJSON } from "../agent-runtime/react-json-utils.js";
+import type { ObservabilityTrace } from "../../observability/provider.js";
 import type {
   AgentStep,
   AgentStreamEvent,
@@ -242,6 +243,9 @@ export class AgentService {
       let llmSucceeded = false;
       let lastLlmError: string = "";
 
+      // ── Observability: access trace from scope ──
+      const trace: ObservabilityTrace | undefined = options.scope?.trace;
+
       while (!llmSucceeded && llmAttempt < maxLlmAttempts) {
         llmAttempt++;
         // Reset state for retry attempts
@@ -257,6 +261,28 @@ export class AgentService {
         }
 
         try {
+          // ── Observability: LLM Generation ──
+          const lfGen = trace?.generation({
+            name: respondOnly
+              ? `llm-respond-iteration-${totalSteps}`
+              : `llm-reAct-iteration-${totalSteps}`,
+            model: resolvedModel,
+            input: iterationMessages.slice(-3),
+            metadata: {
+              iteration: totalSteps,
+              provider: providerName,
+              respondOnly,
+              toolCount: iterationTools?.length ?? 0,
+              llmAttempt,
+            },
+          });
+
+          let llmUsage: {
+            prompt_tokens: number;
+            completion_tokens: number;
+            total_tokens: number;
+          } | null = null;
+
           for await (const chunk of provider.streamChat(
             iterationMessages,
             resolvedModel,
@@ -272,6 +298,13 @@ export class AgentService {
                 type: "agent_token",
                 content: chunk.content,
                 message_id: streamMsgId,
+              };
+            } else if (chunk.type === "done" && chunk.usage) {
+              // 捕获 Token 用量（Provider 在 done chunk 中返回）
+              llmUsage = {
+                prompt_tokens: chunk.usage.prompt_tokens,
+                completion_tokens: chunk.usage.completion_tokens,
+                total_tokens: chunk.usage.total_tokens,
               };
             } else if (chunk.type === "tool_call" && chunk.tool_call) {
               const tc = chunk.tool_call;
@@ -323,6 +356,20 @@ export class AgentService {
             }
           }
           llmSucceeded = true;
+
+          // ── End LLM generation with output and usage ──
+          if (lfGen) {
+            lfGen.end({
+              output: llmResponse.slice(0, 2000),
+              usage: llmUsage
+                ? {
+                    promptTokens: llmUsage.prompt_tokens,
+                    completionTokens: llmUsage.completion_tokens,
+                    totalTokens: llmUsage.total_tokens,
+                  }
+                : undefined,
+            });
+          }
         } catch (err) {
           const error = err instanceof Error ? err : new Error(String(err));
           const classified = classifyError(error, "llm");
@@ -1320,6 +1367,9 @@ export class AgentService {
       let llmSucceeded = false;
       let lastLlmError = "";
 
+      // ── Observability: access trace from scope ──
+      const trace: ObservabilityTrace | undefined = scope?.trace;
+
       while (!llmSucceeded && llmAttempt < maxLlmAttempts) {
         llmAttempt++;
         if (llmAttempt > 1) {
@@ -1333,6 +1383,28 @@ export class AgentService {
         }
 
         try {
+          // ── Observability: LLM Generation ──
+          const lfGen = trace?.generation({
+            name: respondOnly
+              ? `llm-respond-iteration-${totalSteps}`
+              : `llm-reAct-iteration-${totalSteps}`,
+            model: resolvedModel,
+            input: iterationMessages.slice(-3),
+            metadata: {
+              iteration: totalSteps,
+              provider: providerName,
+              respondOnly,
+              toolCount: iterationTools?.length ?? 0,
+              llmAttempt,
+            },
+          });
+
+          let llmUsage: {
+            prompt_tokens: number;
+            completion_tokens: number;
+            total_tokens: number;
+          } | null = null;
+
           for await (const chunk of provider.streamChat(
             iterationMessages,
             resolvedModel,
@@ -1348,6 +1420,13 @@ export class AgentService {
                 type: "agent_token",
                 content: chunk.content,
                 message_id: streamMsgId,
+              };
+            } else if (chunk.type === "done" && chunk.usage) {
+              // 捕获 Token 用量（Provider 在 done chunk 中返回）
+              llmUsage = {
+                prompt_tokens: chunk.usage.prompt_tokens,
+                completion_tokens: chunk.usage.completion_tokens,
+                total_tokens: chunk.usage.total_tokens,
               };
             } else if (chunk.type === "tool_call" && chunk.tool_call) {
               const tc = chunk.tool_call;
@@ -1392,6 +1471,20 @@ export class AgentService {
             }
           }
           llmSucceeded = true;
+
+          // ── End LLM generation with output and usage ──
+          if (lfGen) {
+            lfGen.end({
+              output: llmResponse.slice(0, 2000),
+              usage: llmUsage
+                ? {
+                    promptTokens: llmUsage.prompt_tokens,
+                    completionTokens: llmUsage.completion_tokens,
+                    totalTokens: llmUsage.total_tokens,
+                  }
+                : undefined,
+            });
+          }
         } catch (err) {
           const error = err instanceof Error ? err : new Error(String(err));
           const classified = classifyError(error, "llm");

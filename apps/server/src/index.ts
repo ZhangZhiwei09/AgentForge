@@ -9,6 +9,10 @@ import { prisma } from "./db.js";
 import { logger } from "@agentforge/logger";
 import { authService } from "./services/auth.js";
 import { initTracing } from "./observability/tracing.js";
+import {
+  initObservability,
+  shutdownObservability,
+} from "./observability/index.js";
 
 // Dev seed: ensure default users exist with known passwords
 // In production, users register via /api/auth/signup
@@ -29,8 +33,9 @@ async function seedDefaultUsers() {
 }
 
 async function main() {
-  // 第零步：初始化可观测性（条件启用，OTEL_ENABLED=true 时生效）
+  // 第零步：初始化可观测性（条件启用，OTEL_ENABLED=true / LANGFUSE_ENABLED=true 时生效）
   initTracing();
+  initObservability();
 
   // 第一步：检查数据库连接
   try {
@@ -93,6 +98,15 @@ async function main() {
   setupWebSocketUpgrades(httpServer);
 
   logger.info({ port: settings.port }, "Server listening");
+
+  // 优雅关闭：flush Langfuse 待发送事件
+  const gracefulShutdown = async () => {
+    logger.info("Shutting down observability...");
+    await shutdownObservability();
+    process.exit(0);
+  };
+  process.on("SIGTERM", gracefulShutdown);
+  process.on("SIGINT", gracefulShutdown);
 }
 
 // ---- WebSocket Upgrade Handler (server-level, no Hono response cycle) ----
