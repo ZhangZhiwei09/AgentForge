@@ -22,6 +22,7 @@ import {
 import { intentDetector } from "./intent-detector.js";
 import { MemoryEngine } from "./memory-engine.js";
 import { createExecutionScope } from "../runtime/scope.js";
+import { getObservabilityProvider } from "../observability/index.js";
 
 import { QueryRouter } from "./agent-runtime/router.js";
 import { SafetyAgent } from "./agent-runtime/safety-agent.js";
@@ -260,6 +261,13 @@ export class AgentRuntimeService {
       );
     }
 
+    // ── Observability Trace（提前声明，try/finally 均可访问）──
+    const provider = getObservabilityProvider();
+    let lfTrace = provider.createTrace({
+      name: "agent-chat",
+      input: { message: userMessage },
+    });
+
     try {
       // ── 1. Session 层 ──
       const conversation = await this.getOrCreateConversation(sessionId);
@@ -305,9 +313,20 @@ export class AgentRuntimeService {
 
       const assistantMsgId = randomUUID();
 
+      // ── Update trace with session metadata ──
+      lfTrace.update({
+        metadata: {
+          sessionId: conversation.sessionId ?? undefined,
+          model: `${providerName}/${resolvedModel}`,
+          intent,
+          withinServiceHours: withinHours,
+        },
+      });
+
       // Create ExecutionScope for runtime cancellation
       const scope = createExecutionScope({
         signal: signal ?? new AbortController().signal,
+        trace: lfTrace,
       });
       scope.controller.start();
 
@@ -345,11 +364,19 @@ export class AgentRuntimeService {
           },
         });
 
+        // ── Close observability trace（快通道：无 LLM 调用）──
+        lfTrace.update({ output: { answer: convMatch.answer } });
+        lfTrace.end();
+
         return;
       }
 
       // ── 3. QueryRouter 分类 ──
-      const decision = await this.router.classify(userMessage, historyMessages);
+      const decision = await this.router.classify(
+        userMessage,
+        historyMessages,
+        lfTrace,
+      );
 
       logger.info(
         {
@@ -431,7 +458,7 @@ export class AgentRuntimeService {
 
       // Handle interruption
       if (scope.controller.shouldStop) {
-        const result = scope.controller.interrupt();
+        scope.controller.interrupt();
         if (streamedAnswer) {
           await prisma.message.create({
             data: {
@@ -443,6 +470,11 @@ export class AgentRuntimeService {
             },
           });
         }
+        lfTrace.update({
+          output: { answer: streamedAnswer?.slice(0, 500) },
+          metadata: { route: decision.route, status: "interrupted" },
+        });
+        lfTrace.end();
         return;
       }
 
@@ -489,7 +521,16 @@ export class AgentRuntimeService {
             logger.warn(e, "Memory extraction failed");
           });
       }
+      // ── Close observability trace（正常完成）──
+      lfTrace.update({
+        output: { answer: streamedAnswer.slice(0, 500) },
+        metadata: { route: decision.route, status: "completed" },
+      });
+      lfTrace.end();
     } finally {
+      // 兜底关闭：正常路径已 end，这里幂等；异常路径保证 close
+      lfTrace.end();
+
       releaseLock();
       if (AgentRuntimeService.sessionLocks.get(lockKey) === currentLock) {
         AgentRuntimeService.sessionLocks.delete(lockKey);

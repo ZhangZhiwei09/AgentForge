@@ -88,6 +88,22 @@ services:
     volumes:
       - jaeger_data:/tmp
 
+  # ── Langfuse LLM Observability ─────────────────────────
+  langfuse:
+    image: ghcr.io/langfuse/langfuse:2
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/langfuse
+      NEXTAUTH_SECRET: "${LANGFUSE_NEXTAUTH_SECRET:-langfuse-nextauth-secret-change-me-in-production}"
+      SALT: "${LANGFUSE_SALT:-langfuse-salt-change-me}"
+      ENCRYPTION_KEY: "${LANGFUSE_ENCRYPTION_KEY:-c664547df5d73957fb381ac93b8f2b60012866434866bb0bf8d855b573977795}"
+      NEXTAUTH_URL: "http://localhost:3000"
+      TELEMETRY_ENABLED: "false"
+    depends_on:
+      db:
+        condition: service_started
+
   server:
     build:
       context: ../../

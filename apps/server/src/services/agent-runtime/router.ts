@@ -12,6 +12,7 @@ import type { ChatMessage } from "../../providers/types.js";
 import { logger } from "@agentforge/logger";
 import { intentDetector } from "../intent-detector.js";
 import type { RouteName, RouterDecision } from "./types.js";
+import type { ObservabilityTrace } from "../../observability/provider.js";
 
 // ── Zod Schema：Router LLM 输出的结构化 JSON ──
 
@@ -153,6 +154,7 @@ export class QueryRouter {
   async classify(
     message: string,
     history: ChatMessage[],
+    trace?: ObservabilityTrace,
   ): Promise<RouterDecision> {
     // ── 快速路由扫描 ──
     const quickResult = quickRouteScan(message);
@@ -168,6 +170,14 @@ export class QueryRouter {
         { role: "user", content: message },
       ];
 
+      // ── Observability: Router LLM Generation ──
+      const lfGen = trace?.generation({
+        name: "llm-router-classification",
+        model,
+        input: { message, historyLength: contextMessages.length },
+        metadata: { provider: providerName },
+      });
+
       const provider = getProvider(providerName);
       const result = await provider.chatSync(
         contextMessages,
@@ -179,6 +189,23 @@ export class QueryRouter {
       );
 
       const parsed = this.parseDecision(result.content);
+
+      // End generation with usage（chatSync 已返回 usage）
+      lfGen?.end({
+        output: {
+          route: parsed?.route ?? "unknown",
+          confidence: parsed?.confidence ?? 0,
+        },
+        usage: result.usage
+          ? {
+              promptTokens: result.usage.prompt_tokens,
+              completionTokens: result.usage.completion_tokens,
+              totalTokens:
+                result.usage.prompt_tokens + result.usage.completion_tokens,
+            }
+          : undefined,
+      });
+
       if (parsed && parsed.confidence >= 0.5) {
         return parsed;
       }

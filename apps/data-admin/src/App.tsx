@@ -6,6 +6,7 @@ import { AdminDashboard } from "./components/analytics/AdminDashboard";
 import { AnalyticsPage } from "./components/analytics/AnalyticsPage";
 import { KnowledgePanel } from "./components/knowledge/KnowledgePanel";
 import { MemoryPanel } from "./components/memory/MemoryPanel";
+import { ObservabilityPage } from "./components/analytics/ObservabilityPage";
 
 function KnowledgeManagement() {
   return (
@@ -39,6 +40,7 @@ export default function App() {
           <Route path="cs/knowledge" element={<KnowledgeManagement />} />
           <Route path="cs/memory" element={<MemoryManagement />} />
           <Route path="cs/analytics" element={<AnalyticsPage />} />
+          <Route path="cs/observability" element={<ObservabilityPage />} />
           <Route index element={<Navigate to="cs/analytics" replace />} />
         </Route>
         <Route path="/*" element={<Navigate to="/admin" replace />} />

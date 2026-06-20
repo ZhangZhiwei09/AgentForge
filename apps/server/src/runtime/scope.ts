@@ -8,6 +8,7 @@
 import { createRunContext, createChildContext, type RunContext } from "./context.js";
 import { OutputBuffer } from "./buffer.js";
 import { ExecutionNode, type ExecutionType } from "./controller.js";
+import type { ObservabilityTrace } from "../observability/provider.js";
 
 export interface ExecutionScope {
   readonly context: RunContext;
@@ -16,6 +17,9 @@ export interface ExecutionScope {
 
   /** @deprecated Use node instead */
   readonly controller: ExecutionNode;
+
+  /** 可观测性 Trace（创建时注入，readonly，下游只读） */
+  readonly trace?: ObservabilityTrace;
 }
 
 export interface CreateScopeOptions {
@@ -27,6 +31,8 @@ export interface CreateScopeOptions {
   runId?: string;
   /** 执行类型 */
   executionType?: ExecutionType;
+  /** 可观测性 Trace（创建时注入，之后只读。默认 undefined） */
+  trace?: ObservabilityTrace;
 }
 
 /**
@@ -51,5 +57,7 @@ export function createExecutionScope(options: CreateScopeOptions): ExecutionScop
     buffer,
     // 向后兼容：保留 controller 引用
     controller: node,
+    // 可观测性 Trace（创建时注入）
+    trace: options.trace,
   };
 }
