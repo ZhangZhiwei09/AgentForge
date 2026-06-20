@@ -5,26 +5,44 @@ WORKDIR /app
 # Install pnpm
 RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 
-# Prune stage
-FROM base AS pruner
+# ── 构建层 ──
+FROM base AS builder
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json ./
 COPY packages/database ./packages/database
 COPY packages/shared-types ./packages/shared-types
 COPY packages/shared-prompts ./packages/shared-prompts
+COPY packages/logger ./packages/logger
 COPY apps/server ./apps/server
 
 RUN pnpm install --frozen-lockfile
 RUN pnpm turbo build --filter=@agentforge/server
 
-# Production
+# 验证 prisma generate 成功
+RUN GENERATED=$(find /app/node_modules/.pnpm -path "*/@prisma+client*/node_modules/.prisma/client/index.js" 2>/dev/null | head -1) && \
+    if [ -z "$GENERATED" ]; then \
+      echo "ERROR: .prisma/client/index.js not found" && exit 1; \
+    elif grep -q "did not initialize" "$GENERATED"; then \
+      echo "ERROR: prisma generate produced fallback stub" && exit 1; \
+    else \
+      echo "Prisma client verified OK"; \
+    fi
+
+# ── 生产运行层 ──
 FROM node:20-alpine AS runner
 WORKDIR /app
 
-COPY --from=pruner /app/apps/server/dist ./dist
-COPY --from=pruner /app/node_modules/.pnpm ./node_modules/.pnpm
-COPY --from=pruner /app/apps/server/node_modules ./node_modules
-COPY --from=pruner /app/apps/server/package.json ./
+# 保留 pnpm workspace 的目录结构，symlink 相对路径能正确解析：
+# apps/server/node_modules/@x → ../../../../node_modules/.pnpm/@x@.../node_modules/@x
+COPY --from=builder /app/node_modules/.pnpm ./node_modules/.pnpm
+COPY --from=builder /app/apps/server/node_modules ./apps/server/node_modules
+COPY --from=builder /app/apps/server/dist ./apps/server/dist
+COPY --from=builder /app/apps/server/package.json ./apps/server/package.json
+
+ENV NODE_ENV=production
 
 EXPOSE 8000
 
-CMD ["node", "dist/index.js"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget -qO- http://localhost:8000/api/health || exit 1
+
+CMD ["node", "apps/server/dist/index.cjs"]

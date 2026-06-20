@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsup src/index.ts --format esm --clean",
+    "build": "tsup",
     "lint": "tsc --noEmit",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -16,6 +16,7 @@
   "dependencies": {
     "@agentforge/database": "workspace:*",
     "@agentforge/logger": "workspace:*",
+    "@prisma/client": "^6.0",
     "@agentforge/shared-prompts": "workspace:*",
     "@agentforge/shared-types": "workspace:*",
     "@bull-board/api": "^8.0.0",
