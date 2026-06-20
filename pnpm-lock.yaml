@@ -260,6 +260,9 @@ importers:
       '@opentelemetry/semantic-conventions':
         specifier: ^1.41.1
         version: 1.41.1
+      '@prisma/client':
+        specifier: ^6.0
+        version: 6.19.3(prisma@6.19.3(magicast@0.3.5)(typescript@5.9.3))(typescript@5.9.3)
       '@zilliz/milvus2-sdk-node':
         specifier: ^2.4
         version: 2.6.17

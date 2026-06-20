@@ -4,10 +4,14 @@ import { config } from "dotenv";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
-// ESM 模块中获取 __dirname 的等价写法
-const __dirname = dirname(fileURLToPath(import.meta.url));
+// CJS 打包时 __dirname 为全局变量；ESM 开发时用 import.meta.url
+declare var __dirname: string | undefined;
+const cwd = typeof __dirname !== "undefined"
+  ? __dirname
+  : dirname(fileURLToPath(import.meta.url));
+
 // 加载 apps/server/.env 文件，优先级高于系统环境变量
-config({ path: resolve(__dirname, "../.env") });
+config({ path: resolve(cwd, "../.env") });
 
 export const settings = {
   // PostgreSQL 连接字符串，端口 5434 避免和本地其他 PG 实例冲突
@@ -23,6 +27,7 @@ export const settings = {
     process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
   // 默认使用的模型 ID，会从所有 provider 的模型列表中匹配
   defaultModel: process.env.DEFAULT_MODEL || "gpt-4o-mini",
+  corsOrigins: process.env.CORS_ORIGINS || "",
   debug: process.env.DEBUG === "true",
   // Milvus 向量数据库地址（用于记忆搜索和知识库检索）
   milvusHost: process.env.MILVUS_HOST || "localhost",
