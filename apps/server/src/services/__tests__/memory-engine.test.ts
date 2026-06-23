@@ -109,7 +109,6 @@ vi.mock("../milvus.js", () => ({
     getCollectionStatistics: vi.fn(async () => ({ data: { row_count: 100 } })),
   })),
   MILVUS_MEMORY_COLLECTION: "memory_collection",
-  EMBEDDING_DIM: 768,
   ensureMemoryCollection: vi.fn(),
 }));
 

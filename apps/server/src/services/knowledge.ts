@@ -4,7 +4,6 @@ import { prisma } from "../db.js";
 import {
   getMilvusClient,
   MILVUS_KNOWLEDGE_COLLECTION,
-  EMBEDDING_DIM,
   ensureKnowledgeCollection,
 } from "./milvus.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";

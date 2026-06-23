@@ -48,8 +48,16 @@ interface KnowledgeSearchResult {
 
 const API_BASE = "/api/knowledge";
 
+function authHeaders(json: boolean = true): Record<string, string> {
+  const token = localStorage.getItem("accessToken");
+  const headers: Record<string, string> = {};
+  if (json) headers["Content-Type"] = "application/json";
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
+
 async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`);
+  const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -57,7 +65,7 @@ async function apiGet<T>(path: string): Promise<T> {
 async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: body ? { "Content-Type": "application/json" } : undefined,
+    headers: authHeaders(),
     body: body ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
@@ -68,7 +76,10 @@ async function apiPost<T>(path: string, body?: unknown): Promise<T> {
 }
 
 async function apiDelete(path: string): Promise<void> {
-  const res = await fetch(`${API_BASE}${path}`, { method: "DELETE" });
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
@@ -182,10 +193,12 @@ export function KnowledgePanel() {
       if (uploadMode === "file" && uploadFile) {
         const formData = new FormData();
         formData.append("file", uploadFile);
+        const token = localStorage.getItem("accessToken");
         const res = await fetch(
           `${API_BASE}/bases/${selectedKb.id}/documents/upload`,
           {
             method: "POST",
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
             body: formData,
           },
         );
@@ -491,11 +504,11 @@ export function KnowledgePanel() {
                   {uploadFile ? uploadFile.name : "Click to select file"}
                 </span>
                 <span className="text-[10px] text-muted-foreground">
-                  .txt, .md, .json, .csv, .html
+                  .txt, .md, .json, .csv, .html, .pdf
                 </span>
                 <input
                   type="file"
-                  accept=".txt,.md,.json,.csv,.html,.xml,.yaml,.yml,.log"
+                  accept=".txt,.md,.json,.csv,.html,.xml,.yaml,.yml,.log,.pdf"
                   onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
                   className="hidden"
                 />

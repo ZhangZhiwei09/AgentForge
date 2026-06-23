@@ -29,7 +29,6 @@ vi.mock("../../db.js", () => {
 vi.mock("../milvus.js", () => ({
   getMilvusClient: vi.fn(),
   MILVUS_KNOWLEDGE_COLLECTION: "knowledge_collection",
-  EMBEDDING_DIM: 768,
   ensureKnowledgeCollection: vi.fn(),
 }));
 

@@ -11,10 +11,25 @@ export interface EmbeddingProvider {
   readonly modelName: string; // 使用的模型名称
 }
 
+// 根据模型名称确定向量维度
+function getEmbeddingDimension(model: string): number {
+  // DashScope text-embedding-v3 → 1024
+  if (model === "text-embedding-v3" || model === "text-embedding-v4") return 1024;
+  // OpenAI text-embedding-3-large → 3072（默认）或 1024/256
+  if (model === "text-embedding-3-large") return 3072;
+  // OpenAI text-embedding-3-small → 1536（默认）或 512
+  if (model === "text-embedding-3-small") return 1536;
+  // OpenAI text-embedding-ada-002 → 1536
+  if (model === "text-embedding-ada-002") return 1536;
+  // 未知模型：保守默认 1536
+  return 1536;
+}
+
 // OpenAI Embedding 实现
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private client: OpenAI | null = null;
   private _model: string;
+  private _dimension: number;
 
   constructor(
     apiKey: string,
@@ -22,6 +37,8 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     model: string = "text-embedding-ada-002",
   ) {
     this._model = model;
+    // 根据模型名称确定向量维度
+    this._dimension = getEmbeddingDimension(model);
     if (apiKey) {
       this.client = new OpenAI({
         apiKey,
@@ -31,7 +48,7 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   }
 
   get dimension(): number {
-    return 1536; // ada-002 固定输出 1536 维向量
+    return this._dimension;
   }
 
   get modelName(): string {

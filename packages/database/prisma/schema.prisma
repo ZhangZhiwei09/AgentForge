@@ -143,6 +143,20 @@ model KnowledgeDocument {
   enabled         Boolean          @default(true)
   createdAt       DateTime?        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime?        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // V2.2: 文件上传元数据（nullable，手动创建的文档为 null）
+  originalFilename  String?        @map("original_filename") @db.VarChar(500)
+  originalFileType  String?        @map("original_file_type") @db.VarChar(100)
+  originalFileSize  Int?           @map("original_file_size")
+  originalFilePath  String?        @map("original_file_path") @db.VarChar(1000)
+
+  // V2.2: 失败原因与重试
+  errorMessage      String?        @map("error_message") @db.VarChar(2000)
+  retryCount        Int            @default(0) @map("retry_count")
+
+  // V2.2: 质量标签（good / low，由 Worker quality gate 判定）
+  qualityLabel      String?        @map("quality_label") @db.VarChar(20)
+
   chunks          KnowledgeChunk[]
   knowledgeBase   KnowledgeBase    @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -160,6 +174,11 @@ model KnowledgeChunk {
   milvusId        BigInt?           @map("milvus_id")
   enabled         Boolean           @default(true)
   created_at      DateTime?         @default(now()) @db.Timestamptz(6)
+
+  // V2.2: 来源类型与质量标签（供未来 search bias 使用）
+  sourceType      String?           @map("source_type") @db.VarChar(20)
+  qualityLabel    String?           @map("quality_label") @db.VarChar(20)
+
   document             KnowledgeDocument         @relation(fields: [documentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   knowledgeBase        KnowledgeBase             @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
   invertedIndexEntries KnowledgeInvertedIndex[]

@@ -5,6 +5,8 @@ import { randomUUID } from "crypto";
 import { prisma } from "../../../db.js";
 import { KnowledgeService } from "../../../services/knowledge.js";
 import { KnowledgeIngestionService } from "../../../services/knowledge-ingestion.js";
+import { getParserRegistry } from "../../../services/document-parser/index.js";
+import { getStorageProvider } from "../../../services/storage/index.js";
 import { logger } from "@agentforge/logger";
 import { createHono } from "../../../lib/hono.js";
 
@@ -282,7 +284,9 @@ knowledgeManagementRoutes.post(
   },
 );
 
-// POST /api/knowledge/bases/:kbId/documents/upload —— 上传文件并自动摄取
+// POST /api/knowledge/bases/:kbId/documents/upload —— V2.2: 上传文件并异步摄取
+// API 极薄：保存文件 → 创建文档(PENDING) → 入队 → 返回 documentId
+// 解析/清洗/质量判断全在 Worker 中完成
 knowledgeManagementRoutes.post(
   "/api/knowledge/bases/:kbId/documents/upload",
   async (c) => {
@@ -303,13 +307,18 @@ knowledgeManagementRoutes.post(
 
       const fileName = file.name || "uploaded_file";
       const ext = fileName.split(".").pop()?.toLowerCase() || "";
-      const supportedExts = [
-        "txt", "md", "json", "csv", "html", "xml", "yaml", "yml", "log",
-      ];
 
-      if (!supportedExts.includes(ext)) {
+      // 使用 ParserRegistry 校验文件类型（替代硬编码 supportedExts）
+      const parserRegistry = getParserRegistry();
+      const parser = parserRegistry.getParser({
+        filename: fileName,
+        mimeType: file.type || undefined,
+      });
+
+      if (!parser) {
+        const supportedNames = parserRegistry.listParsers().join("、");
         return c.json(
-          { detail: `不支持的文件类型 .${ext}。支持的格式：${supportedExts.join(", ")}` },
+          { detail: `不支持的文件类型 .${ext}。支持的解析器：${supportedNames}` },
           400,
         );
       }
@@ -322,21 +331,44 @@ knowledgeManagementRoutes.post(
         );
       }
 
-      const content = await file.text();
-      if (!content.trim()) {
-        return c.json({ detail: "文件内容为空" }, 400);
-      }
-
+      const isBinary = ext === "pdf";
       const title = fileName.replace(/\.[^/.]+$/, "");
+      const docId = randomUUID();
+
+      let content = "";
+      let originalFilePath: string | null = null;
+
+      if (isBinary) {
+        // PDF：保存原始文件到 Storage，提取文本由 Worker 异步完成
+        const arrayBuffer = await file.arrayBuffer();
+        const rawBuffer = Buffer.from(arrayBuffer);
+
+        const storage = getStorageProvider();
+        const fileDir = `${docId}`;
+        originalFilePath = await storage.save(
+          `${fileDir}/${fileName}`,
+          rawBuffer,
+        );
+      } else {
+        // 文本格式：直接读取内容（向后兼容，Worker 仍会 normalize）
+        content = await file.text();
+        if (!content.trim()) {
+          return c.json({ detail: "文件内容为空" }, 400);
+        }
+      }
 
       const doc = await prisma.knowledgeDocument.create({
         data: {
-          id: randomUUID(),
+          id: docId,
           knowledgeBaseId: kbId,
           title,
           content,
           chunkCount: 0,
           status: "pending",
+          originalFilename: fileName,
+          originalFileType: ext,
+          originalFileSize: file.size,
+          originalFilePath,
         },
       });
 
@@ -344,7 +376,7 @@ knowledgeManagementRoutes.post(
       const queue = getIngestionQueue();
       if (queue) {
         await queue.add("ingest", { docId: doc.id, kbId });
-        logger.info({ docId: doc.id, title }, "Ingestion job dispatched");
+        logger.info({ docId: doc.id, title, ext }, "Ingestion job dispatched");
       } else {
         const ingestion = new KnowledgeIngestionService();
         await ingestion.processExistingDocument(doc.id, kbId);
