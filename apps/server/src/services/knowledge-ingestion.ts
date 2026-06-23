@@ -1,5 +1,6 @@
 // 知识库文档摄取服务 —— 将文档切分、向量化，写入 Milvus 和 PostgreSQL
-// 摄取流程：创建 Document 记录 → 文本切分 → 生成 embedding → 写入 Milvus → 保存 chunk 元数据到 PG
+// 摄取流程：Document(PENDING) → PARSING → NORMALIZING → INGESTING → COMPLETED/FAILED
+// V2.2: 集成 ParserRegistry + Normalizer + Quality Gate + State Machine
 // 同时包含种子数据（客服 FAQ）和种子函数
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
@@ -12,16 +13,25 @@ import { invalidateCitationCache } from "./agent-runtime/citation-verifier.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
 import { RecursiveCharacterTextSplitter } from "./text-splitter.js";
 import { tokenize, getTokenCount } from "./tokenizer.js";
+import { getParserRegistry } from "./document-parser/index.js";
+import { NormalizerService } from "./document-normalizer/index.js";
+import { getStorageProvider } from "./storage/index.js";
+import type { TextMetrics } from "./document-normalizer/index.js";
 import type { Prisma } from "@agentforge/database";
 import { logger } from "@agentforge/logger";
 
+// Quality gate result — returned by evaluateQuality(), consumed by Worker
+type QualityDecision = "proceed" | "flag_low" | "reject_scan";
+
 export class KnowledgeIngestionService {
   private splitter: RecursiveCharacterTextSplitter;
+  private normalizer: NormalizerService;
   private collectionLoaded = false;
 
   constructor() {
     // 每块 500 字符，相邻块重叠 50 字符
     this.splitter = new RecursiveCharacterTextSplitter(500, 50);
+    this.normalizer = new NormalizerService();
   }
 
   private async ensureCollection() {
@@ -29,6 +39,33 @@ export class KnowledgeIngestionService {
       await ensureKnowledgeCollection();
       this.collectionLoaded = true;
     }
+  }
+
+  // 更新文档状态，可选记录错误信息和递增重试计数
+  private async updateDocumentStatus(
+    docId: string,
+    status: string,
+    opts?: { errorMessage?: string; incrementRetry?: boolean },
+  ): Promise<void> {
+    const data: Record<string, unknown> = { status };
+    if (opts?.errorMessage !== undefined) {
+      data.errorMessage = opts.errorMessage;
+    }
+    if (opts?.incrementRetry) {
+      data.retryCount = { increment: 1 };
+    }
+    await prisma.knowledgeDocument.update({ where: { id: docId }, data });
+  }
+
+  // Quality gate — determines whether to proceed, flag, or reject based on text metrics.
+  // ONLY this method makes quality decisions. computeMetrics() is pure data.
+  private evaluateQuality(m: TextMetrics): QualityDecision {
+    if (m.charCount === 0) return "reject_scan";
+    // Very low density with minimal content → likely scan/image-only PDF
+    if (m.textDensity < 0.05 && m.charCount < 100) return "reject_scan";
+    // Low density but some content → flag for future review
+    if (m.textDensity < 0.1) return "flag_low";
+    return "proceed";
   }
 
   // 摄取单篇文档：创建记录 → 切分 → 向量化 → 双写
@@ -101,65 +138,160 @@ export class KnowledgeIngestionService {
     return results;
   }
 
-  // P1-1: Worker 专用方法 — 处理已创建的文档（文档由路由预创建为 status: "pending"）
-  // 与 ingestDocument() 的区别：不创建新文档记录，只做切片→向量化→双写→更新状态
+  // P1-1 / V2.2: Worker 专用方法 — 处理已创建的文档。
+  // 完整状态机: PENDING → PARSING → NORMALIZING → (quality gate) → INGESTING → COMPLETED / FAILED
   async processExistingDocument(docId: string, kbId: string): Promise<void> {
     const doc = await prisma.knowledgeDocument.findUnique({
       where: { id: docId },
     });
     if (!doc) throw new Error(`Document ${docId} not found`);
 
-    try {
-      // 状态转换: pending → processing
-      await prisma.knowledgeDocument.update({
-        where: { id: docId },
-        data: { status: "processing" },
-      });
+    // 推断来源类型：有原始文件 → 文件上传，否则 → 手动/文本
+    const sourceType: string = doc.originalFileType
+      ? (doc.originalFileType === "pdf" ? "pdf" : "text")
+      : doc.content
+        ? "manual"
+        : "text";
+    let qualityLabel: string = "good";
+    let content = doc.content;
 
-      // 文本切分
-      const chunks = this.splitter.splitText(doc.content);
+    try {
+      // ── Phase 1: PARSING ──
+      // 如果文档有原始文件路径但无内容，则需要从文件解析
+      if (doc.originalFilePath && (!content || !content.trim())) {
+        await this.updateDocumentStatus(docId, "parsing");
+
+        const parserRegistry = getParserRegistry();
+        const parser = parserRegistry.getParser({
+          filename: doc.originalFilename ?? doc.originalFilePath,
+          mimeType: doc.originalFileType === "pdf"
+            ? "application/pdf"
+            : undefined,
+        });
+
+        if (!parser) {
+          throw new Error(
+            `无法识别文件类型: ${doc.originalFilename ?? doc.originalFilePath}`,
+          );
+        }
+
+        const storage = getStorageProvider();
+        const fileBuffer = await storage.read(doc.originalFilePath);
+        const parsed = await parser.parse(fileBuffer);
+
+        // 将解析出的文本存回文档
+        content = parsed.text;
+        await prisma.knowledgeDocument.update({
+          where: { id: docId },
+          data: {
+            content,
+            qualityLabel: parsed.metadata.charCount === 0
+              ? "low"
+              : undefined,
+          },
+        });
+
+        logger.info(
+          { docId, parser: parser.name, charCount: parsed.metadata.charCount },
+          "Document parsed",
+        );
+      }
+
+      // ── Phase 2: NORMALIZING ──
+      await this.updateDocumentStatus(docId, "normalizing");
+      const normalized = this.normalizer.normalize(
+        content,
+        doc.originalFileType === "pdf" ? undefined : undefined,
+      );
+      // If we have original file info, pass pageCount context
+      // (pageCount is not stored on KnowledgeDocument yet, skip for now)
+
+      // ── Quality Gate ──
+      const decision = this.evaluateQuality(normalized.metrics);
+      if (decision === "reject_scan") {
+        await this.updateDocumentStatus(docId, "failed", {
+          errorMessage: "SCAN_OR_IMAGE_PDF: 无法提取文本内容，可能是扫描件或图片型 PDF",
+        });
+        logger.warn(
+          { docId, metrics: normalized.metrics },
+          "Document rejected by quality gate (scan/image detected)",
+        );
+        return; // 不抛异常，明确标记为 FAILED 但不触发 BullMQ 重试
+      }
+      if (decision === "flag_low") {
+        qualityLabel = "low";
+        logger.info(
+          { docId, metrics: normalized.metrics },
+          "Document flagged as low quality, proceeding with ingestion",
+        );
+      }
+
+      // 将 normalize 后的文本回写（去除了多余空白/换行）
+      if (normalized.text !== content) {
+        await prisma.knowledgeDocument.update({
+          where: { id: docId },
+          data: { content: normalized.text },
+        });
+        content = normalized.text;
+      }
+
+      // ── Phase 3: INGESTING ──
+      await this.updateDocumentStatus(docId, "ingesting");
+
+      const chunks = this.splitter.splitText(content);
       if (!chunks.length) {
         await prisma.knowledgeDocument.update({
           where: { id: docId },
-          data: { status: "completed", chunkCount: 0 },
+          data: {
+            status: "completed",
+            chunkCount: 0,
+            qualityLabel: qualityLabel,
+          },
         });
         return;
       }
 
-      // 向量化 + 双写
-      await this.ingestChunks(docId, kbId, chunks);
+      // 向量化 + 双写，带 sourceType 和 qualityLabel
+      await this.ingestChunks(docId, kbId, chunks, sourceType, qualityLabel);
 
-      // 标记完成
+      // ── Phase 4: COMPLETED ──
       await prisma.knowledgeDocument.update({
         where: { id: docId },
-        data: { chunkCount: chunks.length, status: "completed" },
+        data: {
+          chunkCount: chunks.length,
+          status: "completed",
+          qualityLabel: qualityLabel,
+        },
       });
 
       logger.info(
-        { docId, chunks: chunks.length },
+        { docId, chunks: chunks.length, quality: qualityLabel, sourceType },
         "Document processed by worker",
       );
 
-      // 知识库内容已变更 → 清除 CitationVerifier 的 embedding 缓存
       invalidateCitationCache();
     } catch (e) {
+      const errorMessage =
+        e instanceof Error ? e.message : "文档处理失败";
       logger.error(
-        { docId, error: e instanceof Error ? e.message : "Unknown error" },
+        { docId, error: errorMessage },
         "Worker document processing failed",
       );
-      await prisma.knowledgeDocument.update({
-        where: { id: docId },
-        data: { status: "failed" },
+      await this.updateDocumentStatus(docId, "failed", {
+        errorMessage,
+        incrementRetry: true,
       });
       throw e; // 重新抛出让 BullMQ 重试
     }
   }
 
-  // Chunk 向量化 + 双写核心逻辑
+  // Chunk 向量化 + 双写核心逻辑（V2.2: 扩展 sourceType + qualityLabel 元数据）
   private async ingestChunks(
     docId: string,
     kbId: string,
     chunkTexts: string[],
+    sourceType?: string,
+    qualityLabel?: string,
   ) {
     const provider = getDefaultEmbeddingProvider();
     if (!provider) {
@@ -203,6 +335,8 @@ export class KnowledgeIngestionService {
           content: chunkTexts[i],
           tokenCount: getTokenCount(chunkTexts[i]),
           milvusId: milvusIds[i] ? BigInt(milvusIds[i]) : null,
+          sourceType: sourceType ?? null,
+          qualityLabel: qualityLabel ?? null,
         },
       });
     }

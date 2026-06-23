@@ -17,15 +17,42 @@ export function getMilvusClient(): MilvusClient {
 
 export const MILVUS_MEMORY_COLLECTION = "agentforge_memories";
 export const MILVUS_KNOWLEDGE_COLLECTION = "agentforge_knowledge";
-export const EMBEDDING_DIM = 1536; // OpenAI text-embedding-ada-002 输出维度
+
+// 根据配置的 embedding 模型确定向量维度
+function getEmbeddingDim(): number {
+  const model = settings.embeddingModel || "text-embedding-ada-002";
+  if (model === "text-embedding-v3" || model === "text-embedding-v4") return 1024;
+  if (model === "text-embedding-3-large") return 3072;
+  if (model === "text-embedding-3-small") return 1536;
+  if (model === "text-embedding-ada-002") return 1536;
+  return 1536;
+}
 
 // 确保记忆 Collection 存在且已加载到内存
 export async function ensureMemoryCollection(): Promise<void> {
   const client = getMilvusClient();
+  const targetDim = getEmbeddingDim();
 
   const hasCollection = await client.hasCollection({
     collection_name: MILVUS_MEMORY_COLLECTION,
   });
+
+  if (hasCollection.value) {
+    // 检查已有 Collection 的向量维度是否匹配当前模型
+    const desc = await client.describeCollection({
+      collection_name: MILVUS_MEMORY_COLLECTION,
+    });
+    const dimField = (desc.schema?.fields ?? []).find(
+      (f: any) => f.name === "embedding" && f.data_type === "FloatVector",
+    ) as any;
+    if (dimField && (dimField.dim || dimField.type_params?.dim) !== targetDim) {
+      await client.dropCollection({
+        collection_name: MILVUS_MEMORY_COLLECTION,
+      });
+      await ensureMemoryCollection();
+      return;
+    }
+  }
 
   if (!hasCollection.value) {
     // 创建 Collection 并定义字段结构
@@ -35,7 +62,7 @@ export async function ensureMemoryCollection(): Promise<void> {
         { name: "id", data_type: "Int64", is_primary_key: true, autoID: true },
         { name: "memory_id", data_type: "VarChar", max_length: 64 }, // 对应 PG memories 表的 ID
         { name: "user_id", data_type: "VarChar", max_length: 64 }, // 用于搜索时过滤用户
-        { name: "embedding", data_type: "FloatVector", dim: EMBEDDING_DIM }, // 文本语义向量
+        { name: "embedding", data_type: "FloatVector", dim: targetDim }, // 文本语义向量
         { name: "content", data_type: "VarChar", max_length: 4096 }, // 原始文本（截断 4096 字符）
       ],
     });
@@ -61,10 +88,29 @@ export async function ensureMemoryCollection(): Promise<void> {
 // 单向量字段 dense_vector（语义搜索），BM25 关键词匹配在应用层处理
 export async function ensureKnowledgeCollection(): Promise<void> {
   const client = getMilvusClient();
+  const targetDim = getEmbeddingDim();
 
   const hasCollection = await client.hasCollection({
     collection_name: MILVUS_KNOWLEDGE_COLLECTION,
   });
+
+  if (hasCollection.value) {
+    // 检查已有 Collection 的向量维度是否匹配当前模型
+    const desc = await client.describeCollection({
+      collection_name: MILVUS_KNOWLEDGE_COLLECTION,
+    });
+    const dimField = (desc.schema?.fields ?? []).find(
+      (f: any) => f.name === "dense_vector" && f.data_type === "FloatVector",
+    ) as any;
+    if (dimField && (dimField.dim || dimField.type_params?.dim) !== targetDim) {
+      await client.dropCollection({
+        collection_name: MILVUS_KNOWLEDGE_COLLECTION,
+      });
+      // 递归调用创建新 Collection
+      await ensureKnowledgeCollection();
+      return;
+    }
+  }
 
   if (!hasCollection.value) {
     await client.createCollection({
@@ -73,7 +119,7 @@ export async function ensureKnowledgeCollection(): Promise<void> {
         { name: "id", data_type: "Int64", is_primary_key: true, autoID: true },
         { name: "chunk_id", data_type: "VarChar", max_length: 64 }, // 对应 PG knowledge_chunks 表的 ID
         { name: "kb_id", data_type: "VarChar", max_length: 64 }, // 所属知识库 ID
-        { name: "dense_vector", data_type: "FloatVector", dim: EMBEDDING_DIM }, // 语义向量（embedding）
+        { name: "dense_vector", data_type: "FloatVector", dim: targetDim }, // 语义向量（embedding）
         { name: "content", data_type: "VarChar", max_length: 4096 },
       ],
     });

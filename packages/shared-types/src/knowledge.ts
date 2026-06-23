@@ -34,6 +34,14 @@ export interface KnowledgeDocumentDTO {
   status: string;
   createdAt: string;
   updatedAt: string;
+  // V2.2: 文件上传元数据（可选）
+  originalFilename?: string | null;
+  originalFileType?: string | null;
+  originalFileSize?: number | null;
+  // V2.2: 失败原因与质量标签（可选）
+  errorMessage?: string | null;
+  qualityLabel?: string | null;
+  retryCount?: number;
 }
 
 export interface CreateDocumentRequest {

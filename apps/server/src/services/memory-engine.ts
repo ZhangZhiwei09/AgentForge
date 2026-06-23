@@ -9,7 +9,6 @@ import { prisma } from "../db.js";
 import {
   getMilvusClient,
   MILVUS_MEMORY_COLLECTION,
-  EMBEDDING_DIM,
   ensureMemoryCollection,
 } from "./milvus.js";
 import type { Prisma } from "@agentforge/database";
