@@ -11,7 +11,6 @@ import {
   ChevronLeft,
   FolderOpen,
   Eye,
-  X,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────
@@ -101,7 +100,12 @@ async function apiDelete(path: string): Promise<void> {
 
 type ViewMode = "bases" | "documents";
 
-export function KnowledgePanel() {
+interface KnowledgePanelProps {
+  viewingDoc: KnowledgeDocument | null;
+  onViewDoc: (doc: KnowledgeDocument | null) => void;
+}
+
+export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
   // Navigation state
   const [viewMode, setViewMode] = useState<ViewMode>("bases");
   const [selectedKb, setSelectedKb] = useState<KnowledgeBase | null>(null);
@@ -126,9 +130,6 @@ export function KnowledgePanel() {
   const [uploadContent, setUploadContent] = useState("");
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadMode, setUploadMode] = useState<"text" | "file">("text");
-
-  // View document state
-  const [viewingDoc, setViewingDoc] = useState<KnowledgeDocument | null>(null);
 
   // Search state
   const [searchQuery, setSearchQuery] = useState("");
@@ -686,8 +687,12 @@ export function KnowledgePanel() {
             {documents.map((doc) => (
               <div
                 key={doc.id}
-                onClick={() => setViewingDoc(doc)}
-                className="cursor-pointer rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-2.5 hover:border-[hsl(var(--ring))] hover:shadow-sm transition-all group"
+                onClick={() => onViewDoc(doc)}
+                className={`cursor-pointer rounded-lg border p-2.5 hover:shadow-sm transition-all group ${
+                  viewingDoc?.id === doc.id
+                    ? "border-[hsl(var(--ring))] bg-[hsl(var(--accent))]"
+                    : "border-[hsl(var(--border))] bg-[hsl(var(--background))] hover:border-[hsl(var(--ring))]"
+                }`}
               >
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs font-medium text-foreground truncate max-w-[160px]">
@@ -735,47 +740,6 @@ export function KnowledgePanel() {
         </div>
       )}
 
-      {/* Document Content Modal */}
-      {viewingDoc && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="flex flex-col w-full max-w-2xl max-h-[80vh] mx-4 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] shadow-xl">
-            {/* Modal header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-[hsl(var(--border))]">
-              <div>
-                <h3 className="text-sm font-semibold">{viewingDoc.title}</h3>
-                <p className="text-[10px] text-muted-foreground mt-0.5">
-                  {viewingDoc.chunkCount} chunks ·{" "}
-                  {viewingDoc.content?.length ?? 0} chars ·{" "}
-                  <span
-                    className={`rounded px-1 py-0.5 text-[10px] font-medium ${statusBadge(viewingDoc.status)}`}
-                  >
-                    {viewingDoc.status}
-                  </span>
-                </p>
-              </div>
-              <button
-                onClick={() => setViewingDoc(null)}
-                className="rounded p-1 text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--accent))] transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-            {/* Modal body */}
-            <div className="flex-1 overflow-y-auto px-4 py-3">
-              {viewingDoc.content ? (
-                <pre className="text-xs leading-relaxed text-foreground whitespace-pre-wrap font-sans">
-                  {viewingDoc.content}
-                </pre>
-              ) : (
-                <p className="text-xs text-muted-foreground text-center py-8">
-                  No text content — file may not have been parsed yet (status:{" "}
-                  {viewingDoc.status})
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </aside>
   );
 }
