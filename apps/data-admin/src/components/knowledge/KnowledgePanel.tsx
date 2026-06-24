@@ -56,8 +56,18 @@ function authHeaders(json: boolean = true): Record<string, string> {
   return headers;
 }
 
+function handle401(res: Response): void {
+  if (res.status === 401) {
+    localStorage.removeItem("accessToken");
+    if (window.location.pathname !== "/login") {
+      window.location.href = "/login";
+    }
+  }
+}
+
 async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, { headers: authHeaders() });
+  handle401(res);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
 }
@@ -68,6 +78,7 @@ async function apiPost<T>(path: string, body?: unknown): Promise<T> {
     headers: authHeaders(),
     body: body ? JSON.stringify(body) : undefined,
   });
+  handle401(res);
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? `HTTP ${res.status}`);
@@ -80,6 +91,7 @@ async function apiDelete(path: string): Promise<void> {
     method: "DELETE",
     headers: authHeaders(),
   });
+  handle401(res);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 

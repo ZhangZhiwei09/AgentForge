@@ -58,6 +58,12 @@ export function AnalyticsPage() {
           ),
         ]);
 
+        if (analyticsRes.status === 401 || feedbackRes.status === 401) {
+          localStorage.removeItem("accessToken");
+          window.location.href = "/login";
+          return;
+        }
+
         if (analyticsRes.ok) setAnalytics(await analyticsRes.json());
         if (feedbackRes.ok) setFeedback(await feedbackRes.json());
       } catch (e) {
