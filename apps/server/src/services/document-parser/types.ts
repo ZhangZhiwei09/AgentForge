@@ -15,12 +15,71 @@ export interface ParsedDocument {
   text: string;
   /** Per-page text (available for PDF; empty for flat-text formats). */
   pages?: Array<{ index: number; text: string }>;
-  metadata: {
-    /** Total number of pages (PDF) or undefined for flat formats. */
-    pageCount?: number;
-    /** Raw character count before any normalization. */
-    charCount: number;
-  };
+  metadata: ParsedDocumentMetadata;
+}
+
+// ── V3.0: 多模态解析扩展类型 ─────────────────────────────
+
+/** 资产引用：解析过程中提取的图片、音频片段等文件 */
+export interface AssetRef {
+  /** 唯一标识 */
+  id: string;
+  /** 原始文件路径或名称 */
+  localPath: string;
+  /** MinIO 存储 key（上传后获得） */
+  minioKey?: string;
+  /** 资产的公开 URL（签名 URL 或公开 URL） */
+  publicUrl?: string;
+  /** MIME 类型 */
+  mimeType: string;
+  /** 描述文本（alt text） */
+  description?: string;
+}
+
+/** 解析后的分段 */
+export interface ParsedSegment {
+  /** 分段序号 */
+  index: number;
+  /** 分段内容（Markdown 格式） */
+  content: string;
+  /** 起始页码（PDF 等分页格式） */
+  startPage?: number;
+  /** 结束页码 */
+  endPage?: number;
+}
+
+/** 解析后的元数据（扩展版） */
+export interface ParsedDocumentMetadata {
+  /** 字符数 */
+  charCount: number;
+  /** 页数（PDF） */
+  pageCount?: number;
+  /** 分段数 */
+  segmentCount?: number;
+  /** 资产数量 */
+  assetCount?: number;
+  /** 视频时长（秒），仅视频文件 */
+  videoDurationSec?: number;
+  /** 音频时长（秒），仅音频文件 */
+  audioDurationSec?: number;
+  /** OCR 置信度，仅图片文件 */
+  ocrConfidence?: number;
+  /** 解析器名称 */
+  parserName: string;
+}
+
+/** V3.0: 多模态文档的统一 Markdown 输出 */
+export interface ParsedMarkdownDocument {
+  /** 主内容（Markdown 格式） */
+  markdown: string;
+  /** 提取的资产列表（图片、音频等） */
+  assets: AssetRef[];
+  /** 按页/段落分段（可选） */
+  pages?: ParsedSegment[];
+  /** 结构化的内容分段 */
+  segments: ParsedSegment[];
+  /** 扩展元数据 */
+  metadata: ParsedDocumentMetadata;
 }
 
 /** A plugin that can parse a specific document format. */

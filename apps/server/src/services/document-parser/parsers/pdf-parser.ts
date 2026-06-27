@@ -56,6 +56,7 @@ export class PdfParser implements DocumentParser {
       metadata: {
         pageCount: totalPages,
         charCount: text.length,
+        parserName: "pdf",
       },
     };
   }

@@ -11,4 +11,7 @@ export interface StorageProvider {
 
   /** Delete a file from storage. */
   delete(path: string): Promise<void>;
+
+  /** Get a public or signed URL for accessing the file. */
+  getPublicUrl(path: string, expiresSec?: number): Promise<string>;
 }

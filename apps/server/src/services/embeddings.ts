@@ -1,5 +1,5 @@
-// Embedding 服务模块 —— 将文本转换为向量，供 Milvus 语义搜索使用
-// 目前只支持 OpenAI Embedding API，未来可扩展本地模型或其他厂商
+// Embedding 服务模块 —— 将文本转换为向量，供 PGVector 语义搜索使用
+// 支持：Ollama 本地模型、OpenAI 兼容 API（DashScope/DeepSeek 等）
 import OpenAI from "openai";
 import { settings } from "../config.js";
 
@@ -13,19 +13,68 @@ export interface EmbeddingProvider {
 
 // 根据模型名称确定向量维度
 function getEmbeddingDimension(model: string): number {
-  // DashScope text-embedding-v3 → 1024
+  // Ollama 常用模型
+  if (model === "bge-m3") return 1024;          // BAAI BGE-M3，多语言
+  if (model === "nomic-embed-text") return 768; // Nomic Embed
+  if (model === "mxbai-embed-large") return 1024;
+  // DashScope
   if (model === "text-embedding-v3" || model === "text-embedding-v4") return 1024;
-  // OpenAI text-embedding-3-large → 3072（默认）或 1024/256
+  // OpenAI
   if (model === "text-embedding-3-large") return 3072;
-  // OpenAI text-embedding-3-small → 1536（默认）或 512
   if (model === "text-embedding-3-small") return 1536;
-  // OpenAI text-embedding-ada-002 → 1536
   if (model === "text-embedding-ada-002") return 1536;
-  // 未知模型：保守默认 1536
-  return 1536;
+  // 未知模型：保守默认 1024（适配 bge-m3）
+  return 1024;
 }
 
-// OpenAI Embedding 实现
+// ── Ollama Embedding Provider ──────────────────────────────
+
+export class OllamaEmbeddingProvider implements EmbeddingProvider {
+  private _model: string;
+  private _dimension: number;
+  private baseUrl: string;
+
+  constructor(baseUrl: string = "http://localhost:11434", model: string = "bge-m3") {
+    this.baseUrl = baseUrl;
+    this._model = model;
+    this._dimension = getEmbeddingDimension(model);
+  }
+
+  get dimension(): number {
+    return this._dimension;
+  }
+
+  get modelName(): string {
+    return this._model;
+  }
+
+  async embed(texts: string[]): Promise<number[][]> {
+    const response = await fetch(`${this.baseUrl}/api/embed`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: this._model, input: texts }),
+    });
+
+    if (!response.ok) {
+      const body = await response.text().catch(() => "");
+      throw new Error(`Ollama embed failed: HTTP ${response.status} ${body.slice(0, 200)}`);
+    }
+
+    const data = (await response.json()) as { embeddings?: number[][] };
+    if (!data.embeddings || !Array.isArray(data.embeddings)) {
+      throw new Error("Ollama embed: unexpected response format");
+    }
+    return data.embeddings;
+  }
+
+  async embedSingle(text: string): Promise<number[]> {
+    const results = await this.embed([text]);
+    return results[0];
+  }
+}
+
+// ── OpenAI Embedding Provider ──────────────────────────────
+
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   private client: OpenAI | null = null;
   private _model: string;
@@ -37,7 +86,6 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     model: string = "text-embedding-ada-002",
   ) {
     this._model = model;
-    // 根据模型名称确定向量维度
     this._dimension = getEmbeddingDimension(model);
     if (apiKey) {
       this.client = new OpenAI({
@@ -55,7 +103,6 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     return this._model;
   }
 
-  // 批量 embedding：一次 API 调用处理多条文本，比逐条调用效率高
   async embed(texts: string[]): Promise<number[][]> {
     if (!this.client) {
       throw new Error("OpenAI client not configured");
@@ -64,7 +111,6 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
       model: this._model,
       input: texts,
     });
-    // 按 index 排序确保顺序与输入一致
     const sorted = response.data.sort((a, b) => a.index - b.index);
     return sorted.map((e) => e.embedding);
   }
@@ -75,22 +121,34 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   }
 }
 
-// ── Provider 注册表 ──────────────────────────────────
+// ── Provider 注册表 ────────────────────────────────────────
 
 const embeddingProviders: Record<string, EmbeddingProvider> = {};
 let embeddingInitialized = false;
 
-// 惰性初始化：根据 settings 注册可用的 Embedding Provider
+// 惰性初始化：注册 Ollama（本地优先）和 OpenAI 兼容 Provider
 function initEmbeddingProviders(): void {
   if (embeddingInitialized) return;
 
-  if (settings.openaiApiKey) {
+  // Ollama 优先 —— 本地免费，无需 API Key
+  try {
+    embeddingProviders["ollama"] = new OllamaEmbeddingProvider(
+      settings.ollamaBaseUrl,
+      settings.ollamaEmbeddingModel,
+    );
+  } catch {
+    // Ollama URL 无效时跳过
+  }
+
+  // OpenAI 兼容 Provider（DashScope / OpenAI / 自定义代理）
+  if (settings.embeddingApiKey) {
     embeddingProviders["openai"] = new OpenAIEmbeddingProvider(
-      settings.openaiApiKey,
-      settings.openaiBaseUrl,
+      settings.embeddingApiKey,
+      settings.embeddingBaseUrl,
       settings.embeddingModel || "text-embedding-ada-002",
     );
   }
+
   embeddingInitialized = true;
 }
 
@@ -105,9 +163,10 @@ export function getEmbeddingProvider(name: string): EmbeddingProvider {
   return embeddingProviders[name];
 }
 
-// 获取默认 Embedding Provider（有且仅有一个时的便利方法）
+// 获取默认 Embedding Provider —— Ollama 优先（本地免 Key），其次 OpenAI 兼容
 export function getDefaultEmbeddingProvider(): EmbeddingProvider | null {
   initEmbeddingProviders();
+  if (embeddingProviders["ollama"]) return embeddingProviders["ollama"];
   if (Object.keys(embeddingProviders).length === 0) return null;
   return Object.values(embeddingProviders)[0];
 }

@@ -26,6 +26,10 @@ import { getCitationVerifier } from "./citation-verifier.js";
 import { validateBusinessResponse } from "./validation.js";
 import { KnowledgeContextBuilder } from "./knowledge-context.js";
 import { toolRegistry } from "../../tools/registry.js";
+import { getTaskIntentClassifier } from "./task-intent.js";
+import { KnowledgeService } from "../knowledge.js";
+import { resolveModel, getProvider } from "../../providers/registry.js";
+import { settings } from "../../config.js";
 
 // ── 硬编码最终兜底文案 ──
 const HARDCODED_FALLBACK =
@@ -91,6 +95,13 @@ export class AgentExecutor implements RouteAgent {
       route: "TASK",
     };
 
+    // ── TASK 内部意图分类：simple_qa vs complex_task ──
+    const taskIntent = await getTaskIntentClassifier().classify(userMessage);
+    logger.debug(
+      { subclass: taskIntent.subclass, confidence: taskIntent.confidence },
+      "TaskIntentClassifier result",
+    );
+
     let finalAnswer = "";
     let suggestions: string[] = [];
     let accumulatedContent = "";
@@ -111,36 +122,51 @@ export class AgentExecutor implements RouteAgent {
     let iterationCount = 0;
 
     try {
-      const agentService = new AgentService();
+      // ── simple_qa 快速路径：单次 KB 搜索 + LLM 回答，跳过 ReAct ──
+      if (taskIntent.subclass === "simple_qa") {
+        yield* this.handleSimpleQA(
+          context,
+          scope,
+          outputState,
+          envelope,
+          collectedKBChunks,
+        );
+        // 从 envelope 提取结果
+        finalAnswer = envelope.finalContent || "";
+        if (outputState.responseCompleted) {
+          phase = "finished";
+          outputState.responseStarted = true;
+        }
+      } else {
+        // ── complex_task：完整 ReAct 循环 ──
+        const agentService = new AgentService();
 
-      // ── 构建任务描述 ──
-      // KnowledgeContext 在 Agent 执行后由 KnowledgeContextBuilder 构建，
-      // 用于 CitationVerifier 引证校验和 Validation 管线，不预注入 system prompt。
-      const task = `用户询问：${userMessage}
+        // ── 构建任务描述 ──
+        const task = `用户询问：${userMessage}
 
 请使用可用工具帮助用户解决问题。回答要简洁、专业、友好。
 如果工具返回了数据，请直接用自然语言 + Markdown 表格或列表向用户解释结果。
 如果知识库有相关信息，请引用来源。`;
 
-      // ── 动态获取工具列表（从 ToolRegistry） ──
-      const enabledTools = this.getAvailableToolNames();
+        // ── 动态获取工具列表（从 ToolRegistry） ──
+        const enabledTools = this.getAvailableToolNames();
 
-      // 运行 Agent ReAct 循环
-      const events = agentService.run(conversationId, task, {
-        model: resolvedModel,
-        maxIterations: 5,
-        tools: enabledTools,
-        scope,
-        skipUserMessageSave: true,
-        skipAssistantMessageSave: true,
-        guardConfig: {
-          maxTokens: 2000,
-          maxCostCents: 5,
-        },
-      });
+        // 运行 Agent ReAct 循环
+        const events = agentService.run(conversationId, task, {
+          model: resolvedModel,
+          maxIterations: 5,
+          tools: enabledTools,
+          scope,
+          skipUserMessageSave: true,
+          skipAssistantMessageSave: true,
+          guardConfig: {
+            maxTokens: 2000,
+            maxCostCents: 5,
+          },
+        });
 
-      // 映射 agent 事件 → agent-runtime SSE 事件
-      for await (const event of events) {
+        // 映射 agent 事件 → agent-runtime SSE 事件
+        for await (const event of events) {
         if (scope?.controller.shouldStop) break;
 
         switch (event.type) {
@@ -298,6 +324,7 @@ export class AgentExecutor implements RouteAgent {
         { agent_type: "agent_executor" },
         iterationCount,
       );
+      } // ── end complex_task ReAct 分支 ──
 
       // ── Interruption ──
       if (scope?.controller.shouldStop) {
@@ -461,6 +488,22 @@ export class AgentExecutor implements RouteAgent {
       outputState.responseCompleted = true;
     }
 
+    // V3.0: 记录对话到分层记忆系统（异步，不阻塞响应）
+    if (finalAnswer && sessionId) {
+      const recordMemory = async () => {
+        try {
+          const { getMemoryService } = await import("../memory-service.js");
+          const memoryService = getMemoryService();
+          const convId = conversationId || sessionId;
+          await memoryService.recordExchange(convId, userMessage, finalAnswer!);
+        } catch (e) {
+          logger.warn(e, "Memory recording failed (non-blocking)");
+        }
+      };
+      // Fire and forget — 不阻塞 done event
+      recordMemory();
+    }
+
     // 发送 done
     yield {
       type: "done",
@@ -487,6 +530,114 @@ export class AgentExecutor implements RouteAgent {
           }
         : undefined,
     };
+  }
+
+  /**
+   * simple_qa 快速路径：单次 KB 搜索 + LLM 直接回答，跳过完整 ReAct 循环。
+   *
+   * 适用场景：单事实查询（"退换货条件是什么?"、"营业时间?"、"金卡会员有什么权益?"）
+   * 延迟目标：1 次 embedding + 1 次 LLM 调用（vs ReAct 的 3-5 次 LLM 调用）
+   *
+   * 降级策略：KB 搜索失败 → 回退到通用 LLM 回答（标注无知识库支持）
+   */
+  private async *handleSimpleQA(
+    context: RouteContext,
+    scope: ExecutionScope | undefined,
+    outputState: OutputState,
+    envelope: ResponseEnvelope,
+    collectedKBChunks: string[],
+  ): AsyncGenerator<RouteStreamEvent> {
+    const { userMessage, assistantMsgId, conversationId, sessionId } = context;
+
+    // 1. 直接搜索知识库（单次调用，不走 ToolRegistry）
+    let kbResults: string[] = [];
+    try {
+      const kbService = new KnowledgeService();
+      const searchResults = await kbService.search(userMessage, null, 5);
+      kbResults = searchResults.map((r) => r.content).filter(Boolean);
+      if (kbResults.length > 0) {
+        collectedKBChunks.push(...kbResults);
+      }
+    } catch (e) {
+      logger.warn(e, "simple_qa: KB search failed, proceeding without KB context");
+    }
+
+    // 2. 构建简洁的 QA prompt（无 ReAct 结构）
+    const kbContext = kbResults.length > 0
+      ? `\n\n## 参考知识库\n${kbResults.map((c, i) => `[${i + 1}] ${c}`).join("\n\n")}\n\n请基于以上知识库内容回答。如果知识库没有相关信息，请如实说明。`
+      : "\n\n（未找到相关知识库内容，请基于常识回答，并建议用户联系人工客服获取准确信息。）";
+
+    const qaPrompt = `你是一个专业的客服助手。请用简洁、专业的语言回答用户问题。${
+      kbResults.length > 0 ? "严格基于提供的知识库内容，不要编造。" : ""
+    }
+
+## 用户问题
+${userMessage}
+${kbContext}
+
+## 回答要求
+- 使用 Markdown 格式，适当使用列表或表格
+- 如果知识库有相关信息，引用编号（如 [1]）
+- 回答控制在 300 字以内`;
+
+    // 3. 单次 LLM 调用（可配置更廉价模型）
+    const [providerName, model] = resolveModel(
+      settings.simpleQaModel || context.resolvedModel,
+    );
+
+    try {
+      const provider = getProvider(providerName);
+
+      // 流式输出
+      yield {
+        type: "clear_stream",
+        message_id: assistantMsgId,
+      };
+
+      outputState.responseStarted = true;
+
+      const result = await provider.chatSync(
+        [{ role: "user", content: qaPrompt }],
+        model,
+        undefined, // no system prompt override — qaPrompt is self-contained
+        0.3,       // 低温度保证事实准确性
+        800,       // 足够回答 300 字
+        false,     // 不需要 jsonMode
+      );
+
+      const content = result.content || "";
+      for (const char of content) {
+        yield {
+          type: "token",
+          content: char,
+          message_id: assistantMsgId,
+        };
+        outputState.visibleChars++;
+      }
+
+      envelope.finalContent = content;
+      outputState.responseCompleted = true;
+
+      // 持久化助手消息
+      try {
+        await prisma.message.create({
+          data: {
+            id: assistantMsgId,
+            conversationId,
+            role: "assistant",
+            content,
+            model,
+          },
+        });
+      } catch (e) {
+        logger.warn(e, "simple_qa: Failed to persist assistant message");
+      }
+
+      // 记忆记录由 execute() 尾部共享代码统一处理
+    } catch (e) {
+      logger.error(e, "simple_qa: LLM call failed");
+      envelope.fallbackContent = HARDCODED_FALLBACK;
+    }
   }
 
   /**

@@ -27,6 +27,10 @@ export const settings = {
     process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com/v1",
   // 默认使用的模型 ID，会从所有 provider 的模型列表中匹配
   defaultModel: process.env.DEFAULT_MODEL || "gpt-4o-mini",
+  // TASK 内部意图分类模型（轻量，默认跟随 defaultModel）
+  taskIntentModel: process.env.TASK_INTENT_MODEL || process.env.DEFAULT_MODEL || "gpt-4o-mini",
+  // simple_qa 快速路径模型（可配置更廉价模型降低延迟，留空跟随 defaultModel）
+  simpleQaModel: process.env.SIMPLE_QA_MODEL || process.env.DEFAULT_MODEL || "gpt-4o-mini",
   corsOrigins: process.env.CORS_ORIGINS || "",
   debug: process.env.DEBUG === "true",
   // Milvus 向量数据库地址（用于记忆搜索和知识库检索）
@@ -34,6 +38,12 @@ export const settings = {
   milvusPort: process.env.MILVUS_PORT || "19530",
   // Embedding 模型名称
   embeddingModel: process.env.EMBEDDING_MODEL || "text-embedding-v2",
+  // Embedding API 独立端点（默认跟随 OPENAI_BASE_URL）
+  // 当 LLM 用 DeepSeek 但 Embedding 用 DashScope/OpenAI 时需单独配置
+  embeddingBaseUrl:
+    process.env.EMBEDDING_BASE_URL || process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
+  embeddingApiKey:
+    process.env.EMBEDDING_API_KEY || process.env.OPENAI_API_KEY || "",
   port: parseInt(process.env.PORT || "8000", 10),
   // Redis 连接 URL（可选，用于限流存储等场景）
   redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
@@ -59,4 +69,35 @@ export const settings = {
     process.env.LANGFUSE_PUBLIC_KEY || "pk-not-used-selfhosted",
   langfuseSecretKey:
     process.env.LANGFUSE_SECRET_KEY || "sk-not-used-selfhosted",
+
+  // ── PGVector ─────────────────────────────────────────
+  pgvectorEnabled: process.env.PGVECTOR_ENABLED !== "false",
+
+  // ── Ollama 本地 Embedding ───────────────────────────
+  ollamaBaseUrl: process.env.OLLAMA_BASE_URL || "http://localhost:11434",
+  ollamaEmbeddingModel: process.env.OLLAMA_EMBEDDING_MODEL || "bge-m3",
+
+  // ── Elasticsearch ────────────────────────────────────
+  elasticsearchUrl: process.env.ELASTICSEARCH_URL || "http://localhost:9200",
+
+  // ── Reranker ─────────────────────────────────────────
+  rerankerBaseUrl: process.env.RERANKER_BASE_URL || "",
+  rerankerModel: process.env.RERANKER_MODEL || "",
+
+  // ── Neo4j ────────────────────────────────────────────
+  neo4jUri: process.env.NEO4J_URI || "bolt://localhost:7687",
+  neo4jUser: process.env.NEO4J_USER || "neo4j",
+  neo4jPassword: process.env.NEO4J_PASSWORD || "agentforge123",
+
+  // ── MinIO ────────────────────────────────────────────
+  minioEndpoint: process.env.MINIO_ENDPOINT || "localhost",
+  minioPort: parseInt(process.env.MINIO_PORT || "9000", 10),
+  minioAccessKey: process.env.MINIO_ACCESS_KEY || "minioadmin",
+  minioSecretKey: process.env.MINIO_SECRET_KEY || "minioadmin",
+  minioBucket: process.env.MINIO_BUCKET || "agentforge-docs",
+  minioUseSSL: process.env.MINIO_USE_SSL === "true",
+
+  // ── Mem0 ─────────────────────────────────────────────
+  mem0ApiKey: process.env.MEM0_API_KEY || "",
+  mem0BaseUrl: process.env.MEM0_BASE_URL || "",
 };
