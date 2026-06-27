@@ -23,6 +23,7 @@ export interface SessionRecord {
   status: string;
   scratchpad: AgentStep[];
   finalSummary: string | null;
+  runtimeState: Record<string, unknown> | null;
   startedAt: Date;
   completedAt: Date | null;
 }
@@ -42,6 +43,7 @@ export function createSessionRecord(
     status: "running",
     scratchpad: [],
     finalSummary: null,
+    runtimeState: null,
     startedAt: new Date(),
     completedAt: null,
   };
@@ -57,6 +59,7 @@ export async function saveSession(
   status: "running" | "paused" | "completed" | "failed",
   finalSummary: string | null,
   compressedSummary?: string,
+  runtimeState?: Record<string, unknown> | null,
 ): Promise<void> {
   try {
     const completedAt =
@@ -72,6 +75,7 @@ export async function saveSession(
         scratchpad: scratchpad as unknown as object,
         finalSummary,
         compressedSummary: compressedSummary ?? null,
+        runtimeState: (runtimeState ?? record.runtimeState) as Prisma.InputJsonValue,
         startedAt: record.startedAt,
         completedAt,
       },
@@ -80,6 +84,7 @@ export async function saveSession(
         scratchpad: scratchpad as unknown as object,
         finalSummary,
         compressedSummary: compressedSummary ?? null,
+        runtimeState: (runtimeState ?? record.runtimeState) as Prisma.InputJsonValue,
         completedAt,
       },
     });
@@ -88,6 +93,7 @@ export async function saveSession(
     record.status = status;
     record.scratchpad = scratchpad;
     record.finalSummary = finalSummary;
+    record.runtimeState = runtimeState ?? record.runtimeState;
     record.completedAt = completedAt;
   } catch (err) {
     if (isPrismaErrorCode(err, "P2021")) {
@@ -109,6 +115,7 @@ export async function getSessions(conversationId: string): Promise<
     status: string;
     scratchpad: AgentStep[];
     finalSummary: string | null;
+    runtimeState: Record<string, unknown> | null;
     startedAt: Date;
     completedAt: Date | null;
   }>
@@ -126,6 +133,7 @@ export async function getSessions(conversationId: string): Promise<
       status: s.status,
       scratchpad: (s.scratchpad as unknown as AgentStep[]) || [],
       finalSummary: s.finalSummary,
+      runtimeState: (s.runtimeState as Record<string, unknown> | null) ?? null,
       startedAt: s.startedAt,
       completedAt: s.completedAt,
     }));
@@ -149,6 +157,7 @@ export async function getSession(id: string): Promise<{
   status: string;
   scratchpad: AgentStep[];
   finalSummary: string | null;
+  runtimeState: Record<string, unknown> | null;
   startedAt: Date;
   completedAt: Date | null;
 } | null> {
@@ -163,6 +172,7 @@ export async function getSession(id: string): Promise<{
       status: s.status,
       scratchpad: (s.scratchpad as unknown as AgentStep[]) || [],
       finalSummary: s.finalSummary,
+      runtimeState: (s.runtimeState as Record<string, unknown> | null) ?? null,
       startedAt: s.startedAt,
       completedAt: s.completedAt,
     };
