@@ -25,5 +25,9 @@ apps/server/logs/
 # Runtime data (OrderService persistence — auto-generated from seed)
 apps/server/data/
 
+# Claude Code session data
+.claude/agent-memory/
+.claude/worktrees/
+
 # Build artifacts
 *.tar.gz
