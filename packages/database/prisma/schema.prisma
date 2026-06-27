@@ -214,6 +214,7 @@ model AgentSession {
   scratchpad        Json         @default("[]")
   finalSummary      String?      @map("final_summary")
   compressedSummary String?      @map("compressed_summary")
+  runtimeState      Json?        @map("runtime_state")
   startedAt         DateTime     @default(now()) @map("started_at") @db.Timestamptz(6)
   completedAt       DateTime?    @map("completed_at") @db.Timestamptz(6)
   conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)

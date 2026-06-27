@@ -34,6 +34,12 @@ export class DeepSeekProvider implements LLMProvider {
         provider: "deepseek",
         max_tokens: 65536,
       },
+      {
+        id: "deepseek-v4-flash",
+        name: "DeepSeek V4 Flash",
+        provider: "deepseek",
+        max_tokens: 65536,
+      },
     ];
   }
 
