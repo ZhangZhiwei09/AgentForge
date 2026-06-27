@@ -32,6 +32,8 @@ export function getESClient(): Client | null {
         node: settings.elasticsearchUrl,
         maxRetries: 1,
         requestTimeout: 10_000,
+        // ES 8.15 服务端兼容（客户端 9.x 默认发送 compatible-with=9，8.x 只接受 7/8）
+        compatibilityVersion: 8,
       } as unknown as ConstructorParameters<typeof Client>[0]);
       logger.info({ url: settings.elasticsearchUrl }, "ES client created");
     } catch (e) {

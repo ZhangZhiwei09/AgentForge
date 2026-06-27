@@ -448,17 +448,9 @@ export class KnowledgeIngestionService {
     const esDocs: ESDocument[] = [];
 
     for (let i = 0; i < chunkIds.length; i++) {
-      // V3.0: PGVector embedding 向量格式化写入
       const vecLiteral = `[${denseVecs[i].join(",")}]`;
 
-      // 使用 raw SQL 更新 embedding 字段（Prisma 不直接支持 vector 类型）
-      await prisma.$executeRawUnsafe(
-        `UPDATE knowledge_chunks SET embedding = $1::vector WHERE id = $2`,
-        vecLiteral,
-        chunkIds[i],
-      );
-
-      // 先创建 chunk 记录（不含 embedding，通过 raw SQL 补充）
+      // 先创建 chunk 记录，再通过 raw SQL 补充 embedding
       await prisma.knowledgeChunk.create({
         data: {
           id: chunkIds[i],
@@ -472,6 +464,13 @@ export class KnowledgeIngestionService {
           qualityLabel: qualityLabel ?? null,
         },
       });
+
+      // V3.0: PGVector embedding 向量写入（CREATE 之后 UPDATE，Prisma 不直接支持 vector 类型）
+      await prisma.$executeRawUnsafe(
+        `UPDATE knowledge_chunks SET embedding = $1::vector WHERE id = $2`,
+        vecLiteral,
+        chunkIds[i],
+      );
 
       // 构建 ES 文档
       esDocs.push({
