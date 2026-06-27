@@ -45,6 +45,24 @@ interface KnowledgeSearchResult {
   docTitle: string;
 }
 
+interface GraphStats {
+  available: boolean;
+  nodeCount: number;
+  relationCount: number;
+}
+
+interface KnowledgeStats {
+  knowledge_bases: number;
+  documents: number;
+  chunks: number;
+  milvus: Record<string, unknown>;
+  totalChunks?: number;
+  chunksWithEmbedding?: number;
+  pgvectorEnabled?: boolean;
+  elasticsearchAvailable?: boolean;
+  elasticsearchIndexedChunks?: number;
+}
+
 // ── API Helpers ────────────────────────────────
 
 const API_BASE = "/api/knowledge";
@@ -135,6 +153,10 @@ export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [searching, setSearching] = useState(false);
 
+  // Infrastructure stats state
+  const [stats, setStats] = useState<KnowledgeStats | null>(null);
+  const [graphStats, setGraphStats] = useState<GraphStats | null>(null);
+
   // ── Data fetching ──────────────────────────
 
   const fetchKnowledgeBases = useCallback(async () => {
@@ -165,6 +187,23 @@ export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
     }
   }, []);
 
+  const fetchStats = useCallback(async () => {
+    try {
+      const [knowStats, graph] = await Promise.all([
+        apiGet<KnowledgeStats>("/stats"),
+        apiGet<GraphStats>("/graph/stats").catch(() => ({
+          available: false,
+          nodeCount: 0,
+          relationCount: 0,
+        })),
+      ]);
+      setStats(knowStats);
+      setGraphStats(graph);
+    } catch {
+      // Stats fetch failure is silent — infrastructure indicators show red
+    }
+  }, []);
+
   useEffect(() => {
     if (viewMode === "bases") {
       fetchKnowledgeBases();
@@ -176,6 +215,11 @@ export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
       fetchDocuments(selectedKb.id);
     }
   }, [viewMode, selectedKb, fetchDocuments]);
+
+  // Auto-fetch stats on mount
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
 
   // ── Actions ─────────────────────────────────
 
@@ -522,11 +566,11 @@ export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
                   {uploadFile ? uploadFile.name : "Click to select file"}
                 </span>
                 <span className="text-[10px] text-muted-foreground">
-                  .txt, .md, .json, .csv, .html, .pdf
+                  .txt, .md, .json, .csv, .html, .pdf, .docx, .png, .jpg, .mp3, .wav, .mp4, .webm
                 </span>
                 <input
                   type="file"
-                  accept=".txt,.md,.json,.csv,.html,.xml,.yaml,.yml,.log,.pdf"
+                  accept=".txt,.md,.json,.csv,.html,.xml,.yaml,.yml,.log,.pdf,.docx,.png,.jpg,.jpeg,.gif,.bmp,.webp,.mp3,.wav,.m4a,.ogg,.mp4,.webm,.mov"
                   onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
                   className="hidden"
                 />
@@ -730,15 +774,67 @@ export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
         )}
       </div>
 
-      {/* Footer stats */}
-      {viewMode === "documents" && selectedKb && (
-        <div className="border-t border-[hsl(var(--border))] px-3 py-1.5">
+      {/* Footer: document stats + infrastructure status */}
+      <div className="border-t border-[hsl(var(--border))] px-3 py-2 space-y-1.5">
+        {/* Document stats (only in documents view) */}
+        {viewMode === "documents" && selectedKb && (
           <p className="text-[10px] text-muted-foreground">
-            {documents.length} document{documents.length !== 1 ? "s" : ""} ·{" "}
-            {documents.reduce((sum, d) => sum + d.chunkCount, 0)} total chunks
+            {documents.length} 篇文档 ·{" "}
+            {documents.reduce((sum, d) => sum + d.chunkCount, 0)} 个切片
           </p>
+        )}
+
+        {/* Infrastructure status indicators */}
+        <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[10px] text-muted-foreground">
+          {/* ES status */}
+          <span className="inline-flex items-center gap-1">
+            <span
+              className={`inline-block h-1.5 w-1.5 rounded-full ${
+                stats?.elasticsearchAvailable ? "bg-green-500" : "bg-red-500"
+              }`}
+            />
+            ES{stats?.elasticsearchAvailable != null
+              ? stats.elasticsearchAvailable
+                ? ""
+                : " 离线"
+              : ""}
+          </span>
+
+          {/* PGVector status */}
+          <span className="inline-flex items-center gap-1">
+            <span
+              className={`inline-block h-1.5 w-1.5 rounded-full ${
+                stats?.pgvectorEnabled ? "bg-green-500" : "bg-red-500"
+              }`}
+            />
+            PGVector{stats?.pgvectorEnabled != null
+              ? stats.pgvectorEnabled
+                ? ""
+                : " 离线"
+              : ""}
+          </span>
+
+          {/* Neo4j graph stats */}
+          {graphStats?.available ? (
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" />
+              Neo4j {graphStats.nodeCount} 节点 / {graphStats.relationCount} 关系
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1">
+              <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" />
+              Neo4j 离线
+            </span>
+          )}
+
+          {/* Chunk stats */}
+          {stats?.totalChunks != null && (
+            <span>
+              {stats.totalChunks} 切片 / {stats.chunksWithEmbedding ?? "?"} 向量
+            </span>
+          )}
         </div>
-      )}
+      </div>
 
     </aside>
   );

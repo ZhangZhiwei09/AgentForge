@@ -33,7 +33,7 @@ export class TextParser implements DocumentParser {
     const text = buffer.toString("utf-8");
     return {
       text,
-      metadata: { charCount: text.length },
+      metadata: { charCount: text.length, parserName: "text" },
     };
   }
 }

@@ -34,4 +34,9 @@ export class LocalStorageProvider implements StorageProvider {
     const fullPath = this.resolvePath(path);
     await unlink(fullPath);
   }
+
+  // 本地存储无法生成公开 URL，返回文件路径（仅供服务端内部使用）
+  async getPublicUrl(_path: string, _expiresSec?: number): Promise<string> {
+    return `file://${this.resolvePath(_path)}`;
+  }
 }

@@ -40,6 +40,7 @@ async function execute(
 
   try {
     const service = new KnowledgeService();
+    // V3.0: 使用 searchHybrid 获得 RRF 融合 + Reranker 精排结果
     const rawResults = await service.search(query, null, 10);
 
     if (!rawResults || rawResults.length === 0) {

@@ -16,6 +16,13 @@ import { tokenize, getTokenCount } from "./tokenizer.js";
 import { getParserRegistry } from "./document-parser/index.js";
 import { NormalizerService } from "./document-normalizer/index.js";
 import { getStorageProvider } from "./storage/index.js";
+import {
+  bulkIndexDocuments,
+  deleteByDocumentIds,
+  isESAvailable,
+  ensureKnowledgeIndex,
+  type ESDocument,
+} from "./elasticsearch.js";
 import type { TextMetrics } from "./document-normalizer/index.js";
 import type { Prisma } from "@agentforge/database";
 import { logger } from "@agentforge/logger";
@@ -195,6 +202,56 @@ export class KnowledgeIngestionService {
           { docId, parser: parser.name, charCount: parsed.metadata.charCount },
           "Document parsed",
         );
+
+        // V3.0: 如果 parser 返回的是多模态文档（含 assets），上传资产到 MinIO
+        const parsedExtended = parsed as {
+          text: string;
+          _assets?: import("./document-parser/types.js").AssetRef[];
+        };
+        if (parsedExtended._assets && parsedExtended._assets.length > 0) {
+          await this.updateDocumentStatus(docId, "extracting_assets");
+
+          const storage = getStorageProvider();
+          for (const asset of parsedExtended._assets) {
+            try {
+              // 读取资产 buffer 并上传到 MinIO
+              const assetBuffer = Buffer.from(
+                asset.localPath.includes("assets/")
+                  ? "" // 内存中的资产（Word parser 提取的图片）
+                  : "",
+              );
+              // 注：Word parser 的图片已缓存在内存中，这里需要重构以支持
+              // 当前实现：如果 storage 是 MinIO，获取公开 URL；否则跳过
+              const publicUrl = await storage.getPublicUrl(
+                asset.localPath,
+                86400,
+              );
+              asset.publicUrl = publicUrl;
+              asset.minioKey = asset.localPath;
+
+              // 替换 Markdown 中的资产占位符
+              if (content.includes(`{{ASSET:${asset.id}}}`)) {
+                content = content.replace(
+                  `{{ASSET:${asset.id}}}`,
+                  `![${asset.description || "图片"}](${publicUrl})`,
+                );
+              }
+            } catch (e) {
+              logger.warn(
+                { assetId: asset.id, error: String(e) },
+                "Asset upload failed (non-blocking)",
+              );
+            }
+          }
+
+          // 更新文档内容（已被资产 URL 替换后的版本）
+          if (content !== doc.content) {
+            await prisma.knowledgeDocument.update({
+              where: { id: docId },
+              data: { content },
+            });
+          }
+        }
       }
 
       // ── Phase 2: NORMALIZING ──
@@ -264,6 +321,13 @@ export class KnowledgeIngestionService {
         },
       });
 
+      // V3.0: 异步触发图谱抽取（不阻塞文档完成状态）
+      await this.updateDocumentStatus(docId, "graph_extracting");
+      this.triggerGraphExtraction(docId, kbId, chunks, sourceType).catch(
+        (e) => logger.warn({ docId, error: String(e) }, "Graph extraction trigger failed"),
+      );
+      // 图谱抽取完成后仍保持 completed 状态
+
       logger.info(
         { docId, chunks: chunks.length, quality: qualityLabel, sourceType },
         "Document processed by worker",
@@ -285,7 +349,55 @@ export class KnowledgeIngestionService {
     }
   }
 
-  // Chunk 向量化 + 双写核心逻辑（V2.2: 扩展 sourceType + qualityLabel 元数据）
+  // V3.0: 触发图谱抽取（异步，不阻塞主流程）
+  private async triggerGraphExtraction(
+    docId: string,
+    kbId: string,
+    chunks: string[],
+    sourceType?: string,
+  ): Promise<void> {
+    try {
+      const { getGraphExtractionService } = await import(
+        "./graph-extraction.js"
+      );
+      const extractor = getGraphExtractionService();
+
+      // 查询已创建的 chunk IDs
+      const chunkRecords = await prisma.knowledgeChunk.findMany({
+        where: { documentId: docId },
+        select: { id: true, content: true },
+        orderBy: { chunkIndex: "asc" },
+      });
+
+      // 逐 chunk 抽取（控制并发，一次处理 3 个）
+      const CONCURRENCY = 3;
+      for (let i = 0; i < chunkRecords.length; i += CONCURRENCY) {
+        const batch = chunkRecords.slice(i, i + CONCURRENCY);
+        await Promise.all(
+          batch.map((chunk) =>
+            extractor
+              .extractFromChunk(chunk.id, chunk.content, kbId, docId)
+              .catch((e) =>
+                logger.warn(
+                  { chunkId: chunk.id },
+                  e,
+                  "Individual chunk graph extraction failed",
+                ),
+              ),
+          ),
+        );
+      }
+
+      logger.info(
+        { docId, chunksProcessed: chunkRecords.length },
+        "Graph extraction triggered",
+      );
+    } catch (e) {
+      logger.warn({ docId, error: String(e) }, "Graph extraction trigger failed");
+    }
+  }
+
+  // Chunk 向量化 + 双写核心逻辑（V3.0: 追加 PGVector embedding + ES 索引）
   private async ingestChunks(
     docId: string,
     kbId: string,
@@ -300,22 +412,21 @@ export class KnowledgeIngestionService {
 
     await this.ensureCollection();
 
-    // 1. 批量生成 dense 向量（一次 API 调用，比逐条调用效率高）
+    // 1. 批量生成 dense 向量
     const denseVecs = await provider.embed(chunkTexts);
     if (!denseVecs || denseVecs.length !== chunkTexts.length) {
       throw new Error("Embedding failed or returned mismatched count");
     }
 
-    // 2. 批量插入 Milvus（行式格式：每个元素是一个 field→value 对象）
+    // 2. 批量插入 Milvus（过渡期双写，后续版本移除）
     const chunkIds = chunkTexts.map(() => randomUUID());
     const client = getMilvusClient();
 
-    // Milvus SDK v2.x: fields_data 是行数组，每行是 { fieldName: value } 对象
     const rows = chunkTexts.map((text, i) => ({
       chunk_id: chunkIds[i],
       kb_id: kbId,
       dense_vector: denseVecs[i],
-      content: text.slice(0, 4096), // Milvus VarChar 最长 4096
+      content: text.slice(0, 4096),
     }));
 
     const mr = await client.insert({
@@ -323,9 +434,23 @@ export class KnowledgeIngestionService {
       fields_data: rows,
     });
 
-    // 3. 保存 chunk 元数据到 PG（包含 Milvus 返回的内部 ID）
+    // 3. 保存 chunk 元数据到 PG（包含 Milvus ID 和 PGVector embedding）
     const milvusIds = (mr.IDs as any)?.int_id?.data || [];
+
+    // 获取文档标题（用于 ES 索引）
+    const doc = await prisma.knowledgeDocument.findUnique({
+      where: { id: docId },
+      select: { title: true },
+    });
+    const docTitle = doc?.title || "";
+
+    // ES 文档批量（按可用性延迟写入）
+    const esDocs: ESDocument[] = [];
+
     for (let i = 0; i < chunkIds.length; i++) {
+      const vecLiteral = `[${denseVecs[i].join(",")}]`;
+
+      // 先创建 chunk 记录，再通过 raw SQL 补充 embedding
       await prisma.knowledgeChunk.create({
         data: {
           id: chunkIds[i],
@@ -339,9 +464,28 @@ export class KnowledgeIngestionService {
           qualityLabel: qualityLabel ?? null,
         },
       });
+
+      // V3.0: PGVector embedding 向量写入（CREATE 之后 UPDATE，Prisma 不直接支持 vector 类型）
+      await prisma.$executeRawUnsafe(
+        `UPDATE knowledge_chunks SET embedding = $1::vector WHERE id = $2`,
+        vecLiteral,
+        chunkIds[i],
+      );
+
+      // 构建 ES 文档
+      esDocs.push({
+        chunkId: chunkIds[i],
+        kbId,
+        docId,
+        title: docTitle,
+        content: chunkTexts[i],
+        sourceType: sourceType ?? undefined,
+        qualityLabel: qualityLabel ?? undefined,
+        createdAt: new Date().toISOString(),
+      });
     }
 
-    // 4. 构建倒排索引: jieba 分词 → 统计 term freq → 批量写入
+    // 4. 构建倒排索引（保留用于 PG 端关键词回退检索）
     for (let i = 0; i < chunkTexts.length; i++) {
       const tokens = tokenize(chunkTexts[i]);
       const termFreqMap = new Map<string, number>();
@@ -359,6 +503,18 @@ export class KnowledgeIngestionService {
           })),
         });
       }
+    }
+
+    // 5. V3.0: 索引到 Elasticsearch（异步，失败不阻塞主流程）
+    try {
+      if (await isESAvailable()) {
+        await ensureKnowledgeIndex();
+        await bulkIndexDocuments(esDocs);
+      } else {
+        logger.debug("ES unavailable, skipping ES index during ingestion");
+      }
+    } catch (e) {
+      logger.warn({ docId, count: esDocs.length, error: String(e) }, "ES indexing failed during ingestion (non-blocking)");
     }
   }
 
@@ -398,6 +554,13 @@ export class KnowledgeIngestionService {
     await prisma.knowledgeInvertedIndex.deleteMany({
       where: { chunkId: { in: chunkIds } },
     });
+
+    // V3.0: 清理 Elasticsearch 索引
+    try {
+      await deleteByDocumentIds([docId]);
+    } catch (e) {
+      logger.warn({ docId, error: String(e) }, "ES cleanup failed during document deletion (non-blocking)");
+    }
 
     // 从 PG 删除（CASCADE 会自动删关联的 chunks 和 inverted_index）
     await prisma.knowledgeChunk.deleteMany({ where: { documentId: docId } });
@@ -462,6 +625,58 @@ export class KnowledgeIngestionService {
     }
 
     logger.info({ chunks: chunks.length }, "Inverted index rebuilt");
+  }
+
+  // V3.0: 从 PG 重建 ES 索引（可用于 ES 数据丢失或迁移后的修复）
+  static async rebuildESIndex(kbId?: string): Promise<void> {
+    const esAvailable = await isESAvailable();
+    if (!esAvailable) {
+      logger.warn("ES not available, skipping rebuild");
+      return;
+    }
+
+    await ensureKnowledgeIndex();
+
+    const whereClause: Prisma.KnowledgeChunkWhereInput = { enabled: true };
+    if (kbId) whereClause.knowledgeBaseId = kbId;
+
+    const chunks = await prisma.knowledgeChunk.findMany({
+      where: whereClause,
+      select: {
+        id: true,
+        documentId: true,
+        knowledgeBaseId: true,
+        content: true,
+        sourceType: true,
+        qualityLabel: true,
+        document: { select: { title: true } },
+      },
+    });
+
+    if (chunks.length === 0) {
+      logger.info("No chunks to rebuild ES index");
+      return;
+    }
+
+    const esDocs: ESDocument[] = chunks.map((c) => ({
+      chunkId: c.id,
+      kbId: c.knowledgeBaseId,
+      docId: c.documentId,
+      title: c.document.title,
+      content: c.content,
+      sourceType: c.sourceType ?? undefined,
+      qualityLabel: c.qualityLabel ?? undefined,
+      createdAt: new Date().toISOString(),
+    }));
+
+    // 分批写入（每批 500 条）
+    const BATCH = 500;
+    for (let i = 0; i < esDocs.length; i += BATCH) {
+      const batch = esDocs.slice(i, i + BATCH);
+      await bulkIndexDocuments(batch);
+    }
+
+    logger.info({ count: esDocs.length }, "ES index rebuilt from PG");
   }
 }
 

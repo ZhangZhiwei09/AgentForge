@@ -6,17 +6,14 @@ import {
   BookOpen,
   ChevronDown,
   ChevronUp,
-  PanelRightClose,
-  PanelRightOpen,
 } from "lucide-react";
 import { useAgentChatStream } from "@/hooks/useAgentChatStream";
 import type { AgentMessage } from "@/hooks/useAgentChatStream";
 import { RichMessageRenderer } from "@/components/markdown/RichMessageRenderer";
-import { FAQSidebar } from "@/components/customer-chat/FAQSidebar";
+import { SessionList } from "./SessionList";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { QuickReplies } from "@/components/customer-chat/QuickReplies";
 import { SatisfactionRating } from "@/components/customer-chat/SatisfactionRating";
-import { ChatSessionInfo } from "@/components/customer-chat/ChatSessionInfo";
 
 export function AgentChatPage() {
   const {
@@ -26,11 +23,11 @@ export function AgentChatPage() {
     currentMeta,
     sendMessage,
     loadHistory,
-    clearSession,
+    newChat,
+    switchSession,
     abort,
   } = useAgentChatStream();
   const [input, setInput] = useState("");
-  const [showRightPanel, setShowRightPanel] = useState(true);
   const [expandedKnowledge, setExpandedKnowledge] = useState<Set<string>>(
     new Set(),
   );
@@ -92,10 +89,12 @@ export function AgentChatPage() {
       className="flex flex-1 overflow-hidden"
       style={{ height: "calc(100dvh - 48px)" }}
     >
-      {/* 左侧 FAQ 边栏 */}
-      <div className="hidden md:block">
-        <FAQSidebar onSelectQuestion={handleFAQSelect} />
-      </div>
+      {/* 左侧会话列表（ChatGPT 风格） */}
+      <SessionList
+        activeSessionId={sessionId}
+        onSelectSession={switchSession}
+        onNewChat={newChat}
+      />
 
       {/* 中间聊天区域 */}
       <main className="flex flex-1 flex-col bg-[hsl(var(--cs-bg))]">
@@ -280,38 +279,6 @@ export function AgentChatPage() {
           </div>
         </div>
       </main>
-
-      {/* 右侧面板 */}
-      {showRightPanel ? (
-        <div className="w-56 border-l border-[hsl(var(--cs-border))] bg-white">
-          <div className="flex items-center justify-between border-b border-[hsl(var(--cs-border))] px-3 py-2">
-            <span className="text-xs font-medium text-[hsl(var(--muted-foreground))]">
-              会话信息
-            </span>
-            <button
-              onClick={() => setShowRightPanel(false)}
-              className="rounded p-0.5 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
-            >
-              <PanelRightClose className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          <ChatSessionInfo
-            sessionId={sessionId}
-            messages={messages as unknown as Array<{ id: string; role: string; content: string; timestamp: number }>}
-            onClear={clearSession}
-          />
-        </div>
-      ) : null}
-
-      {!showRightPanel && (
-        <button
-          onClick={() => setShowRightPanel(true)}
-          className="absolute right-4 top-16 rounded-lg border border-[hsl(var(--cs-border))] bg-white p-1.5 shadow-sm text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
-          title="显示会话信息"
-        >
-          <PanelRightOpen className="h-3.5 w-3.5" />
-        </button>
-      )}
     </div>
   );
 }

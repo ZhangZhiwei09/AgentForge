@@ -186,41 +186,99 @@ export class KnowledgeContextBuilder {
   }
 }
 
-// ── Memory 注入（从原 business-agent.ts 迁移） ──
+// ── Memory 注入（V3.0: 使用 MemoryService Facade） ──
 
-import { MemoryEngine } from "../memory-engine.js";
+import { getMemoryService } from "../memory-service.js";
 
 const CUSTOMER_USER_ID = "00000000-0000-0000-0000-000000000002";
 
 /**
- * 注入用户记忆上下文。
- * 从 MemoryEngine 提取相关记忆并格式化为 Agent 可用的上下文字符串。
+ * 注入用户记忆上下文（V3.0: 升级到分层记忆系统）。
+ * 从 MemoryService 获取短期摘要 + 最近窗口 + 长期记忆，格式化注入 Agent Prompt。
  */
 export async function injectMemories(
   userMessage: string,
   sessionId: string | null,
+  conversationId?: string,
 ): Promise<[string, string[]]> {
   if (!sessionId) return ["", []];
   try {
-    const engine = new MemoryEngine();
-    const memories = await engine.search(
-      userMessage,
-      CUSTOMER_USER_ID,
-      5,
-      sessionId,
-    );
-    const relevant = memories.filter((m: { score: number }) => m.score > 0.3);
-    if (relevant.length > 0) {
-      const memoryText = relevant
-        .map((m: { content: string }, i: number) => `- ${m.content}`)
-        .join("\n");
-      return [
-        memoryText,
-        relevant.map((m: { content: string }) => m.content),
-      ];
+    const memoryService = getMemoryService();
+    const contextText = await memoryService.buildContextText({
+      userId: CUSTOMER_USER_ID,
+      conversationId: conversationId || sessionId,
+      query: userMessage,
+    });
+
+    if (contextText) {
+      const longTermContent = (
+        await memoryService.buildContext({
+          userId: CUSTOMER_USER_ID,
+          conversationId: conversationId || sessionId,
+          query: userMessage,
+        })
+      ).longTermMemories.map((m) => m.content);
+      return [contextText, longTermContent];
     }
   } catch (e) {
     logger.warn(e, "Memory injection skipped");
   }
   return ["", []];
+}
+
+// ── Graph 检索上下文注入（V3.0 新增） ──
+
+import { getGraphRetrievalService, type GraphRetrievalResult } from "../graph-retrieval.js";
+
+/**
+ * 从知识图谱检索推理链路并格式化为上下文。
+ */
+export async function injectGraphContext(
+  query: string,
+  kbIds?: string[],
+): Promise<GraphRetrievalResult | null> {
+  try {
+    const graphService = getGraphRetrievalService();
+    const result = await graphService.retrieve(query, kbIds);
+    if (result && result.reasoningChains.length > 0) {
+      logger.info(
+        {
+          entities: result.entities.length,
+          chains: result.reasoningChains.length,
+          evidenceCount: result.evidenceChunkIds.length,
+        },
+        "Graph context injected",
+      );
+      return result;
+    }
+  } catch (e) {
+    logger.warn(e, "Graph context injection skipped");
+  }
+  return null;
+}
+
+/**
+ * 将图谱检索结果格式化为 Agent Prompt 可用的文本。
+ */
+export function formatGraphContext(result: GraphRetrievalResult): string {
+  const lines: string[] = [];
+  lines.push(`\n## 知识图谱推理链路 (置信度: ${(result.confidence * 100).toFixed(0)}%)`);
+
+  for (const chain of result.reasoningChains) {
+    const entityNames = chain.entities.map((e) => e.name).join(" → ");
+    lines.push(`\n### 推理链路: ${entityNames}`);
+    for (const rel of chain.relations) {
+      lines.push(
+        `- ${rel.from} --[${rel.type}]--> ${rel.to} (置信度: ${(rel.confidence * 100).toFixed(0)}%)`,
+      );
+    }
+  }
+
+  if (result.evidenceChunkIds.length > 0) {
+    lines.push(
+      `\n相关文档片段: ${result.evidenceChunkIds.length} 条`,
+    );
+  }
+
+  return lines.join("\n");
 }
