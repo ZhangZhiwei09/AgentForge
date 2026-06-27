@@ -1,1 +1,0 @@
-- [codegen.ts File Splitting](codegen-file-splitting.md) — Split 642-line codegen.ts into 6 sub-modules under services/codegen/ with barrel re-export
