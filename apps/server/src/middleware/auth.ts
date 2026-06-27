@@ -12,6 +12,7 @@ const PUBLIC_PATHS = [
   "/api/health",
   "/api/agent/chat", // Anonymous agent SSE chat
   "/api/agent/chat/history", // Load session history
+  "/api/agent/chat/conversations", // List conversations (auth-aware internally)
   "/api/agent/chat/rate", // Submit satisfaction rating
 ];
 
@@ -19,6 +20,7 @@ const PUBLIC_PATHS = [
 // NOTE: Only FAQ sub-tree is public via prefix — feedback/analytics are protected by auth
 const PUBLIC_PREFIXES = [
   "/api/agent/chat/faq", // Anonymous FAQ browsing
+  "/api/agent/chat/conversations/", // Delete conversation (has internal auth)
 ];
 
 export const authMiddleware: MiddlewareHandler<{
