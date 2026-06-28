@@ -10,25 +10,24 @@ import { logger } from "@agentforge/logger";
 /**
  * Process a memory extraction job.
  * Called by the worker — extracts memories from conversation messages
- * and stores them via MemoryEngine (LLM extraction + embedding + Milvus/PG dual write).
+ * and stores them via MemoryService (Mem0 → PG+Milvus fallback).
  */
 export async function processMemoryExtraction(
   job: Job<MemoryExtractionJobData>,
 ) {
-  const { messages, userId, conversationId, providerName } = job.data;
+  const { messages, userId, conversationId } = job.data;
   logger.info(
     { jobId: job.id, userId, messageCount: messages.length },
     "Processing memory extraction job",
   );
 
   // Dynamic import to avoid loading unnecessary server deps in worker
-  const { MemoryEngine } = await import("../services/memory-engine.js");
-  const engine = new MemoryEngine();
-  const extracted = await engine.extractAndStore(
+  const { getMemoryService } = await import("../services/memory-service.js");
+  const memoryService = getMemoryService();
+  const extracted = await memoryService.extractAndStore(
     messages,
     userId,
     conversationId,
-    providerName,
   );
 
   logger.info(

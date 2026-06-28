@@ -164,15 +164,16 @@ export class LongTermMemoryStore {
   async search(
     query: string,
     userId: string,
-    topK: number = 5,
+    topK?: number,
   ): Promise<MemorySearchResult[]> {
+    const effectiveTopK = topK || settings.memoryLongTermTopK || 5;
     // 优先使用 Mem0
     if (this.mem0.isConfigured()) {
       try {
         const mem0Results = await this.mem0.search({
           userId,
           query,
-          topK,
+          topK: effectiveTopK,
         });
 
         if (mem0Results.length > 0) {
@@ -195,23 +196,64 @@ export class LongTermMemoryStore {
     }
 
     // Mem0 不可用 → 降级到 MemoryEngine
-    return this.engine.search(query, userId, topK);
+    return this.engine.search(query, userId, effectiveTopK);
   }
 
   // 从对话中提取并存储长期记忆
+  // 提取流程：LLM 抽取 → PG+Milvus 双写 → Mem0 异步写入（用户级+会话级）
   async extractAndStore(
     messages: Array<{ role: string; content: string }>,
     userId: string,
     conversationId: string,
     sessionId?: string,
   ): Promise<MemoryOut[]> {
-    return this.engine.extractAndStore(
+    // 核心提取：LLM 分析对话 → 逐条写入 PG + Milvus
+    const results = await this.engine.extractAndStore(
       messages,
       userId,
       conversationId,
       "", // auto-detect provider
       sessionId,
     );
+
+    // Mem0 异步写入（fire-and-forget，不阻塞返回）
+    if (results.length > 0 && this.mem0.isConfigured()) {
+      Promise.allSettled(
+        results.map((r) =>
+          this.mem0.add({
+            userId,
+            content: r.content,
+            metadata: {
+              type: r.type,
+              importance: r.importance,
+              scope: sessionId ? "session" : "user",
+              conversationId,
+              sessionId: sessionId || undefined,
+            },
+          }),
+        ),
+      ).then((settled) => {
+        const succeeded = settled.filter((s) => s.status === "fulfilled" && s.value).length;
+        if (succeeded > 0) {
+          logger.info(
+            { succeeded, total: results.length, userId },
+            "Mem0 memories synced from extraction",
+          );
+        }
+        const failed = settled.filter((s) => s.status === "rejected" || !s.value).length;
+        if (failed > 0) {
+          logger.warn(
+            { failed, total: results.length },
+            "Mem0 memory sync partially failed (PG+Milvus fallback intact)",
+          );
+        }
+      }).catch((e) => {
+        // Promise.allSettled itself never rejects, but guard anyway
+        logger.warn(e, "Mem0 post-extraction sync failed");
+      });
+    }
+
+    return results;
   }
 
   // 获取用户完整上下文（用户级 + 会话级记忆）
@@ -221,9 +263,10 @@ export class LongTermMemoryStore {
     query: string,
   ): Promise<LongTermMemoryContext> {
     // 并行搜索两层记忆
+    const effectiveTopK = settings.memoryLongTermTopK || 5;
     const [userMemories, sessionMemories] = await Promise.all([
-      this.search(query, userId, 5),
-      this.searchUserSessionMemories(userId, conversationId, 5),
+      this.search(query, userId, effectiveTopK),
+      this.searchUserSessionMemories(userId, conversationId, effectiveTopK),
     ]);
 
     return { userMemories, sessionMemories };

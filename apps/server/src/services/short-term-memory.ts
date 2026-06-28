@@ -33,9 +33,16 @@ export interface ShortTermMemoryContext {
 
 // ── 常量 ──────────────────────────────────────────────────
 
-const DEFAULT_WINDOW_SIZE = 20;       // 保留最近 N 条消息
-const DEFAULT_TTL_SEC = 7 * 24 * 3600; // 7 天
-const SUMMARY_TRIGGER = 30;           // 消息数超过此阈值 → 触发摘要
+// 从 config 读取可配置参数，提供合理默认值
+function getWindowSize(): number {
+  return settings.memoryWindowSize || 20;
+}
+function getSummaryTrigger(): number {
+  return settings.memorySummaryTrigger || 30;
+}
+function getTtlSec(): number {
+  return (settings.memoryTtlDays || 7) * 24 * 3600;
+}
 
 const SUMMARY_PROMPT = `你是一个对话摘要助手。请将以下对话历史压缩为简洁摘要，保留关键信息：
 
@@ -81,11 +88,11 @@ export class ShortTermMemoryStore {
         // ZSET: score = timestamp, member = JSON serialized message
         const json = JSON.stringify(msg);
         await redis.zadd(key, msg.timestamp, json);
-        await redis.expire(key, DEFAULT_TTL_SEC);
+        await redis.expire(key, getTtlSec());
 
         // 检查窗口大小，溢出时生成摘要
         const count = await redis.zcard(key);
-        if (count > SUMMARY_TRIGGER) {
+        if (count > getSummaryTrigger()) {
           await this.compressWindow(conversationId);
         }
       } catch (e) {
@@ -109,7 +116,7 @@ export class ShortTermMemoryStore {
         // 并行获取摘要和最近消息
         const [summary, rawMessages] = await Promise.all([
           redis.get(summaryKey),
-          redis.zrange(key, -DEFAULT_WINDOW_SIZE, -1), // 最新 N 条
+          redis.zrange(key, -getWindowSize(), -1), // 最新 N 条
         ]);
 
         const messages: ShortTermMemoryMsg[] = [];
@@ -137,7 +144,7 @@ export class ShortTermMemoryStore {
     const fallbackMsgs = this.memoryFallback.get(conversationId) || [];
     return {
       summary: this.summaryFallback.get(conversationId) || "",
-      recentMessages: fallbackMsgs.slice(-DEFAULT_WINDOW_SIZE),
+      recentMessages: fallbackMsgs.slice(-getWindowSize()),
       messageCount: fallbackMsgs.length,
     };
   }
@@ -198,9 +205,9 @@ export class ShortTermMemoryStore {
     try {
       const key = this.messageKey(conversationId);
 
-      // 获取超出窗口的旧消息（保留最近 20 条）
+      // 获取超出窗口的旧消息（保留最近窗口大小条）
       const totalCount = await redis.zcard(key);
-      const removeCount = totalCount - DEFAULT_WINDOW_SIZE;
+      const removeCount = totalCount - getWindowSize();
       if (removeCount <= 0) return;
 
       const oldMessages = await redis.zrange(key, 0, removeCount - 1);
@@ -247,7 +254,7 @@ export class ShortTermMemoryStore {
             ? `${existingSummary}\n\n${result.content}`
             : result.content;
           await redis.set(this.summaryKey(conversationId), newSummary);
-          await redis.expire(this.summaryKey(conversationId), DEFAULT_TTL_SEC);
+          await redis.expire(this.summaryKey(conversationId), getTtlSec());
         } catch (e) {
           logger.warn(e, "Summary generation failed");
         }
