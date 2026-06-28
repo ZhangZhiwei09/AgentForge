@@ -146,6 +146,116 @@ export function rrfFusion(
   return fused;
 }
 
+// ── 相邻 Chunk 去重辅助 ──────────────────────────────────
+
+/**
+ * 相邻 chunk 去重结果。
+ */
+interface DedupResult<T> {
+  kept: T[];
+  removed: T[];
+}
+
+/**
+ * 相邻 chunk 去重。
+ *
+ * 在两阶段去重后保留高分候选：
+ *   1. 邻接去重：同一 docId 且 chunkIndex 距离 ≤ neighborWindow 的，只保留分数高者。
+ *   2. 文本重叠去重：token/Jaccard overlap > similarityThreshold 的，只保留分数高者。
+ *
+ * 保留顺序（高分在前），不改变相对排序。
+ *
+ * @param candidates - RRF 融合后的候选列表（已按分数降序排列）
+ * @param neighborWindow - 视为"相邻"的 chunkIndex 最大距离（默认 1）
+ * @param similarityThreshold - 文本重叠阈值（默认 0.82）
+ * @returns 去重后的候选列表
+ */
+export function dedupeAdjacentChunks<T extends { docId: string; chunkIndex: number; content: string }>(
+  candidates: T[],
+  neighborWindow: number = 1,
+  similarityThreshold: number = 0.82,
+): DedupResult<T> {
+  if (candidates.length <= 1) return { kept: candidates, removed: [] };
+
+  const kept: T[] = [];
+  const removed: T[] = [];
+
+  for (let i = 0; i < candidates.length; i++) {
+    const current = candidates[i];
+    let shouldSkip = false;
+
+    for (let j = 0; j < kept.length; j++) {
+      const prev = kept[j];
+
+      // 条件 1: 同一文档且 chunkIndex 相邻
+      if (
+        prev.docId === current.docId &&
+        Math.abs(prev.chunkIndex - current.chunkIndex) <= neighborWindow
+      ) {
+        // 当前分数更低 → 丢弃；否则不应该出现（已排序），但保留以防万一
+        shouldSkip = true;
+        break;
+      }
+
+      // 条件 2: 文本重叠度超过阈值（Jaccard similarity on tokens）
+      const overlap = computeTokenOverlap(prev.content, current.content);
+      if (overlap > similarityThreshold) {
+        shouldSkip = true;
+        break;
+      }
+    }
+
+    if (shouldSkip) {
+      removed.push(current);
+    } else {
+      kept.push(current);
+    }
+  }
+
+  return { kept, removed };
+}
+
+/**
+ * 计算两段文本的 token 重叠度（简化 Jaccard）。
+ *
+ * 使用字符 bigram 快速估算文本相似度，避免完整 tokenization 开销。
+ * 分数范围 [0, 1]，越高表示越相似。
+ */
+export function computeTokenOverlap(a: string, b: string): number {
+  if (!a || !b) return 0;
+
+  // 生成字符 bigram 集合
+  const bigramsA = toBigramSet(a);
+  const bigramsB = toBigramSet(b);
+
+  if (bigramsA.size === 0 || bigramsB.size === 0) return 0;
+
+  // Jaccard similarity: |intersection| / |union|
+  let intersection = 0;
+  for (const bg of bigramsA) {
+    if (bigramsB.has(bg)) intersection++;
+  }
+
+  const union = bigramsA.size + bigramsB.size - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
+/**
+ * 生成文本的字符 bigram 集合。
+ * 中英文统一处理，CJK 字符间也生成 bigram。
+ */
+function toBigramSet(text: string): Set<string> {
+  const set = new Set<string>();
+  if (text.length < 2) {
+    if (text.length === 1) set.add(text);
+    return set;
+  }
+  for (let i = 0; i < text.length - 1; i++) {
+    set.add(text.slice(i, i + 2));
+  }
+  return set;
+}
+
 // ── KnowledgeService ──────────────────────────────────────
 
 export class KnowledgeService {
@@ -181,10 +291,26 @@ export class KnowledgeService {
 
     if (fused.length === 0) return [];
 
-    // 4. Reranker 重排（可选，可降级）
+    // 4. 相邻 Chunk 去重（在 Reranker 之前）
+    const deduped = dedupeAdjacentChunks(
+      fused,
+      settings.kbDedupeNeighborWindow,
+      settings.kbDedupeSimilarityThreshold,
+    );
+
+    if (deduped.removed.length > 0) {
+      logger.debug(
+        { kept: deduped.kept.length, removed: deduped.removed.length },
+        "Adjacent chunk dedup applied",
+      );
+    }
+
+    const dedupedCandidates = deduped.kept;
+
+    // 5. Reranker 重排（可选，可降级）
     const reranker = getReranker();
     if (useReranker && reranker.isConfigured()) {
-      const rerankDocs: RerankerDocument[] = fused.map((f) => ({
+      const rerankDocs: RerankerDocument[] = dedupedCandidates.map((f) => ({
         text: f.content.slice(0, 800),  // 截断控制 token
         id: f.chunkId,
       }));
@@ -195,7 +321,7 @@ export class KnowledgeService {
         // 用 Reranker 分数重新排序
         const reranked: HybridSearchResult[] = [];
         for (const rr of rerankResults) {
-          const original = fused[rr.index];
+          const original = dedupedCandidates[rr.index];
           if (!original) continue;
           reranked.push({
             ...original,
@@ -209,8 +335,8 @@ export class KnowledgeService {
       // Reranker 失败 → 回退到 RRF 融合分数
     }
 
-    // 5. 无 Reranker 或 Reranker 失败 → 用 RRF 分数作为最终分数
-    return fused.slice(0, topK).map((f) => ({
+    // 6. 无 Reranker 或 Reranker 失败 → 用 RRF 分数作为最终分数
+    return dedupedCandidates.slice(0, topK).map((f) => ({
       ...f,
       score: f.fusionScore,
     }));

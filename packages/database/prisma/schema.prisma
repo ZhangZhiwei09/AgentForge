@@ -128,6 +128,11 @@ model KnowledgeBase {
   enabled     Boolean             @default(true)
   createdAt   DateTime?           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime?           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // V3.1: Token-aware 分片参数（nullable，null 时使用环境默认值）
+  chunkSizeTokens    Int?    @map("chunk_size_tokens")
+  chunkOverlapTokens Int?    @map("chunk_overlap_tokens")
+
   chunks               KnowledgeChunk[]
   documents            KnowledgeDocument[]
   invertedIndexEntries KnowledgeInvertedIndex[]

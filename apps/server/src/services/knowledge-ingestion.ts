@@ -11,8 +11,9 @@ import {
 } from "./milvus.js";
 import { invalidateCitationCache } from "./agent-runtime/citation-verifier.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
-import { RecursiveCharacterTextSplitter } from "./text-splitter.js";
-import { tokenize, getTokenCount } from "./tokenizer.js";
+import { RecursiveTokenTextSplitter } from "./text-splitter.js";
+import { tokenize } from "./tokenizer.js";
+import { countEmbeddingTokens } from "./embedding-tokenizer.js";
 import { getParserRegistry } from "./document-parser/index.js";
 import { NormalizerService } from "./document-normalizer/index.js";
 import { getStorageProvider } from "./storage/index.js";
@@ -26,19 +27,52 @@ import {
 import type { TextMetrics } from "./document-normalizer/index.js";
 import type { Prisma } from "@agentforge/database";
 import { logger } from "@agentforge/logger";
+import { settings } from "../config.js";
 
 // Quality gate result — returned by evaluateQuality(), consumed by Worker
 type QualityDecision = "proceed" | "flag_low" | "reject_scan";
 
 export class KnowledgeIngestionService {
-  private splitter: RecursiveCharacterTextSplitter;
   private normalizer: NormalizerService;
   private collectionLoaded = false;
 
+  // 默认分片参数（来自环境变量，可被 KB 级配置覆盖）
+  private defaultChunkSizeTokens: number;
+  private defaultChunkOverlapTokens: number;
+
   constructor() {
-    // 每块 500 字符，相邻块重叠 50 字符
-    this.splitter = new RecursiveCharacterTextSplitter(500, 50);
     this.normalizer = new NormalizerService();
+    this.defaultChunkSizeTokens = settings.kbChunkSizeTokens;
+    this.defaultChunkOverlapTokens = settings.kbChunkOverlapTokens;
+  }
+
+  /**
+   * 获取或创建 splitter 实例（Token-aware，每次按配置创建）。
+   *
+   * 优先级：KB 级别配置 > 环境变量默认值
+   */
+  private getSplitter(kbChunkSize?: number, kbChunkOverlap?: number): RecursiveTokenTextSplitter {
+    const size = kbChunkSize ?? this.defaultChunkSizeTokens;
+    const overlap = kbChunkOverlap ?? this.defaultChunkOverlapTokens;
+    return new RecursiveTokenTextSplitter(size, overlap);
+  }
+
+  /**
+   * 读取知识库的分片配置（如已设置）。
+   * 返回 null 表示 KB 未自定义配置，应使用默认值。
+   */
+  private async getKBSplitConfig(kbId: string): Promise<{
+    chunkSizeTokens?: number;
+    chunkOverlapTokens?: number;
+  }> {
+    const kb = await prisma.knowledgeBase.findUnique({
+      where: { id: kbId },
+      select: { chunkSizeTokens: true, chunkOverlapTokens: true },
+    });
+    return {
+      chunkSizeTokens: kb?.chunkSizeTokens ?? undefined,
+      chunkOverlapTokens: kb?.chunkOverlapTokens ?? undefined,
+    };
   }
 
   private async ensureCollection() {
@@ -77,6 +111,10 @@ export class KnowledgeIngestionService {
 
   // 摄取单篇文档：创建记录 → 切分 → 向量化 → 双写
   async ingestDocument(kbId: string, title: string, content: string) {
+    // 读取 KB 分片配置
+    const kbConfig = await this.getKBSplitConfig(kbId);
+    const splitter = this.getSplitter(kbConfig.chunkSizeTokens, kbConfig.chunkOverlapTokens);
+
     // 1. 创建 Document 记录，状态标记为 processing
     const doc = await prisma.knowledgeDocument.create({
       data: {
@@ -91,7 +129,7 @@ export class KnowledgeIngestionService {
 
     try {
       // 2. 文本切分为 chunk
-      const chunks = this.splitter.splitText(content);
+      const chunks = splitter.splitText(content);
       if (!chunks.length) {
         // 空内容：直接标记完成
         await prisma.knowledgeDocument.update({
@@ -295,7 +333,10 @@ export class KnowledgeIngestionService {
       // ── Phase 3: INGESTING ──
       await this.updateDocumentStatus(docId, "ingesting");
 
-      const chunks = this.splitter.splitText(content);
+      // 读取 KB 分片配置
+      const kbConfig = await this.getKBSplitConfig(kbId);
+      const splitter = this.getSplitter(kbConfig.chunkSizeTokens, kbConfig.chunkOverlapTokens);
+      const chunks = splitter.splitText(content);
       if (!chunks.length) {
         await prisma.knowledgeDocument.update({
           where: { id: docId },
@@ -447,6 +488,11 @@ export class KnowledgeIngestionService {
     // ES 文档批量（按可用性延迟写入）
     const esDocs: ESDocument[] = [];
 
+    // 预计算所有 chunk 的 embedding token 数（异步批量）
+    const embeddingTokenCounts = await Promise.all(
+      chunkTexts.map((t) => countEmbeddingTokens(t)),
+    );
+
     for (let i = 0; i < chunkIds.length; i++) {
       const vecLiteral = `[${denseVecs[i].join(",")}]`;
 
@@ -458,7 +504,7 @@ export class KnowledgeIngestionService {
           knowledgeBaseId: kbId,
           chunkIndex: i,
           content: chunkTexts[i],
-          tokenCount: getTokenCount(chunkTexts[i]),
+          tokenCount: embeddingTokenCounts[i],
           milvusId: milvusIds[i] ? BigInt(milvusIds[i]) : null,
           sourceType: sourceType ?? null,
           qualityLabel: qualityLabel ?? null,

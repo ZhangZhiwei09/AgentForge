@@ -84,6 +84,27 @@ export const settings = {
   rerankerBaseUrl: process.env.RERANKER_BASE_URL || "",
   rerankerModel: process.env.RERANKER_MODEL || "",
 
+  // ── Knowledge Base Chunking ──────────────────────────
+  // Token-aware 分片默认参数（可被知识库级别配置覆盖）
+  kbChunkSizeTokens: parseInt(
+    process.env.KB_CHUNK_SIZE_TOKENS || "800",
+    10,
+  ),
+  kbChunkOverlapTokens: parseInt(
+    process.env.KB_CHUNK_OVERLAP_TOKENS || "120",
+    10,
+  ),
+
+  // ── Knowledge Base Dedup ──────────────────────────────
+  // 相邻 chunk 去重参数
+  kbDedupeNeighborWindow: parseInt(
+    process.env.KB_DEDUPE_NEIGHBOR_WINDOW || "1",
+    10,
+  ),
+  kbDedupeSimilarityThreshold: parseFloat(
+    process.env.KB_DEDUPE_SIMILARITY_THRESHOLD || "0.82",
+  ),
+
   // ── Neo4j ────────────────────────────────────────────
   neo4jUri: process.env.NEO4J_URI || "bolt://localhost:7687",
   neo4jUser: process.env.NEO4J_USER || "neo4j",
