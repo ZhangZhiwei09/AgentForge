@@ -146,7 +146,7 @@ model KnowledgeDocument {
   title           String           @db.VarChar(500)
   content         String
   chunkCount      Int              @default(0) @map("chunk_count")
-  status          String           @default("pending") @db.VarChar(20)
+  status          String           @default("pending") @db.VarChar(50)
   enabled         Boolean          @default(true)
   createdAt       DateTime?        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime?        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
@@ -163,6 +163,9 @@ model KnowledgeDocument {
 
   // V2.2: 质量标签（good / low，由 Worker quality gate 判定）
   qualityLabel      String?        @map("quality_label") @db.VarChar(20)
+
+  // V3.1: 处理进度详情（JSON：{phase, progress, total, message, startedAt}）
+  processingDetail  String?        @map("processing_detail")
 
   chunks          KnowledgeChunk[]
   knowledgeBase   KnowledgeBase    @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)

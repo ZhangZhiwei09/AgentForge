@@ -82,11 +82,25 @@ export class KnowledgeIngestionService {
     }
   }
 
-  // 更新文档状态，可选记录错误信息和递增重试计数
+  // 处理进度详情
+  private setProgress(
+    phase: string,
+    progress: number,
+    total: number,
+    message: string,
+  ): string {
+    return JSON.stringify({ phase, progress, total, message, updatedAt: new Date().toISOString() });
+  }
+
+  // 更新文档状态，可选记录错误信息、递增重试计数和处理进度
   private async updateDocumentStatus(
     docId: string,
     status: string,
-    opts?: { errorMessage?: string; incrementRetry?: boolean },
+    opts?: {
+      errorMessage?: string;
+      incrementRetry?: boolean;
+      progress?: { phase: string; progress: number; total: number; message: string };
+    },
   ): Promise<void> {
     const data: Record<string, unknown> = { status };
     if (opts?.errorMessage !== undefined) {
@@ -94,6 +108,14 @@ export class KnowledgeIngestionService {
     }
     if (opts?.incrementRetry) {
       data.retryCount = { increment: 1 };
+    }
+    if (opts?.progress) {
+      data.processingDetail = this.setProgress(
+        opts.progress.phase,
+        opts.progress.progress,
+        opts.progress.total,
+        opts.progress.message,
+      );
     }
     await prisma.knowledgeDocument.update({ where: { id: docId }, data });
   }
@@ -204,7 +226,12 @@ export class KnowledgeIngestionService {
       // ── Phase 1: PARSING ──
       // 如果文档有原始文件路径但无内容，则需要从文件解析
       if (doc.originalFilePath && (!content || !content.trim())) {
-        await this.updateDocumentStatus(docId, "parsing");
+        const fileSizeMB = doc.originalFileSize
+          ? (doc.originalFileSize / 1024 / 1024).toFixed(1) + "MB"
+          : "未知大小";
+        await this.updateDocumentStatus(docId, "downloading", {
+          progress: { phase: "downloading", progress: 0, total: 1, message: `正在从存储下载文件（${fileSizeMB}）...` },
+        });
 
         const parserRegistry = getParserRegistry();
         const parser = parserRegistry.getParser({
@@ -222,6 +249,10 @@ export class KnowledgeIngestionService {
 
         const storage = getStorageProvider();
         const fileBuffer = await storage.read(doc.originalFilePath);
+
+        await this.updateDocumentStatus(docId, "parsing", {
+          progress: { phase: "parsing", progress: 0, total: 1, message: `正在用 ${parser.name} 解析器提取文本（${fileSizeMB}）...` },
+        });
         const parsed = await parser.parse(fileBuffer);
 
         // 将解析出的文本存回文档
@@ -293,10 +324,18 @@ export class KnowledgeIngestionService {
       }
 
       // ── Phase 2: NORMALIZING ──
-      await this.updateDocumentStatus(docId, "normalizing");
+      const contentLen = content.length;
+      await this.updateDocumentStatus(docId, "normalizing", {
+        progress: { phase: "normalizing", progress: 0, total: 1, message: `正在清洗文本...` },
+      });
       const normalized = this.normalizer.normalize(
         content,
         doc.originalFileType === "pdf" ? undefined : undefined,
+      );
+
+      logger.info(
+        { docId, beforeChars: contentLen, afterChars: normalized.text.length, density: normalized.metrics.textDensity },
+        "Document normalized",
       );
       // If we have original file info, pass pageCount context
       // (pageCount is not stored on KnowledgeDocument yet, skip for now)
@@ -331,25 +370,29 @@ export class KnowledgeIngestionService {
       }
 
       // ── Phase 3: INGESTING ──
-      await this.updateDocumentStatus(docId, "ingesting");
+      // 3a. 分块（chunking）
+      await this.updateDocumentStatus(docId, "chunking", {
+        progress: { phase: "chunking", progress: 0, total: 1, message: "正在将文本切分为分块..." },
+      });
 
       // 读取 KB 分片配置
       const kbConfig = await this.getKBSplitConfig(kbId);
       const splitter = this.getSplitter(kbConfig.chunkSizeTokens, kbConfig.chunkOverlapTokens);
       const chunks = splitter.splitText(content);
+
+      logger.info({ docId, chunkCount: chunks.length, charCount: content.length }, "Text split into chunks");
+
       if (!chunks.length) {
-        await prisma.knowledgeDocument.update({
-          where: { id: docId },
-          data: {
-            status: "completed",
-            chunkCount: 0,
-            qualityLabel: qualityLabel,
-          },
+        await this.updateDocumentStatus(docId, "completed", {
+          progress: { phase: "completed", progress: 1, total: 1, message: "文档无有效文本内容，已跳过向量化" },
         });
         return;
       }
 
-      // 向量化 + 双写，带 sourceType 和 qualityLabel
+      // 3b. 向量化 + 双写，带 sourceType 和 qualityLabel
+      await this.updateDocumentStatus(docId, "embedding", {
+        progress: { phase: "embedding", progress: 0, total: chunks.length, message: `正在向量化第 0/${chunks.length} 个分块...` },
+      });
       await this.ingestChunks(docId, kbId, chunks, sourceType, qualityLabel);
 
       // ── Phase 4: COMPLETED ──
@@ -359,15 +402,21 @@ export class KnowledgeIngestionService {
           chunkCount: chunks.length,
           status: "completed",
           qualityLabel: qualityLabel,
+          processingDetail: this.setProgress("completed", chunks.length, chunks.length, `处理完成，共生成 ${chunks.length} 个分块`),
         },
       });
 
       // V3.0: 异步触发图谱抽取（不阻塞文档完成状态）
-      await this.updateDocumentStatus(docId, "graph_extracting");
+      // 仅更新 processingDetail 展示图谱进度，主状态保持 completed
+      await prisma.knowledgeDocument.update({
+        where: { id: docId },
+        data: {
+          processingDetail: this.setProgress("graph_extracting", 0, 1, "正在构建知识图谱..."),
+        },
+      });
       this.triggerGraphExtraction(docId, kbId, chunks, sourceType).catch(
         (e) => logger.warn({ docId, error: String(e) }, "Graph extraction trigger failed"),
       );
-      // 图谱抽取完成后仍保持 completed 状态
 
       logger.info(
         { docId, chunks: chunks.length, quality: qualityLabel, sourceType },
@@ -385,6 +434,7 @@ export class KnowledgeIngestionService {
       await this.updateDocumentStatus(docId, "failed", {
         errorMessage,
         incrementRetry: true,
+        progress: { phase: "failed", progress: 0, total: 1, message: `处理失败：${errorMessage}` },
       });
       throw e; // 重新抛出让 BullMQ 重试
     }
@@ -454,10 +504,18 @@ export class KnowledgeIngestionService {
     await this.ensureCollection();
 
     // 1. 批量生成 dense 向量
+    const totalChunks = chunkTexts.length;
+    await this.updateDocumentStatus(docId, "embedding", {
+      progress: { phase: "embedding", progress: 0, total: totalChunks, message: `正在向量化 ${totalChunks} 个分块（通过 ${provider.modelName}）...` },
+    });
     const denseVecs = await provider.embed(chunkTexts);
     if (!denseVecs || denseVecs.length !== chunkTexts.length) {
       throw new Error("Embedding failed or returned mismatched count");
     }
+
+    await this.updateDocumentStatus(docId, "writing_db", {
+      progress: { phase: "writing_db", progress: 0, total: totalChunks, message: `向量化完成，正在写入第 0/${totalChunks} 个分块...` },
+    });
 
     // 2. 批量插入 Milvus（过渡期双写，后续版本移除）
     const chunkIds = chunkTexts.map(() => randomUUID());
@@ -529,6 +587,13 @@ export class KnowledgeIngestionService {
         qualityLabel: qualityLabel ?? undefined,
         createdAt: new Date().toISOString(),
       });
+
+      // 每 20 个块或最后一个块时更新进度
+      if ((i + 1) % 20 === 0 || i === chunkIds.length - 1) {
+        await this.updateDocumentStatus(docId, "writing_db", {
+          progress: { phase: "writing_db", progress: i + 1, total: chunkIds.length, message: `正在写入第 ${i + 1}/${chunkIds.length} 个分块...` },
+        });
+      }
     }
 
     // 4. 构建倒排索引（保留用于 PG 端关键词回退检索）
