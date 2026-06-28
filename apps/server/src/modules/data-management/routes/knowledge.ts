@@ -19,12 +19,70 @@ export const knowledgeManagementRoutes = createHono();
 const kbCreateSchema = z.object({
   name: z.string().min(1).max(255),
   description: z.string().nullable().optional(),
+  chunk_size_tokens: z
+    .number()
+    .int()
+    .min(200)
+    .max(2000)
+    .optional(),
+  chunk_overlap_tokens: z
+    .number()
+    .int()
+    .min(0)
+    .optional(),
+}).superRefine((data, ctx) => {
+  // 校验：overlap < size * 0.5
+  const size = data.chunk_size_tokens;
+  const overlap = data.chunk_overlap_tokens;
+  if (size !== undefined && overlap !== undefined && overlap >= size * 0.5) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "chunk_overlap_tokens must be less than chunk_size_tokens * 0.5",
+      path: ["chunk_overlap_tokens"],
+    });
+  }
+  // 校验：overlap < size（基础约束）
+  if (size !== undefined && overlap !== undefined && overlap >= size) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "chunk_overlap_tokens must be less than chunk_size_tokens",
+      path: ["chunk_overlap_tokens"],
+    });
+  }
 });
 
 const kbUpdateSchema = z.object({
   name: z.string().min(1).max(255).optional(),
   description: z.string().nullable().optional(),
   enabled: z.boolean().optional(),
+  chunk_size_tokens: z
+    .number()
+    .int()
+    .min(200)
+    .max(2000)
+    .optional(),
+  chunk_overlap_tokens: z
+    .number()
+    .int()
+    .min(0)
+    .optional(),
+}).superRefine((data, ctx) => {
+  const size = data.chunk_size_tokens;
+  const overlap = data.chunk_overlap_tokens;
+  if (size !== undefined && overlap !== undefined && overlap >= size * 0.5) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "chunk_overlap_tokens must be less than chunk_size_tokens * 0.5",
+      path: ["chunk_overlap_tokens"],
+    });
+  }
+  if (size !== undefined && overlap !== undefined && overlap >= size) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "chunk_overlap_tokens must be less than chunk_size_tokens",
+      path: ["chunk_overlap_tokens"],
+    });
+  }
 });
 
 // POST /api/knowledge/bases —— 创建知识库
@@ -32,10 +90,17 @@ knowledgeManagementRoutes.post(
   "/api/knowledge/bases",
   zValidator("json", kbCreateSchema),
   async (c) => {
-    const { name, description } = c.req.valid("json");
+    const { name, description, chunk_size_tokens, chunk_overlap_tokens } =
+      c.req.valid("json");
 
     const kb = await prisma.knowledgeBase.create({
-      data: { id: randomUUID(), name, description },
+      data: {
+        id: randomUUID(),
+        name,
+        description,
+        chunkSizeTokens: chunk_size_tokens,
+        chunkOverlapTokens: chunk_overlap_tokens,
+      },
     });
 
     return c.json(
@@ -44,6 +109,8 @@ knowledgeManagementRoutes.post(
         name: kb.name,
         description: kb.description,
         enabled: kb.enabled,
+        chunk_size_tokens: kb.chunkSizeTokens,
+        chunk_overlap_tokens: kb.chunkOverlapTokens,
         document_count: 0,
         created_at: kb.createdAt,
         updated_at: kb.updatedAt,
@@ -67,6 +134,8 @@ knowledgeManagementRoutes.get("/api/knowledge/bases", async (c) => {
     name: kb.name,
     description: kb.description,
     enabled: kb.enabled,
+    chunk_size_tokens: kb.chunkSizeTokens,
+    chunk_overlap_tokens: kb.chunkOverlapTokens,
     document_count: kb._count.documents,
     created_at: kb.createdAt,
     updated_at: kb.updatedAt,
@@ -93,6 +162,8 @@ knowledgeManagementRoutes.get("/api/knowledge/bases/:kbId", async (c) => {
     name: kb.name,
     description: kb.description,
     enabled: kb.enabled,
+    chunk_size_tokens: kb.chunkSizeTokens,
+    chunk_overlap_tokens: kb.chunkOverlapTokens,
     document_count: docCount,
     created_at: kb.createdAt,
     updated_at: kb.updatedAt,
@@ -116,11 +187,17 @@ knowledgeManagementRoutes.put(
       name?: string;
       description?: string | null;
       enabled?: boolean;
+      chunkSizeTokens?: number | null;
+      chunkOverlapTokens?: number | null;
     } = {};
     if (data.name !== undefined) updateData.name = data.name;
     if (data.description !== undefined)
       updateData.description = data.description;
     if (data.enabled !== undefined) updateData.enabled = data.enabled;
+    if (data.chunk_size_tokens !== undefined)
+      updateData.chunkSizeTokens = data.chunk_size_tokens;
+    if (data.chunk_overlap_tokens !== undefined)
+      updateData.chunkOverlapTokens = data.chunk_overlap_tokens;
 
     const updated = await prisma.knowledgeBase.update({
       where: { id: kbId },
@@ -136,6 +213,8 @@ knowledgeManagementRoutes.put(
       name: updated.name,
       description: updated.description,
       enabled: updated.enabled,
+      chunk_size_tokens: updated.chunkSizeTokens,
+      chunk_overlap_tokens: updated.chunkOverlapTokens,
       document_count: docCount,
       created_at: updated.createdAt,
       updated_at: updated.updatedAt,
