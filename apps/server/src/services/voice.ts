@@ -6,7 +6,6 @@ import { logger } from "@agentforge/logger";
 import { getASRProvider, getTTSProvider } from "./audio-providers.js";
 import { getProvider, resolveModel } from "../providers/registry.js";
 import type { ChatMessage } from "../providers/types.js";
-import { MemoryEngine } from "./memory-engine.js";
 import { pcmToWav, estimateDuration } from "../lib/audio-utils.js";
 import { settings } from "../config.js";
 
@@ -220,11 +219,12 @@ export class VoiceService {
       const [providerName, resolvedModel] = resolveModel(null);
       const provider = getProvider(providerName);
 
-      // Inject user memory into system prompt
+      // Inject user memory into system prompt (via MemoryService facade)
       let systemPrompt = "";
       try {
-        const engine = new MemoryEngine();
-        const memories = await engine.search(userText, this.userId, 5);
+        const { getMemoryService } = await import("./memory-service.js");
+        const memoryService = getMemoryService();
+        const memories = await memoryService.search(userText, this.userId, 5);
         const relevant = memories.filter((m) => m.score > 0.3);
         if (relevant.length > 0) {
           const memoryText = relevant.map((m) => `- ${m.content}`).join("\n");

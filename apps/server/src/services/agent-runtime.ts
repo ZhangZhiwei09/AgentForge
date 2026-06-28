@@ -20,7 +20,7 @@ import {
   agentRequestDurationMs,
 } from "../observability/metrics.js";
 import { intentDetector } from "./intent-detector.js";
-import { MemoryEngine } from "./memory-engine.js";
+import { getMemoryService } from "./memory-service.js";
 import { createExecutionScope } from "../runtime/scope.js";
 import { getObservabilityProvider } from "../observability/index.js";
 
@@ -501,19 +501,18 @@ export class AgentRuntimeService {
           { role: "user" as const, content: userMessage },
           { role: "assistant" as const, content: streamedAnswer },
         ];
-        new MemoryEngine()
+        getMemoryService()
           .extractAndStore(
             allMessages,
             AGENT_USER_ID,
             conversation.id,
-            providerName,
             conversation.sessionId,
           )
           .then((extracted) => {
             if (extracted.length > 0) {
               logger.info(
                 { count: extracted.length, sessionId: conversation.sessionId },
-                "Agent memories extracted",
+                "Agent memories extracted via MemoryService",
               );
             }
           })

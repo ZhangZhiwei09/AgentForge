@@ -100,4 +100,14 @@ export const settings = {
   // ── Mem0 ─────────────────────────────────────────────
   mem0ApiKey: process.env.MEM0_API_KEY || "",
   mem0BaseUrl: process.env.MEM0_BASE_URL || "",
+
+  // ── 分层记忆可配置参数 ──────────────────────────────
+  // 短期记忆滑动窗口大小（保留最近 N 条消息）
+  memoryWindowSize: parseInt(process.env.MEMORY_WINDOW_SIZE || "20", 10),
+  // 触发摘要生成的阈值（消息数超过此值 → LLM 压缩旧消息）
+  memorySummaryTrigger: parseInt(process.env.MEMORY_SUMMARY_TRIGGER || "30", 10),
+  // 短期记忆 TTL（天），过期自动清理
+  memoryTtlDays: parseInt(process.env.MEMORY_TTL_DAYS || "7", 10),
+  // 长期记忆检索默认 topK
+  memoryLongTermTopK: parseInt(process.env.MEMORY_LONGTERM_TOPK || "5", 10),
 };

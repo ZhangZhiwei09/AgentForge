@@ -19,7 +19,9 @@ import { logger } from "@agentforge/logger";
 export interface MemoryContext {
   summary: string;                          // 短期窗口摘要
   recentMessages: ShortTermMemoryMsg[];     // 最近窗口消息
-  longTermMemories: MemorySearchResult[];   // 长期记忆（用户级 + 会话级）
+  sessionMemories: MemorySearchResult[];    // 会话级长期记忆（当前会话相关）
+  userMemories: MemorySearchResult[];       // 用户级长期记忆（跨会话偏好/事实）
+  longTermMemories: MemorySearchResult[];   // 全部长期记忆（会话级 + 用户级，去重排序）
   memoryCount: number;                      // 总记忆条目数
 }
 
@@ -44,7 +46,7 @@ export class MemoryService {
 
   /**
    * 构建 Agent Prompt 上下文所需的全部记忆信息。
-   * 按顺序返回：短期摘要 + 最近窗口消息 + 长期记忆。
+   * 注入顺序：短期摘要 → 最近窗口消息 → 会话级长期记忆 → 用户级长期记忆。
    */
   async buildContext(params: BuildContextParams): Promise<MemoryContext> {
     const { userId, conversationId, query } = params;
@@ -61,22 +63,26 @@ export class MemoryService {
       }),
     ]);
 
-    // 合并用户级和会话级长期记忆，去重按分数排序
-    const allLongTerm: MemorySearchResult[] = [
-      ...longContext.userMemories,
-      ...longContext.sessionMemories,
-    ]
-      .sort((a, b) => b.score - a.score)
-      .filter((m, i, arr) => {
-        // 简单内容去重
-        const key = m.content.slice(0, 80);
-        return arr.findIndex((x) => x.content.slice(0, 80) === key) === i;
-      })
-      .slice(0, 10);
+    // 会话级记忆去重（保留高分）
+    const sessionMemories = this.deduplicate(longContext.sessionMemories);
+    // 用户级记忆去重，并排除与会话级重复的内容
+    const sessionContentKeys = new Set(
+      sessionMemories.map((m) => m.content.slice(0, 80)),
+    );
+    const userMemories = this.deduplicate(
+      longContext.userMemories.filter(
+        (m) => !sessionContentKeys.has(m.content.slice(0, 80)),
+      ),
+    );
+
+    // 合并：会话级优先 → 用户级补充
+    const allLongTerm = [...sessionMemories, ...userMemories].slice(0, 10);
 
     return {
       summary: shortContext.summary,
       recentMessages: shortContext.recentMessages,
+      sessionMemories,
+      userMemories,
       longTermMemories: allLongTerm,
       memoryCount: shortContext.messageCount + allLongTerm.length,
     };
@@ -84,16 +90,18 @@ export class MemoryService {
 
   /**
    * 构建格式化后的 Prompt 上下文字符串（可直接注入 Agent system prompt）。
-   * 注入顺序：短期摘要 → 最近窗口 → 长期相关记忆
+   * 注入顺序：短期摘要 → 最近窗口消息 → 会话级长期记忆 → 用户级长期记忆。
    */
   async buildContextText(params: BuildContextParams): Promise<string> {
     const context = await this.buildContext(params);
     const lines: string[] = [];
 
+    // 1. 短期摘要
     if (context.summary) {
       lines.push("## 对话历史摘要\n" + context.summary);
     }
 
+    // 2. 最近窗口消息
     if (context.recentMessages.length > 0) {
       lines.push("\n## 最近对话\n");
       for (const msg of context.recentMessages.slice(-5)) {
@@ -102,9 +110,18 @@ export class MemoryService {
       }
     }
 
-    if (context.longTermMemories.length > 0) {
-      lines.push("\n## 用户相关信息\n");
-      for (const mem of context.longTermMemories) {
+    // 3. 会话级长期记忆（当前会话相关的上下文）
+    if (context.sessionMemories.length > 0) {
+      lines.push("\n## 当前会话记忆\n");
+      for (const mem of context.sessionMemories) {
+        lines.push(`- ${mem.content} (相关度: ${(mem.score * 100).toFixed(0)}%)`);
+      }
+    }
+
+    // 4. 用户级长期记忆（跨会话偏好/事实）
+    if (context.userMemories.length > 0) {
+      lines.push("\n## 用户偏好与事实\n");
+      for (const mem of context.userMemories) {
         lines.push(`- ${mem.content} (相关度: ${(mem.score * 100).toFixed(0)}%)`);
       }
     }
@@ -172,6 +189,21 @@ export class MemoryService {
   /** 清理会话数据 */
   async cleanupSession(conversationId: string): Promise<void> {
     await this.shortTerm.cleanup(conversationId);
+  }
+
+  // ── 私有工具方法 ───────────────────────────────────────
+
+  /** 按内容去重，保留高分记忆 */
+  private deduplicate(memories: MemorySearchResult[]): MemorySearchResult[] {
+    const seen = new Set<string>();
+    return memories
+      .sort((a, b) => b.score - a.score)
+      .filter((m) => {
+        const key = m.content.slice(0, 80);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
   }
 }
 
