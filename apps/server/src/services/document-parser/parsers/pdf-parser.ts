@@ -24,7 +24,8 @@ export class PdfParser implements DocumentParser {
     try {
       // unpdf v1.6: extractText(buffer) returns { totalPages, text: string[] }
       // With mergePages:true returns { totalPages, text: string }
-      const raw = await extractText(buffer, { mergePages: true });
+      // unpdf/pdfjs 要求 Uint8Array，Node Buffer 虽是其子类但会被显式拒绝
+      const raw = await extractText(new Uint8Array(buffer), { mergePages: true });
       text = raw.text;
       totalPages = raw.totalPages;
     } catch (e) {

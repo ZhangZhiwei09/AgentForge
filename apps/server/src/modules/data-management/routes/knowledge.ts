@@ -231,7 +231,13 @@ knowledgeManagementRoutes.delete("/api/knowledge/bases/:kbId", async (c) => {
     return c.json({ detail: "知识库不存在" }, 404);
   }
 
-  await prisma.knowledgeBase.delete({ where: { id: kbId } });
+  // 按 FK 依赖顺序删除：chunks → documents → knowledge_base
+  // KnowledgeInvertedIndex 有 ON DELETE CASCADE，会随 chunk/kb 自动删除
+  await prisma.$transaction(async (tx) => {
+    await tx.knowledgeChunk.deleteMany({ where: { knowledgeBaseId: kbId } });
+    await tx.knowledgeDocument.deleteMany({ where: { knowledgeBaseId: kbId } });
+    await tx.knowledgeBase.delete({ where: { id: kbId } });
+  });
 
   return c.json({ status: "deleted" });
 });
@@ -402,10 +408,10 @@ knowledgeManagementRoutes.post(
         );
       }
 
-      const MAX_SIZE = 10 * 1024 * 1024;
+      const MAX_SIZE = 15 * 1024 * 1024;
       if (file.size > MAX_SIZE) {
         return c.json(
-          { detail: `文件过大（${(file.size / 1024 / 1024).toFixed(2)}MB），最大支持 10MB` },
+          { detail: `文件过大（${(file.size / 1024 / 1024).toFixed(2)}MB），最大支持 15MB` },
           400,
         );
       }
