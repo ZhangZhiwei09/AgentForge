@@ -82,6 +82,25 @@ export class KnowledgeIngestionService {
     }
   }
 
+  // 记录阶段完成时间戳 + 进度更新（参考 Dify per-stage timestamp 设计）
+  private async recordStageComplete(
+    docId: string,
+    stageField: string,
+    progress: { phase: string; progress: number; total: number; message: string },
+  ): Promise<void> {
+    const now = new Date();
+    const data: Record<string, unknown> = {
+      [stageField]: now,
+      processingDetail: this.setProgress(
+        progress.phase,
+        progress.progress,
+        progress.total,
+        progress.message,
+      ),
+    };
+    await prisma.knowledgeDocument.update({ where: { id: docId }, data });
+  }
+
   // 处理进度详情
   private setProgress(
     phase: string,
@@ -213,6 +232,12 @@ export class KnowledgeIngestionService {
     });
     if (!doc) throw new Error(`Document ${docId} not found`);
 
+    // 记录处理开始时间
+    await prisma.knowledgeDocument.update({
+      where: { id: docId },
+      data: { processingStartedAt: new Date() },
+    });
+
     // 推断来源类型：有原始文件 → 文件上传，否则 → 手动/文本
     const sourceType: string = doc.originalFileType
       ? (doc.originalFileType === "pdf" ? "pdf" : "text")
@@ -250,6 +275,11 @@ export class KnowledgeIngestionService {
         const storage = getStorageProvider();
         const fileBuffer = await storage.read(doc.originalFilePath);
 
+        // 记录下载完成时间戳
+        await this.recordStageComplete(docId, "downloadingCompletedAt", {
+          phase: "downloading", progress: 10, total: 100, message: "文件下载完成，开始解析...",
+        });
+
         await this.updateDocumentStatus(docId, "parsing", {
           progress: { phase: "parsing", progress: 0, total: 1, message: `正在用 ${parser.name} 解析器提取文本（${fileSizeMB}）...` },
         });
@@ -271,6 +301,11 @@ export class KnowledgeIngestionService {
           { docId, parser: parser.name, charCount: parsed.metadata.charCount },
           "Document parsed",
         );
+
+        // 记录解析完成时间戳
+        await this.recordStageComplete(docId, "parsingCompletedAt", {
+          phase: "parsing", progress: 25, total: 100, message: `解析完成，共提取 ${parsed.metadata.charCount} 个字符`,
+        });
 
         // V3.0: 如果 parser 返回的是多模态文档（含 assets），上传资产到 MinIO
         const parsedExtended = parsed as {
@@ -369,6 +404,12 @@ export class KnowledgeIngestionService {
         content = normalized.text;
       }
 
+      // 记录清洗完成时间戳
+      await this.recordStageComplete(docId, "normalizingCompletedAt", {
+        phase: "normalizing", progress: 35, total: 100,
+        message: `文本清洗完成（${content.length} 字符，密度 ${normalized.metrics.textDensity.toFixed(2)}）`,
+      });
+
       // ── Phase 3: INGESTING ──
       // 3a. 分块（chunking）
       await this.updateDocumentStatus(docId, "chunking", {
@@ -389,11 +430,23 @@ export class KnowledgeIngestionService {
         return;
       }
 
+      // 记录分段完成时间戳
+      await this.recordStageComplete(docId, "chunkingCompletedAt", {
+        phase: "chunking", progress: 50, total: 100,
+        message: `分段完成，共切分为 ${chunks.length} 个分块`,
+      });
+
       // 3b. 向量化 + 双写，带 sourceType 和 qualityLabel
       await this.updateDocumentStatus(docId, "embedding", {
         progress: { phase: "embedding", progress: 0, total: chunks.length, message: `正在向量化第 0/${chunks.length} 个分块...` },
       });
       await this.ingestChunks(docId, kbId, chunks, sourceType, qualityLabel);
+
+      // 记录向量化+写入完成时间戳
+      await this.recordStageComplete(docId, "embeddingCompletedAt", {
+        phase: "writing_db", progress: 95, total: 100,
+        message: `向量化与写入完成，共处理 ${chunks.length} 个分块`,
+      });
 
       // ── Phase 4: COMPLETED ──
       await prisma.knowledgeDocument.update({

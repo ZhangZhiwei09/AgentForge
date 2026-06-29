@@ -167,6 +167,14 @@ model KnowledgeDocument {
   // V3.1: 处理进度详情（JSON：{phase, progress, total, message, startedAt}）
   processingDetail  String?        @map("processing_detail")
 
+  // V3.2: 阶段时间戳 — 参考 Dify Document 模型的 per-stage timestamp 设计
+  processingStartedAt      DateTime? @map("processing_started_at") @db.Timestamptz(6)
+  downloadingCompletedAt   DateTime? @map("downloading_completed_at") @db.Timestamptz(6)
+  parsingCompletedAt       DateTime? @map("parsing_completed_at") @db.Timestamptz(6)
+  normalizingCompletedAt   DateTime? @map("normalizing_completed_at") @db.Timestamptz(6)
+  chunkingCompletedAt      DateTime? @map("chunking_completed_at") @db.Timestamptz(6)
+  embeddingCompletedAt     DateTime? @map("embedding_completed_at") @db.Timestamptz(6)
+
   chunks          KnowledgeChunk[]
   knowledgeBase   KnowledgeBase    @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 

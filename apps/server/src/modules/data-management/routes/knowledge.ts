@@ -12,6 +12,16 @@ import { createHono } from "../../../lib/hono.js";
 
 export const knowledgeManagementRoutes = createHono();
 
+// 安全解析 JSON 字符串，失败时返回原始字符串
+function safeJsonParse(v: string | null | undefined): unknown {
+  if (!v) return null;
+  try {
+    return JSON.parse(v);
+  } catch {
+    return v;
+  }
+}
+
 // ════════════════════════════════════════════════════════════════
 // 知识库 CRUD
 // ════════════════════════════════════════════════════════════════
@@ -256,18 +266,48 @@ const batchDocCreateSchema = z.object({
 });
 
 // GET /api/knowledge/bases/:kbId/documents —— 列出知识库中的所有文档
+// 不返回 content（可能很大），返回阶段时间戳与进度信息
 knowledgeManagementRoutes.get("/api/knowledge/bases/:kbId/documents", async (c) => {
   const kbId = c.req.param("kbId");
 
   const docs = await prisma.knowledgeDocument.findMany({
     where: { knowledgeBaseId: kbId },
     orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      knowledgeBaseId: true,
+      title: true,
+      chunkCount: true,
+      status: true,
+      enabled: true,
+      createdAt: true,
+      updatedAt: true,
+      originalFilename: true,
+      originalFileType: true,
+      originalFileSize: true,
+      errorMessage: true,
+      retryCount: true,
+      qualityLabel: true,
+      processingDetail: true,
+      processingStartedAt: true,
+      downloadingCompletedAt: true,
+      parsingCompletedAt: true,
+      normalizingCompletedAt: true,
+      chunkingCompletedAt: true,
+      embeddingCompletedAt: true,
+    },
   });
 
-  return c.json(docs);
+  // 解析 processingDetail JSON 字符串为对象，方便前端使用
+  const parsed = docs.map((d) => ({
+    ...d,
+    processingDetail: d.processingDetail ? safeJsonParse(d.processingDetail) : null,
+  }));
+
+  return c.json(parsed);
 });
 
-// GET /api/knowledge/documents/:docId —— 获取单个文档详情
+// GET /api/knowledge/documents/:docId —— 获取单个文档详情（含完整内容、阶段时间戳、进度信息）
 knowledgeManagementRoutes.get("/api/knowledge/documents/:docId", async (c) => {
   const docId = c.req.param("docId");
   const doc = await prisma.knowledgeDocument.findUnique({
@@ -278,7 +318,11 @@ knowledgeManagementRoutes.get("/api/knowledge/documents/:docId", async (c) => {
     return c.json({ detail: "文档不存在" }, 404);
   }
 
-  return c.json(doc);
+  // 解析 processingDetail JSON 字符串为对象
+  return c.json({
+    ...doc,
+    processingDetail: doc.processingDetail ? safeJsonParse(doc.processingDetail) : null,
+  });
 });
 
 // POST /api/knowledge/bases/:kbId/documents —— 上传并摄取单篇文档

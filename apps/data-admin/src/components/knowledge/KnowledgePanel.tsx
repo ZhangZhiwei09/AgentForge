@@ -33,6 +33,25 @@ interface KnowledgeDocument {
   chunkCount: number;
   status: string;
   createdAt: string;
+  originalFilename?: string | null;
+  originalFileType?: string | null;
+  errorMessage?: string | null;
+  qualityLabel?: string | null;
+  processingDetail?: ProcessingDetail | null;
+  processingStartedAt?: string | null;
+  downloadingCompletedAt?: string | null;
+  parsingCompletedAt?: string | null;
+  normalizingCompletedAt?: string | null;
+  chunkingCompletedAt?: string | null;
+  embeddingCompletedAt?: string | null;
+}
+
+interface ProcessingDetail {
+  phase: string;
+  progress: number;
+  total: number;
+  message: string;
+  updatedAt?: string;
 }
 
 interface KnowledgeSearchResult {
@@ -216,6 +235,20 @@ export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
     }
   }, [viewMode, selectedKb, fetchDocuments]);
 
+  // 处理中的文档自动轮询（每 3 秒刷新）
+  useEffect(() => {
+    if (viewMode !== "documents" || !selectedKb) return;
+    const hasProcessing = documents.some(
+      (d) => !["completed", "failed", "pending"].includes(d.status),
+    );
+    if (!hasProcessing) return;
+
+    const timer = setInterval(() => {
+      fetchDocuments(selectedKb.id);
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [viewMode, selectedKb, documents, fetchDocuments]);
+
   // Auto-fetch stats on mount
   useEffect(() => {
     fetchStats();
@@ -363,6 +396,94 @@ export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
     };
     return map[status] ?? "bg-gray-100 text-gray-500";
   };
+
+  // Stage progress bar — 参考 Dify 的阶段进度追踪设计
+  const getStageProgress = (doc: KnowledgeDocument) => {
+    const stages = doc.originalFilename
+      ? [
+          { key: "download", label: "下载", done: !!doc.downloadingCompletedAt },
+          { key: "parse", label: "解析", done: !!doc.parsingCompletedAt },
+          { key: "clean", label: "清洗", done: !!doc.normalizingCompletedAt },
+          { key: "chunk", label: "分段", done: !!doc.chunkingCompletedAt },
+          { key: "embed", label: "向量化", done: !!doc.embeddingCompletedAt },
+        ]
+      : [
+          { key: "clean", label: "清洗", done: !!doc.normalizingCompletedAt },
+          { key: "chunk", label: "分段", done: !!doc.chunkingCompletedAt },
+          { key: "embed", label: "向量化", done: !!doc.embeddingCompletedAt },
+        ];
+
+    const completedCount = stages.filter((s) => s.done).length;
+    const progressPct = doc.processingDetail
+      ? Math.round((doc.processingDetail.progress / doc.processingDetail.total) * 100)
+      : stages.length > 0
+        ? Math.round((completedCount / stages.length) * 100)
+        : 0;
+    const currentPhase = doc.processingDetail?.phase;
+
+    return { stages, completedCount, progressPct, currentPhase };
+  };
+
+  // Document status display with stage progress
+  function DocumentStatus({ doc }: { doc: KnowledgeDocument }) {
+    if (doc.status === "completed") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-green-100 text-green-700">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" />
+          完成
+        </span>
+      );
+    }
+
+    if (doc.status === "failed") {
+      return (
+        <span
+          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-red-100 text-red-700"
+          title={doc.errorMessage ?? undefined}
+        >
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" />
+          失败
+        </span>
+      );
+    }
+
+    if (doc.status === "pending") {
+      return (
+        <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-medium bg-gray-100 text-gray-500">
+          <span className="inline-block h-1.5 w-1.5 rounded-full bg-gray-400" />
+          等待
+        </span>
+      );
+    }
+
+    // Processing — show stage progress bar
+    const { stages, progressPct, currentPhase } = getStageProgress(doc);
+
+    return (
+      <div className="flex items-center gap-1.5 flex-1 min-w-0">
+        {/* Stage dots */}
+        <div className="flex items-center gap-0.5">
+          {stages.map((stage, i) => (
+            <div
+              key={stage.key}
+              className={`h-1.5 rounded-full transition-all ${
+                stage.done
+                  ? "w-3 bg-green-500"
+                  : currentPhase === stage.key
+                    ? "w-3 bg-amber-400 animate-pulse"
+                    : "w-1.5 bg-gray-300"
+              }`}
+              title={`${stage.label}${stage.done ? " ✓" : currentPhase === stage.key ? " ..." : ""}`}
+            />
+          ))}
+        </div>
+        {/* Progress percent */}
+        <span className="text-[10px] text-muted-foreground font-mono tabular-nums">
+          {progressPct}%
+        </span>
+      </div>
+    );
+  }
 
   // ── Main Render ─────────────────────────────
 
@@ -759,14 +880,12 @@ export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span
-                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${statusBadge(doc.status)}`}
-                  >
-                    {doc.status}
-                  </span>
-                  <span className="text-[10px] text-muted-foreground">
-                    {doc.chunkCount} chunk{doc.chunkCount !== 1 ? "s" : ""}
-                  </span>
+                  <DocumentStatus doc={doc} />
+                  {doc.status === "completed" && (
+                    <span className="text-[10px] text-muted-foreground flex-shrink-0">
+                      {doc.chunkCount} chunk{doc.chunkCount !== 1 ? "s" : ""}
+                    </span>
+                  )}
                 </div>
               </div>
             ))}
