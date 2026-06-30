@@ -3,7 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, FileText, Clock, Layers } from "lucide-react";
 import { client } from "@agentforge/ui";
-import type { KnowledgeDocumentDTO } from "@agentforge/shared-types";
+import type { KnowledgeDocumentDTO, KnowledgeChunkDTO } from "@agentforge/shared-types";
 import { StatusBadge } from "./StatusBadge";
 import { SegmentList } from "./SegmentList";
 import type { SegmentData } from "./SegmentCard";
@@ -76,6 +76,26 @@ function DocumentDetailView({
     queryFn: () => client.getDocument(docId),
   });
 
+  // 查询后端真实分块数据
+  const {
+    data: chunks = [],
+    isLoading: chunksLoading,
+  } = useQuery({
+    queryKey: ["knowledge", "document", docId, "chunks"],
+    queryFn: () => client.getDocumentChunks(docId),
+    // 文档处理中时 chunks 可能为空，不视为错误
+    enabled: !!doc && doc.status === "completed",
+  });
+
+  // ── 将后端分块映射为 SegmentData ──
+  const segmentData: SegmentData[] = chunks.map((c: KnowledgeChunkDTO) => ({
+    id: c.id,
+    content: c.content,
+    chunkIndex: c.chunkIndex,
+    tokenCount: c.tokenCount ?? undefined,
+    parentChunkId: c.parentChunkId,
+  }));
+
   // ── 加载状态 ──────────────────────────────────────
 
   if (isLoading) {
@@ -144,8 +164,6 @@ function DocumentDetailView({
     );
   }
 
-  // ── 构建分块数据（当前 API 不返回分块列表，使用占位数据） ──
-
   // KnowledgeDocumentDTO 可能包含额外字段，安全扩展访问
   const fullDoc = doc as KnowledgeDocumentDTO & {
     originalFilename?: string | null;
@@ -153,24 +171,6 @@ function DocumentDetailView({
     errorMessage?: string | null;
     content?: string;
   };
-
-  // 从文档内容构造简单分块展示（未来 API 提供分块列表后替换）
-  const chunks: SegmentData[] = (() => {
-    const docContent: string | undefined = fullDoc.content;
-    if (!docContent || docContent.trim().length === 0) {
-      return [];
-    }
-    // 简单按段落拆分作为展示
-    const paragraphs = docContent
-      .split(/\n\s*\n/)
-      .filter((p) => p.trim().length > 0);
-    return paragraphs.slice(0, 10).map((content, i) => ({
-      id: `${docId}-chunk-${i}`,
-      content: content.trim(),
-      chunkIndex: i,
-      tokenCount: Math.ceil(content.length / 2), // 粗略估算
-    }));
-  })();
 
   return (
     <div className="flex flex-col flex-1 h-full bg-[hsl(var(--background))]">
@@ -232,7 +232,7 @@ function DocumentDetailView({
 
       {/* 内容区：分块列表 */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
-        <SegmentList chunks={chunks} loading={false} />
+        <SegmentList chunks={segmentData} loading={chunksLoading} />
       </div>
     </div>
   );

@@ -14,6 +14,7 @@ import type {
   KnowledgeBaseDTO,
   CreateKnowledgeBaseRequest,
   UpdateKnowledgeBaseRequest,
+  KnowledgeChunkDTO,
   KnowledgeDocumentDTO,
   KnowledgeSearchResponse,
   KnowledgeStatsDTO,
@@ -293,6 +294,12 @@ export class AgentForgeClient {
     );
   }
 
+  async getDocumentChunks(docId: string): Promise<KnowledgeChunkDTO[]> {
+    return this.request<KnowledgeChunkDTO[]>(
+      `/api/knowledge/documents/${docId}/chunks`,
+    );
+  }
+
   async deleteDocument(docId: string): Promise<void> {
     await this.request<void>(`/api/knowledge/documents/${docId}`, {
       method: "DELETE",
@@ -315,7 +322,7 @@ export class AgentForgeClient {
   async uploadDocumentFile(
     kbId: string,
     file: File,
-    options?: { title?: string },
+    options?: { title?: string; process?: boolean },
   ): Promise<KnowledgeDocumentDTO> {
     const formData = new FormData();
     formData.append("file", file);
@@ -330,8 +337,11 @@ export class AgentForgeClient {
     }
     // 不设置 Content-Type，让浏览器自动生成含 boundary 的 multipart/form-data
 
+    // process=false 跳过入队，由前端在配置保存后显式触发
+    const processParam = options?.process === false ? "?process=false" : "";
+
     const res = await fetch(
-      `${this.baseUrl}/api/knowledge/bases/${encodeURIComponent(kbId)}/documents/upload`,
+      `${this.baseUrl}/api/knowledge/bases/${encodeURIComponent(kbId)}/documents/upload${processParam}`,
       {
         method: "POST",
         headers,
@@ -355,15 +365,24 @@ export class AgentForgeClient {
     text: string,
     config: ChunkingConfigDTO,
   ): Promise<ChunkPreviewResponseDTO> {
+    // 自动 clamp overlap：后端校验要求 overlap < size * 0.5，避免 400
+    const clampOverlap = (size: number, overlap: number) =>
+      Math.min(overlap, Math.max(0, Math.floor(size * 0.5) - 1));
+
+    const parentSize = config.maxChunkSize;
+    const parentOverlap = clampOverlap(parentSize, config.overlap);
+    const childSize = config.childMaxSize ?? parentSize;
+    const childOverlap = clampOverlap(childSize, parentOverlap);
+
     return this.request<ChunkPreviewResponseDTO>("/api/knowledge/chunk-preview", {
       method: "POST",
       body: JSON.stringify({
         text,
-        chunk_size_tokens: config.maxChunkSize,
-        chunk_overlap_tokens: config.overlap,
+        chunk_size_tokens: parentSize,
+        chunk_overlap_tokens: parentOverlap,
         chunk_structure: config.mode === "parent_child" ? "hierarchical" : "paragraph",
-        child_chunk_size_tokens: config.childMaxSize,
-        child_chunk_overlap_tokens: config.overlap,
+        child_chunk_size_tokens: childSize,
+        child_chunk_overlap_tokens: childOverlap,
         separator_mode: config.separator ? "custom" : "auto",
         custom_separator: config.separator || null,
       }),
@@ -393,6 +412,16 @@ export class AgentForgeClient {
 
   async getKnowledgeStats(): Promise<KnowledgeStatsDTO> {
     return this.request<KnowledgeStatsDTO>("/api/knowledge/stats");
+  }
+
+  // ---- Knowledge Processing ----
+
+  /** 将知识库中所有 pending 状态的文档入队处理（在保存分块配置后调用） */
+  async processKnowledgeBase(kbId: string): Promise<{ processed: number; message: string }> {
+    return this.request<{ processed: number; message: string }>(
+      `/api/knowledge/bases/${encodeURIComponent(kbId)}/process`,
+      { method: "POST" },
+    );
   }
 
   // ---- Analytics & Feedback ----

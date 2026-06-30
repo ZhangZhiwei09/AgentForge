@@ -12,8 +12,10 @@ interface StepChunkConfigProps {
   onConfigChange: (config: ChunkingConfigDTO) => void;
   onBack: () => void;
   onSubmit: () => void;
+  isSubmitting?: boolean;
   preview: ChunkPreviewResponseDTO | null;
   previewLoading: boolean;
+  previewError?: string | null;
 }
 
 // ── 组件 ──────────────────────────────────────────
@@ -23,8 +25,10 @@ export function StepChunkConfig({
   onConfigChange,
   onBack,
   onSubmit,
+  isSubmitting = false,
   preview,
   previewLoading,
+  previewError,
 }: StepChunkConfigProps) {
   return (
     <div className="space-y-6">
@@ -60,6 +64,11 @@ export function StepChunkConfig({
               <span className="inline-block h-2 w-2 rounded-full bg-amber-400 animate-pulse" />
             )}
           </div>
+          {previewError && (
+            <div className="mb-3 rounded-md bg-red-50 border border-red-200 px-3 py-2 text-xs text-red-600">
+              {previewError}
+            </div>
+          )}
           <div className="max-h-[420px] overflow-y-auto">
             <ChunkPreview preview={preview} loading={previewLoading} />
           </div>
@@ -78,10 +87,15 @@ export function StepChunkConfig({
 
         <button
           onClick={onSubmit}
-          className="inline-flex items-center gap-1.5 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 transition-opacity"
+          disabled={isSubmitting}
+          className="inline-flex items-center gap-1.5 rounded-md bg-[hsl(var(--primary))] px-4 py-2 text-sm font-medium text-[hsl(var(--primary-foreground))] hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          开始处理
-          <ArrowRight className="h-4 w-4" />
+          {isSubmitting ? "保存配置中..." : "开始处理"}
+          {isSubmitting ? (
+            <span className="inline-block h-3 w-3 rounded-full border-2 border-[hsl(var(--primary-foreground))] border-t-transparent animate-spin" />
+          ) : (
+            <ArrowRight className="h-4 w-4" />
+          )}
         </button>
       </div>
     </div>

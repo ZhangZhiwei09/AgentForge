@@ -24,11 +24,11 @@ interface SegmentCardProps {
 export function SegmentCard({ segment, index }: SegmentCardProps) {
   const [expanded, setExpanded] = useState(false);
 
-  const isTruncated = segment.content.length > 200;
+  const isTruncated = segment.content.length > 500;
   const displayContent =
     expanded || !isTruncated
       ? segment.content
-      : segment.content.slice(0, 200) + "…";
+      : segment.content.slice(0, 500) + "…";
 
   return (
     <div className="rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] p-3.5 transition-colors hover:border-[hsl(var(--ring))]/30">

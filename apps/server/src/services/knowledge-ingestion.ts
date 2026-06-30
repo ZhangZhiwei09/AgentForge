@@ -749,7 +749,7 @@ export class KnowledgeIngestionService {
           chunkIndex: i,
           content: chunkTexts[i],
           tokenCount: embeddingTokenCounts[i],
-          milvusId: milvusIds[i] ? BigInt(milvusIds[i]) : null,
+          milvusId: milvusIds[i] != null ? BigInt(milvusIds[i]) : null,
           sourceType: sourceType ?? null,
           qualityLabel: qualityLabel ?? null,
           parentChunkId: parentId ?? null,

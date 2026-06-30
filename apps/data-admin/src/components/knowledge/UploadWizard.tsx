@@ -73,6 +73,7 @@ export function UploadWizard({
   // 分块预览
   const [preview, setPreview] = useState<ChunkPreviewResponseDTO | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   // 采样文本（用于预览）
   const [sampleText, setSampleText] = useState("");
   // 上传错误
@@ -139,6 +140,7 @@ export function UploadWizard({
       try {
         const doc = await client.uploadDocumentFile(kbId, file, {
           title: file.name,
+          process: false, // 延迟入队：等 Step 2 保存分块配置后再触发
         });
         docs.push({ id: doc.id, title: doc.title, status: doc.status });
         store.setUploadProgress(file.name, 100);
@@ -179,11 +181,13 @@ export function UploadWizard({
 
     const timer = setTimeout(async () => {
       setPreviewLoading(true);
+      setPreviewError(null);
       try {
         const result = await client.previewChunks(sampleText, config);
         setPreview(result);
-      } catch {
+      } catch (e) {
         setPreview(null);
+        setPreviewError(e instanceof Error ? e.message : "分块预览请求失败");
       } finally {
         setPreviewLoading(false);
       }
@@ -192,11 +196,45 @@ export function UploadWizard({
     return () => clearTimeout(timer);
   }, [step, config, sampleText, client]);
 
-  // ── 步骤 2 → 3：开始处理 ───────────────────────
+  // ── 步骤 2 → 3：保存分块配置到知识库，然后开始处理 ───
 
-  const handleStartProcessing = useCallback(() => {
-    store.setStep(3);
-  }, [store]);
+  const [savingConfig, setSavingConfig] = useState(false);
+  const handleStartProcessing = useCallback(async () => {
+    setSavingConfig(true);
+    try {
+      // 自动 clamp overlap：后端校验要求 overlap < size * 0.5，避免 400
+      const clampOverlap = (size: number, overlap: number) =>
+        Math.min(overlap, Math.max(0, Math.floor(size * 0.5) - 1));
+
+      const parentSize = config.maxChunkSize;
+      const parentOverlap = clampOverlap(parentSize, config.overlap);
+      const childSize = config.childMaxSize ?? parentSize;
+      // 链式 clamp：childOverlap 基于已 clamp 的 parentOverlap，与 SDK previewChunks 保持一致
+      const childOverlap = clampOverlap(childSize, parentOverlap);
+
+      // 1. 将分块配置写入知识库，确保 Worker 处理时使用正确的参数
+      await client.updateKnowledgeBase(kbId, {
+        chunk_size_tokens: parentSize,
+        chunk_overlap_tokens: parentOverlap,
+        separator_mode: config.separator ? "custom" : "auto",
+        custom_separator: config.separator || null,
+        chunk_structure: config.mode === "parent_child" ? "hierarchical" : "paragraph",
+        child_chunk_size_tokens: config.mode === "parent_child" ? childSize : null,
+        child_chunk_overlap_tokens: config.mode === "parent_child" ? childOverlap : null,
+        remove_extra_spaces: config.removeExtraSpaces,
+        remove_urls_emails: config.removeUrlsEmails,
+      });
+
+      // 2. 配置已保存，现在触发文档处理（Step 1 上传时跳过了入队）
+      await client.processKnowledgeBase(kbId);
+
+      store.setStep(3);
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : "保存分块配置失败");
+    } finally {
+      setSavingConfig(false);
+    }
+  }, [kbId, config, client, store]);
 
   // ── 完成 ───────────────────────────────────────
 
@@ -204,6 +242,7 @@ export function UploadWizard({
     store.reset();
     setUploadedDocs([]);
     setPreview(null);
+    setPreviewError(null);
     setSampleText("");
     setUploadError(null);
     onComplete();
@@ -330,8 +369,10 @@ export function UploadWizard({
               onConfigChange={store.setConfig}
               onBack={() => store.setStep(1)}
               onSubmit={handleStartProcessing}
+              isSubmitting={savingConfig}
               preview={preview}
               previewLoading={previewLoading}
+              previewError={previewError}
             />
           )}
 
