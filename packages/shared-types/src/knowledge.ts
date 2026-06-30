@@ -10,6 +10,16 @@ export interface KnowledgeBaseDTO {
   document_count: number;
   created_at: string;
   updated_at: string;
+  // 分块配置（可被 KB 级别覆盖）
+  chunk_size_tokens?: number | null;
+  chunk_overlap_tokens?: number | null;
+  separator_mode?: string | null;
+  custom_separator?: string | null;
+  chunk_structure?: string | null;
+  child_chunk_size_tokens?: number | null;
+  child_chunk_overlap_tokens?: number | null;
+  remove_extra_spaces?: boolean | null;
+  remove_urls_emails?: boolean | null;
 }
 
 export interface CreateKnowledgeBaseRequest {
@@ -21,6 +31,33 @@ export interface UpdateKnowledgeBaseRequest {
   name?: string;
   description?: string | null;
   enabled?: boolean;
+  // 分块配置
+  chunk_size_tokens?: number | null;
+  chunk_overlap_tokens?: number | null;
+  separator_mode?: string | null;
+  custom_separator?: string | null;
+  chunk_structure?: string | null;
+  child_chunk_size_tokens?: number | null;
+  child_chunk_overlap_tokens?: number | null;
+  remove_extra_spaces?: boolean | null;
+  remove_urls_emails?: boolean | null;
+}
+
+// ── 分块 ──
+
+export interface KnowledgeChunkDTO {
+  id: string;
+  documentId: string;
+  knowledgeBaseId: string;
+  chunkIndex: number;
+  content: string;
+  tokenCount: number | null;
+  sourceType: string | null;
+  qualityLabel: string | null;
+  parentChunkId: string | null;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
 }
 
 // ── 文档 ──

@@ -478,17 +478,24 @@ export class AgentRuntimeService {
         return;
       }
 
-      // ── 7. 保存助手消息 ──
+      // ── 7. 保存助手消息（幂等：Agent 内部可能已保存，用 catch 避免重复插入报错）──
       if (streamedAnswer) {
-        await prisma.message.create({
-          data: {
-            id: assistantMsgId,
-            conversationId: conversation.id,
-            role: "assistant",
-            content: streamedAnswer,
-            model: resolvedModel,
-          },
-        });
+        try {
+          await prisma.message.create({
+            data: {
+              id: assistantMsgId,
+              conversationId: conversation.id,
+              role: "assistant",
+              content: streamedAnswer,
+              model: resolvedModel,
+            },
+          });
+        } catch (e) {
+          // 唯一约束冲突=Agent 已保存，忽略；其他错误记录日志
+          if (!(e instanceof Error && e.message.includes("Unique constraint"))) {
+            logger.warn(e, "Failed to persist assistant message in orchestrator");
+          }
+        }
       }
 
       // ── 8. 提取记忆（fire-and-forget） ──

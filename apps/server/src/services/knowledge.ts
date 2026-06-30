@@ -192,17 +192,7 @@ export function dedupeAdjacentChunks<T extends { docId: string; chunkIndex: numb
     for (let j = 0; j < kept.length; j++) {
       const prev = kept[j];
 
-      // 条件 1: 同一文档且 chunkIndex 相邻
-      if (
-        prev.docId === current.docId &&
-        Math.abs(prev.chunkIndex - current.chunkIndex) <= neighborWindow
-      ) {
-        // 当前分数更低 → 丢弃；否则不应该出现（已排序），但保留以防万一
-        shouldSkip = true;
-        break;
-      }
-
-      // 条件 2: 文本重叠度超过阈值（Jaccard similarity on tokens）
+      // 文本重叠度超过阈值（Jaccard similarity on tokens）
       const overlap = computeTokenOverlap(prev.content, current.content);
       if (overlap > similarityThreshold) {
         shouldSkip = true;

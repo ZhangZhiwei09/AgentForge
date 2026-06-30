@@ -48,8 +48,8 @@ const kbCreateSchema = z.object({
   custom_separator: z.string().min(1).max(100).nullable().optional(),
   // V3.4: 层次分块（parent-child chunking）
   chunk_structure: z.enum(["paragraph", "hierarchical"]).default("paragraph").optional(),
-  child_chunk_size_tokens: z.number().int().min(50).max(2000).optional(),
-  child_chunk_overlap_tokens: z.number().int().min(0).optional(),
+  child_chunk_size_tokens: z.number().int().min(50).max(2000).nullable().optional(),
+  child_chunk_overlap_tokens: z.number().int().min(0).nullable().optional(),
   // V3.5: 文本预处理规则
   remove_extra_spaces: z.boolean().default(true).optional(),
   remove_urls_emails: z.boolean().default(false).optional(),
@@ -73,7 +73,7 @@ const kbCreateSchema = z.object({
     });
   }
   // 校验：hierarchical 模式下 child_chunk 参数
-  if (data.chunk_structure === "hierarchical" && data.child_chunk_size_tokens !== undefined) {
+  if (data.chunk_structure === "hierarchical" && data.child_chunk_size_tokens != null) {
     const childOverlap = data.child_chunk_overlap_tokens ?? 0;
     if (childOverlap >= data.child_chunk_size_tokens * 0.5) {
       ctx.addIssue({
@@ -113,8 +113,8 @@ const kbUpdateSchema = z.object({
   custom_separator: z.string().min(1).max(100).nullable().optional(),
   // V3.4: 层次分块
   chunk_structure: z.enum(["paragraph", "hierarchical"]).optional(),
-  child_chunk_size_tokens: z.number().int().min(50).max(2000).optional(),
-  child_chunk_overlap_tokens: z.number().int().min(0).optional(),
+  child_chunk_size_tokens: z.number().int().min(50).max(2000).nullable().optional(),
+  child_chunk_overlap_tokens: z.number().int().min(0).nullable().optional(),
   // V3.5: 文本预处理规则
   remove_extra_spaces: z.boolean().optional(),
   remove_urls_emails: z.boolean().optional(),
@@ -136,7 +136,7 @@ const kbUpdateSchema = z.object({
     });
   }
   // 校验：hierarchical 模式下 child_chunk 参数
-  if (data.chunk_structure === "hierarchical" && data.child_chunk_size_tokens !== undefined) {
+  if (data.chunk_structure === "hierarchical" && data.child_chunk_size_tokens != null) {
     const childOverlap = data.child_chunk_overlap_tokens ?? 0;
     if (childOverlap >= data.child_chunk_size_tokens * 0.5) {
       ctx.addIssue({
@@ -419,19 +419,24 @@ knowledgeManagementRoutes.get("/api/knowledge/bases/:kbId/documents", async (c) 
 // GET /api/knowledge/documents/:docId —— 获取单个文档详情（含完整内容、阶段时间戳、进度信息）
 knowledgeManagementRoutes.get("/api/knowledge/documents/:docId", async (c) => {
   const docId = c.req.param("docId");
-  const doc = await prisma.knowledgeDocument.findUnique({
-    where: { id: docId },
-  });
+  try {
+    const doc = await prisma.knowledgeDocument.findUnique({
+      where: { id: docId },
+    });
 
-  if (!doc) {
-    return c.json({ detail: "文档不存在" }, 404);
+    if (!doc) {
+      return c.json({ detail: "文档不存在" }, 404);
+    }
+
+    // 解析 processingDetail JSON 字符串为对象
+    return c.json({
+      ...doc,
+      processingDetail: doc.processingDetail ? safeJsonParse(doc.processingDetail) : null,
+    });
+  } catch (e) {
+    logger.error({ docId, error: String(e) }, "Document detail fetch failed");
+    return c.json({ detail: `文档加载失败: ${e instanceof Error ? e.message : "未知错误"}` }, 500);
   }
-
-  // 解析 processingDetail JSON 字符串为对象
-  return c.json({
-    ...doc,
-    processingDetail: doc.processingDetail ? safeJsonParse(doc.processingDetail) : null,
-  });
 });
 
 // POST /api/knowledge/bases/:kbId/documents —— 上传并摄取单篇文档
@@ -610,14 +615,18 @@ knowledgeManagementRoutes.post(
         },
       });
 
-      const { getIngestionQueue } = await import("../../../jobs/queues.js");
-      const queue = getIngestionQueue();
-      if (queue) {
-        await queue.add("ingest", { docId: doc.id, kbId });
-        logger.info({ docId: doc.id, title, ext }, "Ingestion job dispatched");
-      } else {
-        const ingestion = new KnowledgeIngestionService();
-        await ingestion.processExistingDocument(doc.id, kbId);
+      // query param process=false 跳过入队，由前端在配置保存后显式触发
+      const shouldProcess = c.req.query("process") !== "false";
+      if (shouldProcess) {
+        const { getIngestionQueue } = await import("../../../jobs/queues.js");
+        const queue = getIngestionQueue();
+        if (queue) {
+          await queue.add("ingest", { docId: doc.id, kbId });
+          logger.info({ docId: doc.id, title, ext }, "Ingestion job dispatched");
+        } else {
+          const ingestion = new KnowledgeIngestionService();
+          await ingestion.processExistingDocument(doc.id, kbId);
+        }
       }
 
       const updatedDoc = await prisma.knowledgeDocument.findUnique({
@@ -631,6 +640,68 @@ knowledgeManagementRoutes.post(
       logger.error(e, "File upload failed");
       return c.json(
         { detail: e instanceof Error ? e.message : "文件上传处理失败" },
+        500,
+      );
+    }
+  },
+);
+
+// POST /api/knowledge/bases/:kbId/process —— 将知识库中所有 pending 文档入队处理
+// 用于上传向导在保存分块配置后显式触发处理，避免 Worker 在配置保存前竞态
+knowledgeManagementRoutes.post(
+  "/api/knowledge/bases/:kbId/process",
+  async (c) => {
+    const kbId = c.req.param("kbId");
+
+    const kb = await prisma.knowledgeBase.findUnique({ where: { id: kbId } });
+    if (!kb) {
+      return c.json({ detail: "知识库不存在" }, 404);
+    }
+
+    try {
+      const pendingDocs = await prisma.knowledgeDocument.findMany({
+        where: { knowledgeBaseId: kbId, status: "pending" },
+        select: { id: true, title: true },
+      });
+
+      if (pendingDocs.length === 0) {
+        return c.json({ processed: 0, message: "没有待处理的文档" });
+      }
+
+      const { getIngestionQueue } = await import("../../../jobs/queues.js");
+      const queue = getIngestionQueue();
+
+      let queued = 0;
+      const failed: string[] = [];
+
+      for (const doc of pendingDocs) {
+        try {
+          if (queue) {
+            // jobId 用 docId 去重：同一文档重复调用不会创建重复 job
+            await queue.add("ingest", { docId: doc.id, kbId }, { jobId: `ingest-${doc.id}` });
+          } else {
+            const ingestion = new KnowledgeIngestionService();
+            await ingestion.processExistingDocument(doc.id, kbId);
+          }
+          queued++;
+        } catch (err) {
+          failed.push(doc.id);
+          logger.error({ docId: doc.id, error: String(err) }, "Process endpoint: failed to queue document");
+        }
+      }
+
+      logger.info({ kbId, queued, failed: failed.length }, "Process endpoint completed");
+      return c.json({
+        processed: queued,
+        failed: failed.length > 0 ? failed.length : undefined,
+        message: failed.length > 0
+          ? `已入队 ${queued} 篇，${failed.length} 篇失败`
+          : `已入队 ${queued} 篇文档`,
+      });
+    } catch (e) {
+      logger.error({ kbId, error: String(e) }, "Process endpoint failed");
+      return c.json(
+        { detail: e instanceof Error ? e.message : "批量入队失败" },
         500,
       );
     }
@@ -659,7 +730,12 @@ knowledgeManagementRoutes.get("/api/knowledge/documents/:docId/chunks", async (c
     orderBy: { chunkIndex: "asc" },
   });
 
-  return c.json(chunks);
+  // BigInt 字段（milvusId）无法被 JSON.stringify 序列化，映射为 Number
+  // 注意：0n 是 falsy，必须用 != null 判断
+  return c.json(chunks.map((c) => ({
+    ...c,
+    milvusId: c.milvusId != null ? Number(c.milvusId) : null,
+  })));
 });
 
 // ════════════════════════════════════════════════════════════════
@@ -685,7 +761,7 @@ const chunkPreviewSchema = z.object({
       path: ["chunk_overlap_tokens"],
     });
   }
-  if (data.chunk_structure === "hierarchical" && data.child_chunk_size_tokens !== undefined) {
+  if (data.chunk_structure === "hierarchical" && data.child_chunk_size_tokens != null) {
     const childOverlap = data.child_chunk_overlap_tokens ?? 0;
     if (childOverlap >= data.child_chunk_size_tokens * 0.5) {
       ctx.addIssue({

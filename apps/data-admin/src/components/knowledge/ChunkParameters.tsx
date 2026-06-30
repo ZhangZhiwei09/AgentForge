@@ -137,7 +137,11 @@ export function ChunkParameters({ config, onChange }: ChunkParametersProps) {
         max={4000}
         step={50}
         unit=" tokens"
-        onChange={(v) => update({ maxChunkSize: v })}
+        onChange={(v) => {
+          // 当分块大小变化时，自动 clamp overlap 确保 < size * 0.5（后端校验）
+          const clampedOverlap = Math.min(config.overlap, Math.max(0, Math.floor(v * 0.5) - 1));
+          update({ maxChunkSize: v, overlap: clampedOverlap });
+        }}
       />
 
       {/* 重叠大小滑块 */}

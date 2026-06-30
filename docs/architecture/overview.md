@@ -76,6 +76,7 @@ Frontend: POST /api/agent/chat
 
 详见：
 - `docs/architecture/routing.md` — 路由架构完整数据流转、三层分类管线、Agent 分发
+- `docs/architecture/knowledge-hybrid-retrieval.md` — 知识库混合检索全链路（摄入→索引→RRF融合→Reranker精排→降级）
 - `docs/agent-runtime.md` — Agent Runtime 状态模型（三维状态机、事件协议）
 - `docs/agent-runtime-refactor-plan.md` — 重构方案与背景
 
