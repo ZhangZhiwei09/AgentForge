@@ -21,6 +21,10 @@ import type {
   FeedbackResponse,
   FAQDocumentDTO,
   FAQCategoryDTO,
+  ChunkingConfigDTO,
+  ChunkPreviewResponseDTO,
+  HitTestingRequestDTO,
+  HitTestingResponseDTO,
 } from "@agentforge/shared-types";
 import { VoiceService } from "./services/voice.js";
 
@@ -304,6 +308,87 @@ export class AgentForgeClient {
       method: "POST",
       body: JSON.stringify({ query, kb_ids: kbIds, top_k: topK ?? 3 }),
     });
+  }
+
+  // ---- Knowledge Document Upload ----
+
+  async uploadDocumentFile(
+    kbId: string,
+    file: File,
+    options?: { title?: string },
+  ): Promise<KnowledgeDocumentDTO> {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (options?.title) {
+      formData.append("title", options.title);
+    }
+
+    const token = this.getAccessToken();
+    const headers: Record<string, string> = {};
+    if (token) {
+      headers["Authorization"] = `Bearer ${token}`;
+    }
+    // 不设置 Content-Type，让浏览器自动生成含 boundary 的 multipart/form-data
+
+    const res = await fetch(
+      `${this.baseUrl}/api/knowledge/bases/${encodeURIComponent(kbId)}/documents/upload`,
+      {
+        method: "POST",
+        headers,
+        body: formData,
+      },
+    );
+
+    if (res.status === 401 && this.onAuthError) {
+      this.onAuthError();
+    }
+    if (!res.ok) {
+      const error = await res.json().catch(() => ({ detail: res.statusText }));
+      throw new Error(error.detail ?? `HTTP ${res.status}`);
+    }
+    return res.json();
+  }
+
+  // ---- Chunk Preview ----
+
+  async previewChunks(
+    text: string,
+    config: ChunkingConfigDTO,
+  ): Promise<ChunkPreviewResponseDTO> {
+    return this.request<ChunkPreviewResponseDTO>("/api/knowledge/chunk-preview", {
+      method: "POST",
+      body: JSON.stringify({
+        text,
+        chunk_size_tokens: config.maxChunkSize,
+        chunk_overlap_tokens: config.overlap,
+        chunk_structure: config.mode === "parent_child" ? "hierarchical" : "paragraph",
+        child_chunk_size_tokens: config.childMaxSize,
+        child_chunk_overlap_tokens: config.overlap,
+        separator_mode: config.separator ? "custom" : "auto",
+        custom_separator: config.separator || null,
+      }),
+    });
+  }
+
+  // ---- Hit Testing ----
+
+  async hitTest(
+    kbId: string,
+    params: HitTestingRequestDTO,
+  ): Promise<HitTestingResponseDTO> {
+    return this.request<HitTestingResponseDTO>(
+      `/api/knowledge/bases/${encodeURIComponent(kbId)}/hit-testing`,
+      {
+        method: "POST",
+        body: JSON.stringify({
+          query: params.query,
+          top_k: params.topK ?? 10,
+          search_method: params.searchMethod ?? "hybrid",
+          reranking_enable: params.rerankingEnable ?? true,
+          score_threshold: params.scoreThreshold ?? 0,
+        }),
+      },
+    );
   }
 
   async getKnowledgeStats(): Promise<KnowledgeStatsDTO> {

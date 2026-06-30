@@ -59,22 +59,25 @@ Frontend: POST /api/chat
 Frontend: POST /api/agent/chat
   → Hono SSE
     → AgentRuntimeService.streamChat()
-      → Router (SAFETY/CHAT/TASK/HUMAN)
-        → Agent
+      → Router (Rule First + LLM Fallback)
+        → Agent (SAFETY/CHAT/TASK/HUMAN)
           → useAgentChatStream hook
 ```
 
 ## Agent Runtime Architecture
 
-详见 `docs/agent-runtime-refactor-plan.md`。
-
 核心设计：
 
-- **4-Route Classifier**: SAFETY / CHAT / TASK / HUMAN — 请求首先经过路由分类
+- **4-Route Classifier**: SAFETY / CHAT / TASK / HUMAN — Rule First + LLM Fallback 三层降级分类
 - **AgentExecutor (ReAct)**: 统一的 Agent 执行引擎，动态获取 Tool
 - **Tool Layering**: Builtin 层 (`search_knowledge_base`) vs Business 层 (`create_support_ticket`)
 - **KnowledgeContextBuilder**: 结构化知识库上下文构建
 - **CitationVerifier**: 引用验证
+
+详见：
+- `docs/architecture/routing.md` — 路由架构完整数据流转、三层分类管线、Agent 分发
+- `docs/agent-runtime.md` — Agent Runtime 状态模型（三维状态机、事件协议）
+- `docs/agent-runtime-refactor-plan.md` — 重构方案与背景
 
 ## Version Roadmap
 

@@ -94,6 +94,15 @@ export const settings = {
     process.env.KB_CHUNK_OVERLAP_TOKENS || "120",
     10,
   ),
+  // V3.4: 层次分块子分片默认参数
+  kbChildChunkSizeTokens: parseInt(
+    process.env.KB_CHILD_CHUNK_SIZE_TOKENS || "400",
+    10,
+  ),
+  kbChildChunkOverlapTokens: parseInt(
+    process.env.KB_CHILD_CHUNK_OVERLAP_TOKENS || "60",
+    10,
+  ),
 
   // ── Knowledge Base Dedup ──────────────────────────────
   // 相邻 chunk 去重参数

@@ -51,10 +51,14 @@ export class KnowledgeIngestionService {
    *
    * 优先级：KB 级别配置 > 环境变量默认值
    */
-  private getSplitter(kbChunkSize?: number, kbChunkOverlap?: number): RecursiveTokenTextSplitter {
+  private getSplitter(
+    kbChunkSize?: number,
+    kbChunkOverlap?: number,
+    fixedSeparator?: string,
+  ): RecursiveTokenTextSplitter {
     const size = kbChunkSize ?? this.defaultChunkSizeTokens;
     const overlap = kbChunkOverlap ?? this.defaultChunkOverlapTokens;
-    return new RecursiveTokenTextSplitter(size, overlap);
+    return new RecursiveTokenTextSplitter(size, overlap, undefined, fixedSeparator);
   }
 
   /**
@@ -64,14 +68,41 @@ export class KnowledgeIngestionService {
   private async getKBSplitConfig(kbId: string): Promise<{
     chunkSizeTokens?: number;
     chunkOverlapTokens?: number;
+    fixedSeparator?: string;
+    chunkStructure?: string;
+    childChunkSize?: number;
+    childChunkOverlap?: number;
+    removeExtraSpaces?: boolean;
+    removeUrlsEmails?: boolean;
   }> {
     const kb = await prisma.knowledgeBase.findUnique({
       where: { id: kbId },
-      select: { chunkSizeTokens: true, chunkOverlapTokens: true },
+      select: {
+        chunkSizeTokens: true,
+        chunkOverlapTokens: true,
+        separatorMode: true,
+        customSeparator: true,
+        chunkStructure: true,
+        childChunkSize: true,
+        childChunkOverlap: true,
+        removeExtraSpaces: true,
+        removeUrlsEmails: true,
+      },
     });
+    // 仅在 separatorMode 为 "custom" 且 customSeparator 非空时启用固定分隔符
+    const fixedSeparator =
+      kb?.separatorMode === "custom" && kb?.customSeparator
+        ? kb.customSeparator
+        : undefined;
     return {
       chunkSizeTokens: kb?.chunkSizeTokens ?? undefined,
       chunkOverlapTokens: kb?.chunkOverlapTokens ?? undefined,
+      fixedSeparator,
+      chunkStructure: kb?.chunkStructure ?? undefined,
+      childChunkSize: kb?.childChunkSize ?? undefined,
+      childChunkOverlap: kb?.childChunkOverlap ?? undefined,
+      removeExtraSpaces: kb?.removeExtraSpaces ?? undefined,
+      removeUrlsEmails: kb?.removeUrlsEmails ?? undefined,
     };
   }
 
@@ -80,6 +111,25 @@ export class KnowledgeIngestionService {
       await ensureKnowledgeCollection();
       this.collectionLoaded = true;
     }
+  }
+
+  // 记录阶段完成时间戳 + 进度更新（参考 Dify per-stage timestamp 设计）
+  private async recordStageComplete(
+    docId: string,
+    stageField: string,
+    progress: { phase: string; progress: number; total: number; message: string },
+  ): Promise<void> {
+    const now = new Date();
+    const data: Record<string, unknown> = {
+      [stageField]: now,
+      processingDetail: this.setProgress(
+        progress.phase,
+        progress.progress,
+        progress.total,
+        progress.message,
+      ),
+    };
+    await prisma.knowledgeDocument.update({ where: { id: docId }, data });
   }
 
   // 处理进度详情
@@ -135,7 +185,7 @@ export class KnowledgeIngestionService {
   async ingestDocument(kbId: string, title: string, content: string) {
     // 读取 KB 分片配置
     const kbConfig = await this.getKBSplitConfig(kbId);
-    const splitter = this.getSplitter(kbConfig.chunkSizeTokens, kbConfig.chunkOverlapTokens);
+    const splitter = this.getSplitter(kbConfig.chunkSizeTokens, kbConfig.chunkOverlapTokens, kbConfig.fixedSeparator);
 
     // 1. 创建 Document 记录，状态标记为 processing
     const doc = await prisma.knowledgeDocument.create({
@@ -213,6 +263,12 @@ export class KnowledgeIngestionService {
     });
     if (!doc) throw new Error(`Document ${docId} not found`);
 
+    // 记录处理开始时间
+    await prisma.knowledgeDocument.update({
+      where: { id: docId },
+      data: { processingStartedAt: new Date() },
+    });
+
     // 推断来源类型：有原始文件 → 文件上传，否则 → 手动/文本
     const sourceType: string = doc.originalFileType
       ? (doc.originalFileType === "pdf" ? "pdf" : "text")
@@ -250,6 +306,11 @@ export class KnowledgeIngestionService {
         const storage = getStorageProvider();
         const fileBuffer = await storage.read(doc.originalFilePath);
 
+        // 记录下载完成时间戳
+        await this.recordStageComplete(docId, "downloadingCompletedAt", {
+          phase: "downloading", progress: 10, total: 100, message: "文件下载完成，开始解析...",
+        });
+
         await this.updateDocumentStatus(docId, "parsing", {
           progress: { phase: "parsing", progress: 0, total: 1, message: `正在用 ${parser.name} 解析器提取文本（${fileSizeMB}）...` },
         });
@@ -271,6 +332,11 @@ export class KnowledgeIngestionService {
           { docId, parser: parser.name, charCount: parsed.metadata.charCount },
           "Document parsed",
         );
+
+        // 记录解析完成时间戳
+        await this.recordStageComplete(docId, "parsingCompletedAt", {
+          phase: "parsing", progress: 25, total: 100, message: `解析完成，共提取 ${parsed.metadata.charCount} 个字符`,
+        });
 
         // V3.0: 如果 parser 返回的是多模态文档（含 assets），上传资产到 MinIO
         const parsedExtended = parsed as {
@@ -328,8 +394,16 @@ export class KnowledgeIngestionService {
       await this.updateDocumentStatus(docId, "normalizing", {
         progress: { phase: "normalizing", progress: 0, total: 1, message: `正在清洗文本...` },
       });
-      const normalized = this.normalizer.normalize(
+
+      // 读取 KB 预处理规则
+      const preprocessingConfig = await this.getKBSplitConfig(kbId);
+      const preprocessingRules = {
+        removeExtraSpaces: preprocessingConfig.removeExtraSpaces ?? true,
+        removeUrlsEmails: preprocessingConfig.removeUrlsEmails ?? false,
+      };
+      const normalized = this.normalizer.normalizeWithRules(
         content,
+        preprocessingRules,
         doc.originalFileType === "pdf" ? undefined : undefined,
       );
 
@@ -369,6 +443,12 @@ export class KnowledgeIngestionService {
         content = normalized.text;
       }
 
+      // 记录清洗完成时间戳
+      await this.recordStageComplete(docId, "normalizingCompletedAt", {
+        phase: "normalizing", progress: 35, total: 100,
+        message: `文本清洗完成（${content.length} 字符，密度 ${normalized.metrics.textDensity.toFixed(2)}）`,
+      });
+
       // ── Phase 3: INGESTING ──
       // 3a. 分块（chunking）
       await this.updateDocumentStatus(docId, "chunking", {
@@ -377,51 +457,154 @@ export class KnowledgeIngestionService {
 
       // 读取 KB 分片配置
       const kbConfig = await this.getKBSplitConfig(kbId);
-      const splitter = this.getSplitter(kbConfig.chunkSizeTokens, kbConfig.chunkOverlapTokens);
-      const chunks = splitter.splitText(content);
+      const isHierarchical = kbConfig.chunkStructure === "hierarchical";
 
-      logger.info({ docId, chunkCount: chunks.length, charCount: content.length }, "Text split into chunks");
+      if (isHierarchical) {
+        // ── 层次分块路径 ──
+        const splitter = this.getSplitter(kbConfig.chunkSizeTokens, kbConfig.chunkOverlapTokens, kbConfig.fixedSeparator);
+        const childSize = kbConfig.childChunkSize ?? settings.kbChildChunkSizeTokens ?? 400;
+        const childOverlap = kbConfig.childChunkOverlap ?? settings.kbChildChunkOverlapTokens ?? 60;
+        const { parentChunks, childChunks } = splitter.splitHierarchical(content, childSize, childOverlap);
 
-      if (!chunks.length) {
-        await this.updateDocumentStatus(docId, "completed", {
-          progress: { phase: "completed", progress: 1, total: 1, message: "文档无有效文本内容，已跳过向量化" },
+        logger.info(
+          { docId, parentCount: parentChunks.length, totalChildren: [...childChunks.values()].reduce((s, c) => s + c.length, 0) },
+          "Hierarchical text split into parent/child chunks",
+        );
+
+        if (!parentChunks.length) {
+          await this.updateDocumentStatus(docId, "completed", {
+            progress: { phase: "completed", progress: 1, total: 1, message: "文档无有效文本内容，已跳过向量化" },
+          });
+          return;
+        }
+
+        // 1) 创建 parent chunk 记录（仅 PG，不向量化）
+        const parentChunkIds = new Map<number, string>();
+        const parentTokenCounts = new Map<string, number>();
+        await this.updateDocumentStatus(docId, "writing_db", {
+          progress: { phase: "writing_db", progress: 0, total: parentChunks.length, message: `正在写入 ${parentChunks.length} 个父分块...` },
         });
-        return;
+
+        for (let i = 0; i < parentChunks.length; i++) {
+          const pId = randomUUID();
+          parentChunkIds.set(i, pId);
+          const tokenCount = await countEmbeddingTokens(parentChunks[i]);
+          parentTokenCounts.set(pId, tokenCount);
+
+          await prisma.knowledgeChunk.create({
+            data: {
+              id: pId,
+              documentId: docId,
+              knowledgeBaseId: kbId,
+              chunkIndex: i,
+              content: parentChunks[i],
+              tokenCount,
+              sourceType: sourceType ?? null,
+              qualityLabel: qualityLabel ?? null,
+              // parentChunkId 为 null → 表示这是一个 parent chunk
+            },
+          });
+        }
+
+        // 2) 收集所有 child chunks（带 parent 映射）
+        let totalChildCount = 0;
+        const allChildTexts: string[] = [];
+        const childParentMap = new Map<number, string>();  // childIndex → parentChunkId
+
+        for (const [parentIdx, children] of childChunks.entries()) {
+          const parentId = parentChunkIds.get(parentIdx)!;
+          for (const childText of children) {
+            allChildTexts.push(childText);
+            childParentMap.set(totalChildCount, parentId);
+            totalChildCount++;
+          }
+        }
+
+        logger.info({ docId, totalChildren: totalChildCount }, "Child chunks collected for hierarchical ingestion");
+
+        await this.recordStageComplete(docId, "chunkingCompletedAt", {
+          phase: "chunking", progress: 50, total: 100,
+          message: `层次分块完成：${parentChunks.length} 父分块 / ${totalChildCount} 子分块`,
+        });
+
+        // 3) 向量化 + 写入 child chunks（带 parentChunkId）
+        if (totalChildCount > 0) {
+          await this.updateDocumentStatus(docId, "embedding", {
+            progress: { phase: "embedding", progress: 0, total: totalChildCount, message: `正在向量化第 0/${totalChildCount} 个子分块...` },
+          });
+          await this.ingestChunks(docId, kbId, allChildTexts, sourceType, qualityLabel, childParentMap);
+        }
+
+        // 总 chunk 数 = parent + child
+        const totalChunkCount = parentChunks.length + totalChildCount;
+        await prisma.knowledgeDocument.update({
+          where: { id: docId },
+          data: {
+            chunkCount: totalChunkCount,
+            status: "completed",
+            qualityLabel: qualityLabel,
+            processingDetail: this.setProgress("completed", totalChunkCount, totalChunkCount, `层次分块完成：${parentChunks.length} 父分块 + ${totalChildCount} 子分块`),
+          },
+        });
+      } else {
+        // ── 标准 paragraph 分块路径（现有逻辑） ──
+        const splitter = this.getSplitter(kbConfig.chunkSizeTokens, kbConfig.chunkOverlapTokens, kbConfig.fixedSeparator);
+        const chunks = splitter.splitText(content);
+
+        logger.info({ docId, chunkCount: chunks.length, charCount: content.length }, "Text split into chunks");
+
+        if (!chunks.length) {
+          await this.updateDocumentStatus(docId, "completed", {
+            progress: { phase: "completed", progress: 1, total: 1, message: "文档无有效文本内容，已跳过向量化" },
+          });
+          return;
+        }
+
+        // 记录分段完成时间戳
+        await this.recordStageComplete(docId, "chunkingCompletedAt", {
+          phase: "chunking", progress: 50, total: 100,
+          message: `分段完成，共切分为 ${chunks.length} 个分块`,
+        });
+
+        // 3b. 向量化 + 双写，带 sourceType 和 qualityLabel
+        await this.updateDocumentStatus(docId, "embedding", {
+          progress: { phase: "embedding", progress: 0, total: chunks.length, message: `正在向量化第 0/${chunks.length} 个分块...` },
+        });
+        await this.ingestChunks(docId, kbId, chunks, sourceType, qualityLabel);
+
+        // 记录向量化+写入完成时间戳
+        await this.recordStageComplete(docId, "embeddingCompletedAt", {
+          phase: "writing_db", progress: 95, total: 100,
+          message: `向量化与写入完成，共处理 ${chunks.length} 个分块`,
+        });
+
+        // ── Phase 4: COMPLETED (paragraph path) ──
+        await prisma.knowledgeDocument.update({
+          where: { id: docId },
+          data: {
+            chunkCount: chunks.length,
+            status: "completed",
+            qualityLabel: qualityLabel,
+            processingDetail: this.setProgress("completed", chunks.length, chunks.length, `处理完成，共生成 ${chunks.length} 个分块`),
+          },
+        });
+
+        // V3.0: 异步触发图谱抽取（不阻塞文档完成状态）
+        await prisma.knowledgeDocument.update({
+          where: { id: docId },
+          data: {
+            processingDetail: this.setProgress("graph_extracting", 0, 1, "正在构建知识图谱..."),
+          },
+        });
+        this.triggerGraphExtraction(docId, kbId, chunks, sourceType).catch(
+          (e) => logger.warn({ docId, error: String(e) }, "Graph extraction trigger failed"),
+        );
+
+        logger.info(
+          { docId, chunks: chunks.length, quality: qualityLabel, sourceType },
+          "Document processed by worker",
+        );
       }
-
-      // 3b. 向量化 + 双写，带 sourceType 和 qualityLabel
-      await this.updateDocumentStatus(docId, "embedding", {
-        progress: { phase: "embedding", progress: 0, total: chunks.length, message: `正在向量化第 0/${chunks.length} 个分块...` },
-      });
-      await this.ingestChunks(docId, kbId, chunks, sourceType, qualityLabel);
-
-      // ── Phase 4: COMPLETED ──
-      await prisma.knowledgeDocument.update({
-        where: { id: docId },
-        data: {
-          chunkCount: chunks.length,
-          status: "completed",
-          qualityLabel: qualityLabel,
-          processingDetail: this.setProgress("completed", chunks.length, chunks.length, `处理完成，共生成 ${chunks.length} 个分块`),
-        },
-      });
-
-      // V3.0: 异步触发图谱抽取（不阻塞文档完成状态）
-      // 仅更新 processingDetail 展示图谱进度，主状态保持 completed
-      await prisma.knowledgeDocument.update({
-        where: { id: docId },
-        data: {
-          processingDetail: this.setProgress("graph_extracting", 0, 1, "正在构建知识图谱..."),
-        },
-      });
-      this.triggerGraphExtraction(docId, kbId, chunks, sourceType).catch(
-        (e) => logger.warn({ docId, error: String(e) }, "Graph extraction trigger failed"),
-      );
-
-      logger.info(
-        { docId, chunks: chunks.length, quality: qualityLabel, sourceType },
-        "Document processed by worker",
-      );
 
       invalidateCitationCache();
     } catch (e) {
@@ -489,12 +672,14 @@ export class KnowledgeIngestionService {
   }
 
   // Chunk 向量化 + 双写核心逻辑（V3.0: 追加 PGVector embedding + ES 索引）
+  // V3.4: childParentMap 用于层次分块时映射 child → parent chunk ID
   private async ingestChunks(
     docId: string,
     kbId: string,
     chunkTexts: string[],
     sourceType?: string,
     qualityLabel?: string,
+    childParentMap?: Map<number, string>,  // childIndex → parentChunkId
   ) {
     const provider = getDefaultEmbeddingProvider();
     if (!provider) {
@@ -555,6 +740,7 @@ export class KnowledgeIngestionService {
       const vecLiteral = `[${denseVecs[i].join(",")}]`;
 
       // 先创建 chunk 记录，再通过 raw SQL 补充 embedding
+      const parentId = childParentMap?.get(i);
       await prisma.knowledgeChunk.create({
         data: {
           id: chunkIds[i],
@@ -566,6 +752,7 @@ export class KnowledgeIngestionService {
           milvusId: milvusIds[i] ? BigInt(milvusIds[i]) : null,
           sourceType: sourceType ?? null,
           qualityLabel: qualityLabel ?? null,
+          parentChunkId: parentId ?? null,
         },
       });
 

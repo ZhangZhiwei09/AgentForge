@@ -5,12 +5,25 @@ import { randomUUID } from "crypto";
 import { prisma } from "../../../db.js";
 import { KnowledgeService } from "../../../services/knowledge.js";
 import { KnowledgeIngestionService } from "../../../services/knowledge-ingestion.js";
+import { getDefaultEmbeddingProvider } from "../../../services/embeddings.js";
+import { RecursiveTokenTextSplitter } from "../../../services/text-splitter.js";
 import { getParserRegistry } from "../../../services/document-parser/index.js";
 import { getStorageProvider } from "../../../services/storage/index.js";
 import { logger } from "@agentforge/logger";
+import { settings } from "../../../config.js";
 import { createHono } from "../../../lib/hono.js";
 
 export const knowledgeManagementRoutes = createHono();
+
+// 安全解析 JSON 字符串，失败时返回原始字符串
+function safeJsonParse(v: string | null | undefined): unknown {
+  if (!v) return null;
+  try {
+    return JSON.parse(v);
+  } catch {
+    return v;
+  }
+}
 
 // ════════════════════════════════════════════════════════════════
 // 知识库 CRUD
@@ -22,14 +35,24 @@ const kbCreateSchema = z.object({
   chunk_size_tokens: z
     .number()
     .int()
-    .min(200)
-    .max(2000)
+    .min(50)
+    .max(4000)
     .optional(),
   chunk_overlap_tokens: z
     .number()
     .int()
     .min(0)
     .optional(),
+  // V3.4: 切分模式
+  separator_mode: z.enum(["auto", "custom"]).default("auto").optional(),
+  custom_separator: z.string().min(1).max(100).nullable().optional(),
+  // V3.4: 层次分块（parent-child chunking）
+  chunk_structure: z.enum(["paragraph", "hierarchical"]).default("paragraph").optional(),
+  child_chunk_size_tokens: z.number().int().min(50).max(2000).optional(),
+  child_chunk_overlap_tokens: z.number().int().min(0).optional(),
+  // V3.5: 文本预处理规则
+  remove_extra_spaces: z.boolean().default(true).optional(),
+  remove_urls_emails: z.boolean().default(false).optional(),
 }).superRefine((data, ctx) => {
   // 校验：overlap < size * 0.5
   const size = data.chunk_size_tokens;
@@ -49,6 +72,25 @@ const kbCreateSchema = z.object({
       path: ["chunk_overlap_tokens"],
     });
   }
+  // 校验：hierarchical 模式下 child_chunk 参数
+  if (data.chunk_structure === "hierarchical" && data.child_chunk_size_tokens !== undefined) {
+    const childOverlap = data.child_chunk_overlap_tokens ?? 0;
+    if (childOverlap >= data.child_chunk_size_tokens * 0.5) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "child_chunk_overlap_tokens must be less than child_chunk_size_tokens * 0.5",
+        path: ["child_chunk_overlap_tokens"],
+      });
+    }
+  }
+  // 校验：custom separator 模式下必须提供 custom_separator
+  if (data.separator_mode === "custom" && !data.custom_separator) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "custom_separator is required when separator_mode is 'custom'",
+      path: ["custom_separator"],
+    });
+  }
 });
 
 const kbUpdateSchema = z.object({
@@ -58,14 +100,24 @@ const kbUpdateSchema = z.object({
   chunk_size_tokens: z
     .number()
     .int()
-    .min(200)
-    .max(2000)
+    .min(50)
+    .max(4000)
     .optional(),
   chunk_overlap_tokens: z
     .number()
     .int()
     .min(0)
     .optional(),
+  // V3.4: 切分模式
+  separator_mode: z.enum(["auto", "custom"]).optional(),
+  custom_separator: z.string().min(1).max(100).nullable().optional(),
+  // V3.4: 层次分块
+  chunk_structure: z.enum(["paragraph", "hierarchical"]).optional(),
+  child_chunk_size_tokens: z.number().int().min(50).max(2000).optional(),
+  child_chunk_overlap_tokens: z.number().int().min(0).optional(),
+  // V3.5: 文本预处理规则
+  remove_extra_spaces: z.boolean().optional(),
+  remove_urls_emails: z.boolean().optional(),
 }).superRefine((data, ctx) => {
   const size = data.chunk_size_tokens;
   const overlap = data.chunk_overlap_tokens;
@@ -83,6 +135,17 @@ const kbUpdateSchema = z.object({
       path: ["chunk_overlap_tokens"],
     });
   }
+  // 校验：hierarchical 模式下 child_chunk 参数
+  if (data.chunk_structure === "hierarchical" && data.child_chunk_size_tokens !== undefined) {
+    const childOverlap = data.child_chunk_overlap_tokens ?? 0;
+    if (childOverlap >= data.child_chunk_size_tokens * 0.5) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "child_chunk_overlap_tokens must be less than child_chunk_size_tokens * 0.5",
+        path: ["child_chunk_overlap_tokens"],
+      });
+    }
+  }
 });
 
 // POST /api/knowledge/bases —— 创建知识库
@@ -90,7 +153,7 @@ knowledgeManagementRoutes.post(
   "/api/knowledge/bases",
   zValidator("json", kbCreateSchema),
   async (c) => {
-    const { name, description, chunk_size_tokens, chunk_overlap_tokens } =
+    const { name, description, chunk_size_tokens, chunk_overlap_tokens, separator_mode, custom_separator, chunk_structure, child_chunk_size_tokens, child_chunk_overlap_tokens, remove_extra_spaces, remove_urls_emails } =
       c.req.valid("json");
 
     const kb = await prisma.knowledgeBase.create({
@@ -100,6 +163,13 @@ knowledgeManagementRoutes.post(
         description,
         chunkSizeTokens: chunk_size_tokens,
         chunkOverlapTokens: chunk_overlap_tokens,
+        separatorMode: separator_mode,
+        customSeparator: custom_separator,
+        chunkStructure: chunk_structure,
+        childChunkSize: child_chunk_size_tokens,
+        childChunkOverlap: child_chunk_overlap_tokens,
+        removeExtraSpaces: remove_extra_spaces,
+        removeUrlsEmails: remove_urls_emails,
       },
     });
 
@@ -111,6 +181,13 @@ knowledgeManagementRoutes.post(
         enabled: kb.enabled,
         chunk_size_tokens: kb.chunkSizeTokens,
         chunk_overlap_tokens: kb.chunkOverlapTokens,
+        separator_mode: kb.separatorMode,
+        custom_separator: kb.customSeparator,
+        chunk_structure: kb.chunkStructure,
+        child_chunk_size_tokens: kb.childChunkSize,
+        child_chunk_overlap_tokens: kb.childChunkOverlap,
+        remove_extra_spaces: kb.removeExtraSpaces,
+        remove_urls_emails: kb.removeUrlsEmails,
         document_count: 0,
         created_at: kb.createdAt,
         updated_at: kb.updatedAt,
@@ -136,6 +213,13 @@ knowledgeManagementRoutes.get("/api/knowledge/bases", async (c) => {
     enabled: kb.enabled,
     chunk_size_tokens: kb.chunkSizeTokens,
     chunk_overlap_tokens: kb.chunkOverlapTokens,
+    separator_mode: kb.separatorMode,
+    custom_separator: kb.customSeparator,
+    chunk_structure: kb.chunkStructure,
+    child_chunk_size_tokens: kb.childChunkSize,
+    child_chunk_overlap_tokens: kb.childChunkOverlap,
+    remove_extra_spaces: kb.removeExtraSpaces,
+    remove_urls_emails: kb.removeUrlsEmails,
     document_count: kb._count.documents,
     created_at: kb.createdAt,
     updated_at: kb.updatedAt,
@@ -164,6 +248,13 @@ knowledgeManagementRoutes.get("/api/knowledge/bases/:kbId", async (c) => {
     enabled: kb.enabled,
     chunk_size_tokens: kb.chunkSizeTokens,
     chunk_overlap_tokens: kb.chunkOverlapTokens,
+    separator_mode: kb.separatorMode,
+    custom_separator: kb.customSeparator,
+    chunk_structure: kb.chunkStructure,
+    child_chunk_size_tokens: kb.childChunkSize,
+    child_chunk_overlap_tokens: kb.childChunkOverlap,
+    remove_extra_spaces: kb.removeExtraSpaces,
+    remove_urls_emails: kb.removeUrlsEmails,
     document_count: docCount,
     created_at: kb.createdAt,
     updated_at: kb.updatedAt,
@@ -189,6 +280,13 @@ knowledgeManagementRoutes.put(
       enabled?: boolean;
       chunkSizeTokens?: number | null;
       chunkOverlapTokens?: number | null;
+      separatorMode?: string;
+      customSeparator?: string | null;
+      chunkStructure?: string;
+      childChunkSize?: number | null;
+      childChunkOverlap?: number | null;
+      removeExtraSpaces?: boolean;
+      removeUrlsEmails?: boolean;
     } = {};
     if (data.name !== undefined) updateData.name = data.name;
     if (data.description !== undefined)
@@ -198,6 +296,20 @@ knowledgeManagementRoutes.put(
       updateData.chunkSizeTokens = data.chunk_size_tokens;
     if (data.chunk_overlap_tokens !== undefined)
       updateData.chunkOverlapTokens = data.chunk_overlap_tokens;
+    if (data.separator_mode !== undefined)
+      updateData.separatorMode = data.separator_mode;
+    if (data.custom_separator !== undefined)
+      updateData.customSeparator = data.custom_separator;
+    if (data.chunk_structure !== undefined)
+      updateData.chunkStructure = data.chunk_structure;
+    if (data.child_chunk_size_tokens !== undefined)
+      updateData.childChunkSize = data.child_chunk_size_tokens;
+    if (data.child_chunk_overlap_tokens !== undefined)
+      updateData.childChunkOverlap = data.child_chunk_overlap_tokens;
+    if (data.remove_extra_spaces !== undefined)
+      updateData.removeExtraSpaces = data.remove_extra_spaces;
+    if (data.remove_urls_emails !== undefined)
+      updateData.removeUrlsEmails = data.remove_urls_emails;
 
     const updated = await prisma.knowledgeBase.update({
       where: { id: kbId },
@@ -215,6 +327,13 @@ knowledgeManagementRoutes.put(
       enabled: updated.enabled,
       chunk_size_tokens: updated.chunkSizeTokens,
       chunk_overlap_tokens: updated.chunkOverlapTokens,
+      separator_mode: updated.separatorMode,
+      custom_separator: updated.customSeparator,
+      chunk_structure: updated.chunkStructure,
+      child_chunk_size_tokens: updated.childChunkSize,
+      child_chunk_overlap_tokens: updated.childChunkOverlap,
+      remove_extra_spaces: updated.removeExtraSpaces,
+      remove_urls_emails: updated.removeUrlsEmails,
       document_count: docCount,
       created_at: updated.createdAt,
       updated_at: updated.updatedAt,
@@ -256,18 +375,48 @@ const batchDocCreateSchema = z.object({
 });
 
 // GET /api/knowledge/bases/:kbId/documents —— 列出知识库中的所有文档
+// 不返回 content（可能很大），返回阶段时间戳与进度信息
 knowledgeManagementRoutes.get("/api/knowledge/bases/:kbId/documents", async (c) => {
   const kbId = c.req.param("kbId");
 
   const docs = await prisma.knowledgeDocument.findMany({
     where: { knowledgeBaseId: kbId },
     orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      knowledgeBaseId: true,
+      title: true,
+      chunkCount: true,
+      status: true,
+      enabled: true,
+      createdAt: true,
+      updatedAt: true,
+      originalFilename: true,
+      originalFileType: true,
+      originalFileSize: true,
+      errorMessage: true,
+      retryCount: true,
+      qualityLabel: true,
+      processingDetail: true,
+      processingStartedAt: true,
+      downloadingCompletedAt: true,
+      parsingCompletedAt: true,
+      normalizingCompletedAt: true,
+      chunkingCompletedAt: true,
+      embeddingCompletedAt: true,
+    },
   });
 
-  return c.json(docs);
+  // 解析 processingDetail JSON 字符串为对象，方便前端使用
+  const parsed = docs.map((d) => ({
+    ...d,
+    processingDetail: d.processingDetail ? safeJsonParse(d.processingDetail) : null,
+  }));
+
+  return c.json(parsed);
 });
 
-// GET /api/knowledge/documents/:docId —— 获取单个文档详情
+// GET /api/knowledge/documents/:docId —— 获取单个文档详情（含完整内容、阶段时间戳、进度信息）
 knowledgeManagementRoutes.get("/api/knowledge/documents/:docId", async (c) => {
   const docId = c.req.param("docId");
   const doc = await prisma.knowledgeDocument.findUnique({
@@ -278,7 +427,11 @@ knowledgeManagementRoutes.get("/api/knowledge/documents/:docId", async (c) => {
     return c.json({ detail: "文档不存在" }, 404);
   }
 
-  return c.json(doc);
+  // 解析 processingDetail JSON 字符串为对象
+  return c.json({
+    ...doc,
+    processingDetail: doc.processingDetail ? safeJsonParse(doc.processingDetail) : null,
+  });
 });
 
 // POST /api/knowledge/bases/:kbId/documents —— 上传并摄取单篇文档
@@ -510,6 +663,102 @@ knowledgeManagementRoutes.get("/api/knowledge/documents/:docId/chunks", async (c
 });
 
 // ════════════════════════════════════════════════════════════════
+// 分块预览（不入库，仅预览）
+// ════════════════════════════════════════════════════════════════
+
+const chunkPreviewSchema = z.object({
+  text: z.string().min(1).max(100000),
+  chunk_size_tokens: z.number().int().min(50).max(4000).optional(),
+  chunk_overlap_tokens: z.number().int().min(0).optional(),
+  chunk_structure: z.enum(["paragraph", "hierarchical"]).default("paragraph").optional(),
+  child_chunk_size_tokens: z.number().int().min(50).max(2000).optional(),
+  child_chunk_overlap_tokens: z.number().int().min(0).optional(),
+  separator_mode: z.enum(["auto", "custom"]).default("auto").optional(),
+  custom_separator: z.string().min(1).max(100).nullable().optional(),
+}).superRefine((data, ctx) => {
+  const size = data.chunk_size_tokens;
+  const overlap = data.chunk_overlap_tokens;
+  if (size !== undefined && overlap !== undefined && overlap >= size * 0.5) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "chunk_overlap_tokens must be less than chunk_size_tokens * 0.5",
+      path: ["chunk_overlap_tokens"],
+    });
+  }
+  if (data.chunk_structure === "hierarchical" && data.child_chunk_size_tokens !== undefined) {
+    const childOverlap = data.child_chunk_overlap_tokens ?? 0;
+    if (childOverlap >= data.child_chunk_size_tokens * 0.5) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "child_chunk_overlap_tokens must be less than child_chunk_size_tokens * 0.5",
+        path: ["child_chunk_overlap_tokens"],
+      });
+    }
+  }
+});
+
+// POST /api/knowledge/chunk-preview —— 预览分块结果（不创建文档/不写入数据库）
+knowledgeManagementRoutes.post(
+  "/api/knowledge/chunk-preview",
+  zValidator("json", chunkPreviewSchema),
+  async (c) => {
+    const {
+      text, chunk_size_tokens, chunk_overlap_tokens, chunk_structure,
+      child_chunk_size_tokens, child_chunk_overlap_tokens,
+      separator_mode, custom_separator,
+    } = c.req.valid("json");
+
+    const fixedSep = separator_mode === "custom" && custom_separator
+      ? custom_separator
+      : undefined;
+
+    const parentSize = chunk_size_tokens ?? settings.kbChunkSizeTokens;
+    const parentOverlap = chunk_overlap_tokens ?? settings.kbChunkOverlapTokens;
+    const splitter = new RecursiveTokenTextSplitter(
+      parentSize, parentOverlap, undefined, fixedSep,
+    );
+
+    if (chunk_structure === "hierarchical") {
+      const childSize = child_chunk_size_tokens ?? 400;
+      const childOverlap = child_chunk_overlap_tokens ?? 60;
+      const { parentChunks, childChunks } = splitter.splitHierarchical(text, childSize, childOverlap);
+
+      const preview = parentChunks.map((parent, i) => ({
+        index: i,
+        content: parent.slice(0, 500) + (parent.length > 500 ? "..." : ""),
+        token_count: splitter.tokenCount(parent),
+        children: (childChunks.get(i) || []).map((child, j) => ({
+          index: j,
+          content: child.slice(0, 300) + (child.length > 300 ? "..." : ""),
+          token_count: splitter.tokenCount(child),
+        })),
+      }));
+
+      return c.json({
+        chunk_structure: "hierarchical",
+        total_parents: parentChunks.length,
+        total_children: [...childChunks.values()].reduce((s, c) => s + c.length, 0),
+        preview,
+      });
+    }
+
+    // paragraph mode
+    const chunks = splitter.splitText(text);
+    const preview = chunks.map((chunk, i) => ({
+      index: i,
+      content: chunk.slice(0, 500) + (chunk.length > 500 ? "..." : ""),
+      token_count: splitter.tokenCount(chunk),
+    }));
+
+    return c.json({
+      chunk_structure: "paragraph",
+      total: chunks.length,
+      preview,
+    });
+  },
+);
+
+// ════════════════════════════════════════════════════════════════
 // 搜索
 // ════════════════════════════════════════════════════════════════
 
@@ -533,6 +782,127 @@ knowledgeManagementRoutes.post(
       results,
       query,
       total: results.length,
+    });
+  },
+);
+
+// ════════════════════════════════════════════════════════════════
+// 命中测试
+// ════════════════════════════════════════════════════════════════
+
+const hitTestingSchema = z.object({
+  query: z.string().min(1).max(500),
+  top_k: z.number().int().min(1).max(20).default(10),
+  search_method: z.enum(["hybrid", "semantic", "keyword"]).default("hybrid"),
+  reranking_enable: z.boolean().default(true),
+  score_threshold: z.number().min(0).max(1).default(0),
+});
+
+// POST /api/knowledge/bases/:kbId/hit-testing —— 检索命中测试（用于调试分块参数和检索策略）
+knowledgeManagementRoutes.post(
+  "/api/knowledge/bases/:kbId/hit-testing",
+  zValidator("json", hitTestingSchema),
+  async (c) => {
+    const kbId = c.req.param("kbId");
+    const { query, top_k, search_method, reranking_enable, score_threshold } =
+      c.req.valid("json");
+
+    // 验证知识库存在
+    const kb = await prisma.knowledgeBase.findUnique({ where: { id: kbId } });
+    if (!kb) {
+      return c.json({ detail: "知识库不存在" }, 404);
+    }
+
+    const service = new KnowledgeService();
+    const startedAt = Date.now();
+
+    let rawResults: Array<{
+      chunkId: string;
+      docId: string;
+      kbId: string;
+      content: string;
+      score: number;
+      fusionScore?: number;
+      rerankScore?: number;
+      recallSources: ("pgvector" | "elasticsearch")[];
+      chunkIndex: number;
+      docTitle: string;
+      parentChunk?: { id: string; content: string };
+    }> = [];
+
+    if (search_method === "hybrid") {
+      rawResults = await service.searchHybrid({
+        query,
+        kbIds: [kbId],
+        topK: top_k,
+        useReranker: reranking_enable,
+      });
+    } else if (search_method === "semantic") {
+      const provider = getDefaultEmbeddingProvider();
+      if (provider) {
+        const queryVec = await provider.embedSingle(query);
+        if (queryVec) {
+          const denseResults = await service.searchByVector(queryVec, [kbId], top_k);
+          rawResults = denseResults.map((r) => ({
+            ...r,
+            score: r.sourceScore,
+            fusionScore: r.sourceScore,
+            recallSources: ["pgvector" as const],
+          }));
+        }
+      }
+    } else if (search_method === "keyword") {
+      const sparseResults = await service.searchByKeyword(query, [kbId], top_k);
+      rawResults = sparseResults.map((r) => ({
+        ...r,
+        score: r.sourceScore,
+        fusionScore: r.sourceScore,
+        recallSources: ["elasticsearch" as const],
+      }));
+    }
+
+    const elapsedMs = Date.now() - startedAt;
+
+    // 分数阈值过滤
+    const filtered = score_threshold > 0
+      ? rawResults.filter((r) => r.score >= score_threshold)
+      : rawResults;
+
+    // 构建响应
+    const results = filtered.map((r) => ({
+      chunk_id: r.chunkId,
+      content: r.content,
+      score: r.score,
+      fusion_score: r.fusionScore,
+      rerank_score: r.rerankScore,
+      recall_sources: r.recallSources,
+      chunk_index: r.chunkIndex,
+      document: {
+        id: r.docId,
+        title: r.docTitle,
+      },
+      parent_chunk: r.parentChunk || null,
+    }));
+
+    // V3.5: 异步写入审计日志（fire-and-forget，不阻塞响应）
+    prisma.knowledgeQueryLog.create({
+      data: {
+        id: randomUUID(),
+        kbId,
+        query,
+        method: search_method,
+        results: results.length,
+        source: "hit_testing",
+        elapsedMs,
+      },
+    }).catch((e) =>
+      logger.warn({ error: String(e) }, "Failed to write query audit log"),
+    );
+
+    return c.json({
+      query: { content: query },
+      results,
+      elapsed_ms: elapsedMs,
     });
   },
 );

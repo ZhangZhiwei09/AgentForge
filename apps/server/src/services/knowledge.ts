@@ -47,6 +47,11 @@ export interface HybridSearchResult {
   recallSources: ("pgvector" | "elasticsearch")[];  // 召回来源
   chunkIndex: number;
   docTitle: string;
+  // V3.4: 层次分块时附上父分块上下文
+  parentChunk?: {
+    id: string;
+    content: string;
+  };
 }
 
 export interface HybridSearchParams {
@@ -282,8 +287,8 @@ export class KnowledgeService {
 
     // 2. 并行双路召回：PGVector + Elasticsearch
     const [denseResults, sparseResults] = await Promise.all([
-      this.pgVectorSearch(queryVec, kbIds, recallSize),
-      this.esKeywordRecall(query, kbIds, recallSize),
+      this.searchByVector(queryVec, kbIds, recallSize),
+      this.searchByKeyword(query, kbIds, recallSize),
     ]);
 
     // 3. RRF 融合
@@ -330,23 +335,66 @@ export class KnowledgeService {
           });
         }
         reranked.sort((a, b) => b.score - a.score);
-        return reranked.slice(0, topK);
+        return this.enrichWithParentChunks(reranked.slice(0, topK));
       }
       // Reranker 失败 → 回退到 RRF 融合分数
     }
 
     // 6. 无 Reranker 或 Reranker 失败 → 用 RRF 分数作为最终分数
-    return dedupedCandidates.slice(0, topK).map((f) => ({
+    const finalResults = dedupedCandidates.slice(0, topK).map((f) => ({
       ...f,
       score: f.fusionScore,
     }));
+    return this.enrichWithParentChunks(finalResults);
+  }
+
+  /**
+   * V3.4: 为搜索结果附加父分块上下文（层次分块时）。
+   * 对每个有 parentChunkId 的 child chunk，批量查询 parent 信息。
+   */
+  private async enrichWithParentChunks<T extends { chunkId: string }>(
+    results: T[],
+  ): Promise<(T & { parentChunk?: { id: string; content: string } })[]> {
+    if (results.length === 0) return results;
+
+    // 批量查询所有 child chunks 的 parent 信息
+    const chunkIds = results.map((r) => r.chunkId);
+    const chunks = await prisma.knowledgeChunk.findMany({
+      where: { id: { in: chunkIds } },
+      select: { id: true, parentChunkId: true },
+    });
+
+    const parentIds = new Set(
+      chunks.filter((c) => c.parentChunkId).map((c) => c.parentChunkId!),
+    );
+
+    if (parentIds.size === 0) {
+      return results.map((r) => ({ ...r }));
+    }
+
+    // 批量查询 parent chunks 内容
+    const parents = await prisma.knowledgeChunk.findMany({
+      where: { id: { in: [...parentIds] } },
+      select: { id: true, content: true },
+    });
+    const parentMap = new Map(parents.map((p) => [p.id, { id: p.id, content: p.content }]));
+
+    const chunkParentMap = new Map(
+      chunks.filter((c) => c.parentChunkId).map((c) => [c.id, c.parentChunkId!]),
+    );
+
+    return results.map((r) => {
+      const pid = chunkParentMap.get(r.chunkId);
+      const parentChunk = pid ? parentMap.get(pid) : undefined;
+      return { ...r, parentChunk };
+    });
   }
 
   /**
    * PGVector 语义搜索：向量余弦相似度检索
    * 使用 PostgreSQL `<->` 操作符（欧几里得距离）或 `<=>` (余弦距离)
    */
-  private async pgVectorSearch(
+  async searchByVector(
     queryVec: number[],
     kbIds?: string[],
     topK: number = 20,
@@ -415,7 +463,7 @@ export class KnowledgeService {
    * ES 关键词召回（包装 elasticsearch.ts 的方法）
    * ES 不可用时回退到空结果（RRF 融合时仅依赖 PGVector 单路）
    */
-  private async esKeywordRecall(
+  async searchByKeyword(
     query: string,
     kbIds?: string[],
     topK: number = 20,
