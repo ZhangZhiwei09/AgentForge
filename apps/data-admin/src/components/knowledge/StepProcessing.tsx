@@ -1,5 +1,5 @@
 // 上传向导第 3 步：处理进度展示 —— 显示多个文档的实时处理进度
-import { useMemo } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { CheckCircle, ArrowRight, Loader2 } from "lucide-react";
 import { DocumentProgressItem } from "./DocumentProgressItem";
 import { useProcessingPolling } from "../../hooks/useProcessingPolling";
@@ -27,9 +27,11 @@ interface StepProcessingProps {
 function PollingDocumentItem({
   doc,
   fetchDocument,
+  onStatusChange,
 }: {
   doc: ProcessingDocument;
   fetchDocument: (docId: string) => Promise<DocumentSnapshot>;
+  onStatusChange: (docId: string, status: string) => void;
 }) {
   const { status, phases, progress } = useProcessingPolling({
     docId: doc.id,
@@ -38,15 +40,23 @@ function PollingDocumentItem({
     enabled: doc.status !== "completed" && doc.status !== "failed",
   });
 
-  // 使用轮询数据或初始数据
-  const displayStatus = status ?? doc.status;
+  // 通知父组件当前状态（初始 + 轮询更新）
+  const currentStatus = status ?? doc.status;
+  const prevStatusRef = useRef(currentStatus);
+  useEffect(() => {
+    if (prevStatusRef.current !== currentStatus) {
+      prevStatusRef.current = currentStatus;
+      onStatusChange(doc.id, currentStatus);
+    }
+  }, [currentStatus, doc.id, onStatusChange]);
+
   const displayPhases: PhaseItem[] =
     phases.length > 0
       ? phases.map((p) => ({
           name: p.label,
           status: p.done
             ? ("completed" as const)
-            : status === "failed"
+            : currentStatus === "failed"
               ? ("failed" as const)
               : ("pending" as const),
         }))
@@ -56,7 +66,7 @@ function PollingDocumentItem({
     <DocumentProgressItem
       documentId={doc.id}
       title={doc.title}
-      status={displayStatus}
+      status={currentStatus}
       phases={displayPhases}
       totalProgress={progress}
     />
@@ -71,14 +81,38 @@ export function StepProcessing({
   onGoToDocuments,
   fetchDocument,
 }: StepProcessingProps) {
-  // 统计各状态数量
+  // 实时追踪每个文档的状态（map: docId → status）
+  const [liveStatuses, setLiveStatuses] = useState<Map<string, string>>(() => {
+    const initial = new Map<string, string>();
+    documents.forEach((d) => initial.set(d.id, d.status));
+    return initial;
+  });
+
+  const handleStatusChange = useCallback(
+    (docId: string, newStatus: string) => {
+      setLiveStatuses((prev) => {
+        // 只在实际变更时更新
+        if (prev.get(docId) === newStatus) return prev;
+        const next = new Map(prev);
+        next.set(docId, newStatus);
+        return next;
+      });
+    },
+    [],
+  );
+
+  // 基于实时状态计算统计
   const stats = useMemo(() => {
     const total = documents.length;
-    const completed = documents.filter((d) => d.status === "completed").length;
-    const failed = documents.filter((d) => d.status === "failed").length;
+    let completed = 0;
+    let failed = 0;
+    liveStatuses.forEach((s) => {
+      if (s === "completed") completed++;
+      else if (s === "failed") failed++;
+    });
     const processing = total - completed - failed;
     return { total, completed, failed, processing };
-  }, [documents]);
+  }, [liveStatuses, documents.length]);
 
   const allDone = stats.completed + stats.failed === stats.total;
 
@@ -120,6 +154,7 @@ export function StepProcessing({
             key={doc.id}
             doc={doc}
             fetchDocument={fetchDocument}
+            onStatusChange={handleStatusChange}
           />
         ))}
       </div>

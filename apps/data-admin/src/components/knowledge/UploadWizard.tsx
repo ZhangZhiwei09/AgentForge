@@ -163,6 +163,11 @@ export function UploadWizard({
     setUploadedDocs(docs);
     setSampleText(sampleContent);
     setUploading(false);
+
+    // 全部失败则不进入下一步
+    if (docs.length === 0) {
+      return;
+    }
     store.setStep(2);
   }, [files, kbId, client, store]);
 
