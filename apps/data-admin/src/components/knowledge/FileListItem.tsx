@@ -1,5 +1,5 @@
 // 文件列表项 —— 单行展示：图标、文件名、大小、进度、状态、删除按钮
-import { FileText, CheckCircle, XCircle, Loader2, Trash2 } from "lucide-react";
+import { FileText, CheckCircle, XCircle, Loader2, Clock, Trash2 } from "lucide-react";
 
 // ── 文件类型图标映射 ──────────────────────────────
 
@@ -111,7 +111,7 @@ export function FileListItem({
         )}
         {status === "error" && <XCircle className="h-5 w-5 text-red-500" />}
         {status === "pending" && (
-          <Loader2 className="h-4 w-4 text-muted-foreground animate-spin" />
+          <Clock className="h-4 w-4 text-muted-foreground" />
         )}
 
         {/* 删除按钮 */}
