@@ -224,4 +224,10 @@ export type {
   FeedbackResponse,
   FAQDocumentDTO,
   FAQCategoryDTO,
+  ChunkingConfigDTO,
+  ChunkPreviewDTO,
+  ChunkPreviewResponseDTO,
+  HitTestingRequestDTO,
+  HitTestingResultDTO,
+  HitTestingResponseDTO,
 } from "./knowledge";

@@ -141,3 +141,65 @@ export interface FAQCategoryDTO {
   name: string;
   count: number;
 }
+
+// ── 分块配置 ──
+
+export interface ChunkingConfigDTO {
+  mode: 'general' | 'parent_child';
+  separator: string;
+  maxChunkSize: number;
+  overlap: number;
+  removeExtraSpaces: boolean;
+  removeUrlsEmails: boolean;
+  // 父子模式
+  parentMaxSize?: number;
+  childMaxSize?: number;
+}
+
+// ── 分块预览 ──
+
+export interface ChunkPreviewDTO {
+  index: number;
+  content: string;
+  tokenCount: number;
+}
+
+export interface ChunkPreviewResponseDTO {
+  chunkStructure: string;
+  total: number;
+  preview: ChunkPreviewDTO[];
+}
+
+// ── 命中测试 ──
+
+export interface HitTestingRequestDTO {
+  query: string;
+  topK?: number;
+  searchMethod?: 'hybrid' | 'semantic' | 'keyword';
+  rerankingEnable?: boolean;
+  scoreThreshold?: number;
+}
+
+export interface HitTestingResultDTO {
+  chunkId: string;
+  content: string;
+  score: number;
+  fusionScore?: number;
+  rerankScore?: number;
+  recallSources: string[];
+  chunkIndex: number;
+  document: {
+    id: string;
+    title: string;
+  };
+  parentChunk?: {
+    id: string;
+    content: string;
+  };
+}
+
+export interface HitTestingResponseDTO {
+  query: { content: string };
+  results: HitTestingResultDTO[];
+  elapsedMs: number;
+}

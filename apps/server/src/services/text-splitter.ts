@@ -206,11 +206,14 @@ export class RecursiveTokenTextSplitter {
   private chunkOverlapTokens: number;
   // 分隔符优先级：段落 → 行 → 句子结束 → 列表项 → 分句标点 → 空格 → 字符
   private separators: string[];
+  // V3.4: 固定分隔符（如 "\n## " 按 Markdown 标题切分）
+  private fixedSeparator?: string;
 
   constructor(
     chunkSizeTokens: number = 800,
     chunkOverlapTokens: number = 120,
     separators?: string[],
+    fixedSeparator?: string,
   ) {
     if (chunkOverlapTokens >= chunkSizeTokens) {
       throw new Error(
@@ -222,6 +225,7 @@ export class RecursiveTokenTextSplitter {
     }
     this.chunkSizeTokens = chunkSizeTokens;
     this.chunkOverlapTokens = chunkOverlapTokens;
+    this.fixedSeparator = fixedSeparator;
     this.separators = separators || [
       "\n\n",   // 段落分隔（最高优先级）
       "\n",     // 行分隔
@@ -235,15 +239,102 @@ export class RecursiveTokenTextSplitter {
     ];
   }
 
-  /** Token 估算（同步，用于分片循环） */
-  private tokenCount(text: string): number {
+  /** Token 估算（同步，用于分片循环 + 外部预览） */
+  tokenCount(text: string): number {
     return estimateTokensLocal(text);
   }
 
   /** 切分单篇文本 */
   splitText(text: string): string[] {
     if (!text) return [];
+
+    // V3.4: 有固定分隔符时，先按固定分隔符切分，超长片段再递归降级
+    if (this.fixedSeparator) {
+      return this.splitWithFixedSeparator(text);
+    }
+
     return this.splitRecursive(text, this.separators);
+  }
+
+  /**
+   * V3.4: 按固定分隔符切分 + 超长片段递归降级。
+   * 参考 Dify FixedRecursiveCharacterTextSplitter 的设计：
+   * 先按 fixed_separator 切分整个文本，每个片段若不超长则直接作为一个 chunk，
+   * 超长的片段走递归降级切分。
+   */
+  private splitWithFixedSeparator(text: string): string[] {
+    const sep = this.fixedSeparator!;
+    // 将转义的 Unicode 还原（兼容 "\n" 等字面量）
+    const decodedSep = this.decodeSeparator(sep);
+    const parts = text.split(decodedSep);
+
+    const finalChunks: string[] = [];
+    for (const part of parts) {
+      if (!part) continue;
+      if (this.tokenCount(part) <= this.chunkSizeTokens) {
+        // 不超长 → 直接作为一个 chunk（保留原始分隔符在前后 chunk 的边界）
+        finalChunks.push(part);
+      } else {
+        // 超长 → 递归降级切分
+        finalChunks.push(...this.splitRecursive(part, this.separators));
+      }
+    }
+
+    return this.mergeTokenOverlap(finalChunks);
+  }
+
+  /**
+   * 解码转义的 Unicode 分隔符。
+   * 将 "\n" → 换行、"\t" → 制表符等。
+   * 不直接使用 JSON.parse（会因其他内容报错），仅处理常见转义。
+   */
+  private decodeSeparator(sep: string): string {
+    return sep
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "\r")
+      .replace(/\\t/g, "\t")
+      .replace(/\\\\/g, "\\");
+  }
+
+  /**
+   * V3.4: 层次分块 — 两级切分（parent → child）。
+   *
+   * 第一级用较大 token 数切出 parent chunks（提供上下文），
+   * 第二级对每个 parent chunk 用较小 token 数切出 child chunks（提供检索精度）。
+   * 只有 child chunks 被向量化，parent chunks 仅用于结果展示。
+   *
+   * @returns parent chunks 列表 + 每个 parent 对应的 child chunks 映射
+   */
+  splitHierarchical(
+    text: string,
+    childChunkSize: number,
+    childChunkOverlap: number,
+  ): {
+    parentChunks: string[];
+    childChunks: Map<number, string[]>;  // parentIndex → childText[]
+  } {
+    if (!text) return { parentChunks: [], childChunks: new Map() };
+
+    // 第一级：切出 parent chunks
+    const parentChunks = this.splitText(text);
+    const childChunks = new Map<number, string[]>();
+
+    // 第二级：对每个 parent 用子 splitter 切出 child chunks
+    const childSplitter = new RecursiveTokenTextSplitter(
+      childChunkSize,
+      childChunkOverlap,
+      undefined,  // 使用默认 separator 列表
+      this.fixedSeparator,  // 继承父级的 fixedSeparator
+    );
+
+    for (let i = 0; i < parentChunks.length; i++) {
+      const children = childSplitter.splitText(parentChunks[i]);
+      if (children.length > 0) {
+        childChunks.set(i, children);
+      }
+    }
+
+    return { parentChunks, childChunks };
   }
 
   /** 批量切分文档 */
