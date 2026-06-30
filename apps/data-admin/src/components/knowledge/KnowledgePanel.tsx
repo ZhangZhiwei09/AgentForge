@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   BookOpen,
   Search,
@@ -11,6 +12,7 @@ import {
   ChevronLeft,
   FolderOpen,
   Eye,
+  FlaskConical,
 } from "lucide-react";
 
 // ── Types ──────────────────────────────────────
@@ -143,6 +145,8 @@ interface KnowledgePanelProps {
 }
 
 export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
+  const navigate = useNavigate();
+
   // Navigation state
   const [viewMode, setViewMode] = useState<ViewMode>("bases");
   const [selectedKb, setSelectedKb] = useState<KnowledgeBase | null>(null);
@@ -516,6 +520,16 @@ export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
           )}
         </div>
         <div className="flex items-center gap-1">
+          {/* 命中测试按钮（仅在文档视图显示） */}
+          {viewMode === "documents" && selectedKb && (
+            <button
+              onClick={() => navigate(`/admin/cs/knowledge/${selectedKb.id}/hit-testing`)}
+              className="rounded p-0.5 text-muted-foreground transition-colors hover:text-[hsl(var(--cs-primary))]"
+              title="命中测试"
+            >
+              <FlaskConical className="h-3.5 w-3.5" />
+            </button>
+          )}
           <button
             onClick={() =>
               viewMode === "bases"
