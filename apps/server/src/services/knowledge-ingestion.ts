@@ -1,6 +1,8 @@
-// 知识库文档摄取服务 —— 将文档切分、向量化，写入 Milvus 和 PostgreSQL
+// 知识库文档摄取服务 —— 将文档切分、向量化，写入 PGVector 和 Elasticsearch
 // 摄取流程：Document(PENDING) → PARSING → NORMALIZING → INGESTING → COMPLETED/FAILED
 // V2.2: 集成 ParserRegistry + Normalizer + Quality Gate + State Machine
+// V3.5: 移除 Milvus Knowledge Collection 写入和 PostgreSQL inverted_index 写入
+//       知识检索已迁移到 PGVector + ES + RRF 融合，这两个路径不再作为写入目标
 // 同时包含种子数据（客服 FAQ）和种子函数
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
@@ -35,6 +37,7 @@ type QualityDecision = "proceed" | "flag_low" | "reject_scan";
 export class KnowledgeIngestionService {
   private normalizer: NormalizerService;
   private collectionLoaded = false;
+  private collectionLoadFailed = false;
 
   // 默认分片参数（来自环境变量，可被 KB 级配置覆盖）
   private defaultChunkSizeTokens: number;
@@ -106,10 +109,38 @@ export class KnowledgeIngestionService {
     };
   }
 
-  private async ensureCollection() {
-    if (!this.collectionLoaded) {
+  // 确保 Milvus Knowledge Collection 存在（仅用于 deleteDocument 清理历史数据）
+  // V3.5: ingestChunks 不再写入 Milvus，此方法保留用于旧文档删除时的向量清理
+  //       Milvus 不可用时安全跳过：gRPC 连接失败的 unhandledRejection 会被
+  //       临时的进程级处理器捕获，然后恢复原有的处理逻辑。
+  private async ensureCollection(): Promise<boolean> {
+    if (this.collectionLoaded) return true;
+    if (this.collectionLoadFailed) return false;
+
+    // Milvus gRPC 连接失败时会触发 unhandledRejection 导致进程崩溃。
+    // 这里注册一个临时处理器来拦截并抑制这个致命错误。
+    const prevListeners = process.listeners("unhandledRejection");
+    process.removeAllListeners("unhandledRejection");
+    // 确保 Node 默认的 unhandledRejection 行为被覆盖
+    const tempHandler = (_reason: unknown, _promise: unknown) => {
+      // 吞掉 Milvus gRPC 的 unhandledRejection，防止进程崩溃
+    };
+    process.on("unhandledRejection", tempHandler);
+
+    try {
       await ensureKnowledgeCollection();
       this.collectionLoaded = true;
+      return true;
+    } catch (e) {
+      logger.warn(e, "Milvus Knowledge Collection unavailable — skipping historical vector cleanup");
+      this.collectionLoadFailed = true;
+      return false;
+    } finally {
+      // 恢复原有的 unhandledRejection 处理器
+      process.removeListener("unhandledRejection", tempHandler);
+      for (const listener of prevListeners) {
+        process.on("unhandledRejection", listener);
+      }
     }
   }
 
@@ -181,7 +212,7 @@ export class KnowledgeIngestionService {
     return "proceed";
   }
 
-  // 摄取单篇文档：创建记录 → 切分 → 向量化 → 双写
+  // 摄取单篇文档：创建记录 → 切分 → 向量化 → 写入 PGVector + ES
   async ingestDocument(kbId: string, title: string, content: string) {
     // 读取 KB 分片配置
     const kbConfig = await this.getKBSplitConfig(kbId);
@@ -213,7 +244,7 @@ export class KnowledgeIngestionService {
         })!;
       }
 
-      // 3. 逐 chunk 向量化并写入 Milvus + PG
+      // 3. 逐 chunk 向量化并写入 PGVector + ES
       await this.ingestChunks(doc.id, kbId, chunks);
 
       // 4. 更新文档状态为 completed
@@ -671,7 +702,9 @@ export class KnowledgeIngestionService {
     }
   }
 
-  // Chunk 向量化 + 双写核心逻辑（V3.0: 追加 PGVector embedding + ES 索引）
+  // Chunk 向量化 + 写入核心逻辑（PGVector embedding + ES 索引）
+  // V3.5: 移除 Milvus Knowledge Collection 写入和 PostgreSQL inverted_index 写入
+  //       知识检索路径已迁移到 PGVector + ES + RRF 融合
   // V3.4: childParentMap 用于层次分块时映射 child → parent chunk ID
   private async ingestChunks(
     docId: string,
@@ -686,9 +719,7 @@ export class KnowledgeIngestionService {
       throw new Error("No embedding provider configured");
     }
 
-    await this.ensureCollection();
-
-    // 1. 批量生成 dense 向量
+    // 1. 批量生成 dense 向量（PGVector 语义检索用）
     const totalChunks = chunkTexts.length;
     await this.updateDocumentStatus(docId, "embedding", {
       progress: { phase: "embedding", progress: 0, total: totalChunks, message: `正在向量化 ${totalChunks} 个分块（通过 ${provider.modelName}）...` },
@@ -702,24 +733,8 @@ export class KnowledgeIngestionService {
       progress: { phase: "writing_db", progress: 0, total: totalChunks, message: `向量化完成，正在写入第 0/${totalChunks} 个分块...` },
     });
 
-    // 2. 批量插入 Milvus（过渡期双写，后续版本移除）
+    // 2. 保存 chunk 元数据到 PG + PGVector embedding
     const chunkIds = chunkTexts.map(() => randomUUID());
-    const client = getMilvusClient();
-
-    const rows = chunkTexts.map((text, i) => ({
-      chunk_id: chunkIds[i],
-      kb_id: kbId,
-      dense_vector: denseVecs[i],
-      content: text.slice(0, 4096),
-    }));
-
-    const mr = await client.insert({
-      collection_name: MILVUS_KNOWLEDGE_COLLECTION,
-      fields_data: rows,
-    });
-
-    // 3. 保存 chunk 元数据到 PG（包含 Milvus ID 和 PGVector embedding）
-    const milvusIds = (mr.IDs as any)?.int_id?.data || [];
 
     // 获取文档标题（用于 ES 索引）
     const doc = await prisma.knowledgeDocument.findUnique({
@@ -739,7 +754,8 @@ export class KnowledgeIngestionService {
     for (let i = 0; i < chunkIds.length; i++) {
       const vecLiteral = `[${denseVecs[i].join(",")}]`;
 
-      // 先创建 chunk 记录，再通过 raw SQL 补充 embedding
+      // 创建 chunk 记录（milvusId 置空，不再写入 Milvus Knowledge Collection）
+      // 再通过 raw SQL 补充 PGVector embedding
       const parentId = childParentMap?.get(i);
       await prisma.knowledgeChunk.create({
         data: {
@@ -749,7 +765,6 @@ export class KnowledgeIngestionService {
           chunkIndex: i,
           content: chunkTexts[i],
           tokenCount: embeddingTokenCounts[i],
-          milvusId: milvusIds[i] != null ? BigInt(milvusIds[i]) : null,
           sourceType: sourceType ?? null,
           qualityLabel: qualityLabel ?? null,
           parentChunkId: parentId ?? null,
@@ -763,7 +778,7 @@ export class KnowledgeIngestionService {
         chunkIds[i],
       );
 
-      // 构建 ES 文档
+      // 构建 ES 文档（用于关键词召回）
       esDocs.push({
         chunkId: chunkIds[i],
         kbId,
@@ -783,27 +798,7 @@ export class KnowledgeIngestionService {
       }
     }
 
-    // 4. 构建倒排索引（保留用于 PG 端关键词回退检索）
-    for (let i = 0; i < chunkTexts.length; i++) {
-      const tokens = tokenize(chunkTexts[i]);
-      const termFreqMap = new Map<string, number>();
-      for (const t of tokens) {
-        termFreqMap.set(t, (termFreqMap.get(t) ?? 0) + 1);
-      }
-      if (termFreqMap.size > 0) {
-        await prisma.knowledgeInvertedIndex.createMany({
-          data: Array.from(termFreqMap.entries()).map(([term, freq]) => ({
-            id: randomUUID(),
-            term,
-            chunkId: chunkIds[i],
-            kbId,
-            termFreq: freq,
-          })),
-        });
-      }
-    }
-
-    // 5. V3.0: 索引到 Elasticsearch（异步，失败不阻塞主流程）
+    // 3. V3.0: 索引到 Elasticsearch（关键词检索用，失败不阻塞主流程）
     try {
       if (await isESAvailable()) {
         await ensureKnowledgeIndex();
@@ -816,7 +811,8 @@ export class KnowledgeIngestionService {
     }
   }
 
-  // 删除文档：同时清理 PG 和 Milvus 中的数据
+  // 删除文档：清理 PG、ES 中的活跃数据，同时处理历史 Milvus 向量和倒排索引
+  // V3.5: 新文档不再有 Milvus 向量和 inverted_index 行，这些清理分支对它们是无操作
   async deleteDocument(docId: string): Promise<boolean> {
     const doc = await prisma.knowledgeDocument.findUnique({
       where: { id: docId },
@@ -832,22 +828,24 @@ export class KnowledgeIngestionService {
       .filter((c) => c.milvusId !== null)
       .map((c) => Number(c.milvusId));
 
-    // 从 Milvus 删除向量
+    // 从 Milvus 删除向量（仅当 Collection 可用时）
     if (milvusIds.length > 0) {
-      try {
-        await this.ensureCollection();
-        const client = getMilvusClient();
-        const idExpr = milvusIds.join(", ");
-        await client.delete({
-          collection_name: MILVUS_KNOWLEDGE_COLLECTION,
-          filter: `id in [${idExpr}]`,
-        });
-      } catch (e) {
-        logger.warn(e, "Milvus delete failed during document cleanup");
+      const milvusReady = await this.ensureCollection();
+      if (milvusReady) {
+        try {
+          const client = getMilvusClient();
+          const idExpr = milvusIds.join(", ");
+          await client.delete({
+            collection_name: MILVUS_KNOWLEDGE_COLLECTION,
+            filter: `id in [${idExpr}]`,
+          });
+        } catch (e) {
+          logger.warn(e, "Milvus delete failed during document cleanup");
+        }
       }
     }
 
-    // 清理倒排索引（用 chunk ID 精确删除）
+    // 清理历史倒排索引（新文档无对应行，为安全 no-op）
     const chunkIds = chunks.map((c) => c.id);
     await prisma.knowledgeInvertedIndex.deleteMany({
       where: { chunkId: { in: chunkIds } },
@@ -1053,7 +1051,7 @@ export async function seedKnowledgeBase(): Promise<string> {
   } catch (e) {
     logger.warn(
       e,
-      "Seed data vectorization failed (Milvus may not be running)",
+      "Seed data vectorization failed (embedding provider or PGVector may not be available)",
     );
   }
 
