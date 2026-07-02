@@ -17,9 +17,7 @@
 │  Embedding Provider (Ollama / OpenAI)                                │
 │       │                                                              │
 │       ├──→ PostgreSQL (chunk metadata + PGVector embedding)          │
-│       ├──→ Elasticsearch (BM25 keyword index)                       │
-│       ├──→ Milvus (legacy, transition period)                       │
-│       └──→ PostgreSQL Inverted Index (term→chunk, fallback)         │
+│       └──→ Elasticsearch (BM25 keyword index)                       │
 └─────────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -139,7 +137,7 @@ Parent Chunk (800 tokens, overlap 120)
 ```
 
 - Parent chunks: 仅存 PostgreSQL，**不向量化**，用于提供上下文
-- Child chunks: 向量化 + 双写，`parentChunkId` 关联父块
+- Child chunks: 向量化 + 写入 PGVector + ES，`parentChunkId` 关联父块
 
 #### Phase 5: EMBEDDING（向量化）
 
@@ -159,15 +157,13 @@ chunkTexts[] → embed() → denseVecs[][]
 | OpenAI | text-embedding-3-small | 1536 | 性价比 |
 | DashScope | text-embedding-v3/v4 | 1024 | 阿里云 |
 
-#### Phase 6: WRITING_DB（多路写入）
+#### Phase 6: WRITING_DB（双路写入 V3.5）
 
-每个 chunk 同时写入 **四个存储**：
+每个 chunk 写入 **两个存储**（V3.5 已移除 Milvus Knowledge Collection 和 PG inverted_index 写入）：
 
 ```
-                    ┌──→ PostgreSQL knowledge_chunks (元数据 + embedding vector)
-chunk text + vec ───┼──→ Milvus (向量，过渡期保留)
-                    ├──→ Elasticsearch knowledge_chunks (BM25 倒排索引)
-                    └──→ PostgreSQL knowledge_inverted_index (term→chunk 回退索引)
+chunk text + vec ───┬──→ PostgreSQL knowledge_chunks (元数据 + embedding vector)
+                    └──→ Elasticsearch knowledge_chunks (BM25 倒排索引)
 ```
 
 **PostgreSQL (knowledge_chunks)**:
@@ -190,17 +186,12 @@ UPDATE knowledge_chunks SET embedding = '[0.1, 0.2, ...]'::vector WHERE id = $1;
 }
 ```
 
-**PostgreSQL Inverted Index (knowledge_inverted_index)**:
-```
-分词 → {term: "退换货", chunkId: "uuid", termFreq: 3}
-     → {term: "商品", chunkId: "uuid", termFreq: 2}
-     → ...
-```
+**PostgreSQL Inverted Index (knowledge_inverted_index)** — V3.5 已停止写入:
+此表在 V3.5 之前用于 PG 端关键词回退检索，现已停止在摄入时写入。表结构和 `rebuildInvertedIndex()` 静态方法保留用于历史数据修复，后续阶段将清理 Schema。
 
-**写入策略**:
+**写入策略（V3.5）**:
 - PGVector embedding 写入失败 → 抛出异常，触发 BullMQ 重试
 - Elasticsearch 索引失败 → 仅 warn 日志，不阻塞主流程
-- Milvus 写入失败 → 抛出异常（过渡期行为）
 
 ---
 
@@ -374,16 +365,16 @@ PGVector 查询失败？
 删除文档时同步清理所有存储：
 
 ```
-deleteDocument(docId):
-  1. 查询所有 chunk IDs + Milvus IDs
-  2. Milvus: DELETE WHERE id IN [...]
-  3. PostgreSQL: DELETE knowledge_inverted_index WHERE chunkId IN [...]
+deleteDocument(docId) — V3.5 清理策略:
+  1. 查询所有 chunk IDs + Milvus IDs（新文档 milvusId 为 null，跳过 Milvus 清理）
+  2. Milvus: DELETE WHERE id IN [...]（仅历史数据，新文档为 no-op）
+  3. PostgreSQL: DELETE knowledge_inverted_index WHERE chunkId IN [...]（仅历史数据）
   4. Elasticsearch: DELETE BY QUERY terms: { docId: [...] }
   5. PostgreSQL: DELETE knowledge_chunks WHERE documentId = docId
   6. PostgreSQL: DELETE knowledge_document WHERE id = docId
 ```
 
-ES 和 Milvus 删除失败时仅 warn 日志，不阻塞（后续可通过 rebuild 修复）。
+ES 和历史 Milvus 删除失败时仅 warn 日志，不阻塞（后续可通过 rebuild 修复）。
 
 ---
 
@@ -441,8 +432,8 @@ KnowledgeIngestionService.rebuildInvertedIndex(kbId?):
 | **PostgreSQL** | chunk 元数据 + PGVector embedding（语义搜索主引擎） | **致命**，系统不可用 |
 | **Elasticsearch** | BM25 关键词倒排索引 | 降级为纯向量搜索，召回率下降 |
 | **Reranker** | Cross-Encoder 精排 | 降级为 RRF 融合分数排序，精度略降 |
-| **Milvus** | 向量存储（过渡期保留） | 未来版本移除，当前仍参与写入 |
-| **PG Inverted Index** | term→chunk 回退关键词索引 | 回退路径，当前版本保留用于 PG 端关键词搜索 |
+| **Milvus** | 向量存储（仅 long-term memory） | Knowledge Collection 已停止写入（V3.5），仅 MemoryEngine 使用 |
+| **PG Inverted Index** | term→chunk（已停止写入 V3.5） | 表结构保留，rebuildInvertedIndex 保留用于历史数据修复 |
 | **MinIO** | 原始文件存储（PDF/Word 等） | 仅影响文件解析入口，不影响已索引数据的检索 |
 
 ---

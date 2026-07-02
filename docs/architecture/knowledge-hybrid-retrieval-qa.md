@@ -40,7 +40,7 @@
 | 干什么 | 买书→分类→贴标签→上架 | 读者问→查目录→找书→递给读者 |
 | 什么时候跑 | 有新书来的时候（偶发） | 有读者来问的时候（频繁） |
 | 谁负责 | `knowledge-ingestion.ts` | `knowledge.ts` |
-| 关键存储 | PG + ES + Milvus + MinIO | 同上（只读，不改） |
+| 关键存储 | PG + ES + MinIO | PG + ES（只读，不改） |
 
 **一个关键设计——漏斗：**
 
@@ -434,13 +434,7 @@ chunk text + vector
         │      ├─ Prisma 插入元数据（id, content, chunkIndex, tokenCount...）
         │      └─ Raw SQL 写入 embedding 向量列
         │
-        ├── ② Milvus ← 过渡期保留，未来移除
-        │      └─ client.insert(collection, rows)
-        │
-        ├── ③ PostgreSQL (knowledge_inverted_index) ← 回退关键词索引
-        │      └─ 分词 → termFreqMap → INSERT
-        │
-        └── ④ Elasticsearch ← 异步写入，失败不阻塞
+        └── ② Elasticsearch ← 异步写入，失败不阻塞
                └─ bulkIndexDocuments(esDocs)
 ```
 
@@ -448,23 +442,21 @@ chunk text + vector
 |------|------|---------|
 | **PGVector** | 主引擎（语义搜索） | 抛异常，重试 |
 | **Elasticsearch** | BM25 关键词搜索 | warn 日志，不阻塞 |
-| Milvus | 历史遗留，待移除 | 抛异常（过渡期） |
-| 倒排索引 | PG 端回退关键词 | await，PG 写失败即致命 |
 
 错误处理的设计原则：**核心路径必须成功，辅助路径可以容错。** 系统在部分组件故障时仍能工作——这为后面的降级策略打下了基础。
 
 > **学生：** 这里我比较好奇，有必要写入那么多的地方嘛？
 >
-> **老师：** 问得好。实话实说——**不是全部必要，目前是历史演进而非精简化之后的状态。**
+> **老师：** V3.5 已经做了精简——**现在只需要 PG + ES 两个就够了。**
 
-逐条分析：
+逐条分析（V3.5 更新）：
 
 - **PGVector → 必须。** 语义搜索的主引擎，没它系统就废了。
 - **Elasticsearch → 应该要。** BM25 关键词搜索是"混合检索"的另一条腿。但它是可选依赖——代码已经做了降级处理。
-- **Milvus → 不需要了，遗留物。** 早期 PGVector 还不成熟，所以最初选了 Milvus 做向量存储。后来 pgvector 成熟了，系统把向量列直接加到 PG 表里，Milvus 变成了冗余。代码注释已经写了"过渡期双写，后续版本移除"。
-- **PG 倒排索引 → 可有可无。** 它是 ES 不可用时的回退，但分词逻辑很简陋，搜索效果远不如 ES 的 BM25。如果 ES 稳定运行，这块代码等于白跑。
+- **Milvus（Knowledge Collection）→ 已从摄入路径移除。** 早期 PGVector 不成熟时选用 Milvus 做向量存储，后来 PG vector 列直接加到 PG 表里变成冗余。V3.5 已停止写入，仅 deleteDocument 保留历史数据清理。
+- **PG 倒排索引（knowledge_inverted_index）→ 已从摄入路径移除。** V3.5 已停止写入，仅保留 rebuildInvertedIndex 静态方法用于数据修复。新文档不再写入该表。
 
-精简后的理想形态：
+当前写入路径：
 
 ```
 chunk text + vector
@@ -473,7 +465,7 @@ chunk text + vector
   └── Elasticsearch（BM25 关键词）        ← 混合检索需要，但可降级
 ```
 
-**总结：这是一个技术债务问题，不是架构要求。** 核心只需要 PG + ES 两个就够了。
+**总结：V3.5 已完成清理，技术债务已解决。** 核心只需要 PG + ES 两个就够了。
 
 ---
 
