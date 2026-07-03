@@ -18,22 +18,9 @@ vi.mock("../../db.js", () => {
     knowledgeDocument: {
       findMany: vi.fn(),
     },
-    knowledgeInvertedIndex: {
-      findMany: vi.fn(),
-      count: vi.fn(),
-      deleteMany: vi.fn(),
-      createMany: vi.fn(),
-    },
   };
   return { prisma: mockPrisma };
 });
-
-// Mock milvus
-vi.mock("../milvus.js", () => ({
-  getMilvusClient: vi.fn(),
-  MILVUS_KNOWLEDGE_COLLECTION: "knowledge_collection",
-  ensureKnowledgeCollection: vi.fn(),
-}));
 
 // Mock embeddings
 vi.mock("../embeddings.js", () => ({

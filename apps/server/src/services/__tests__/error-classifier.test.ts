@@ -172,15 +172,6 @@ describe("classifyError", () => {
       expect(result.category).toBe("degradable");
     });
 
-    it("classifies Milvus errors as degradable", () => {
-      const result = classifyError(
-        new Error("collection not loaded in Milvus"),
-        "tool",
-        "knowledge_search",
-      );
-      expect(result.category).toBe("degradable");
-    });
-
     it("classifies generic service unavailable as degradable", () => {
       const result = classifyError(
         new Error("service temporarily unavailable"),

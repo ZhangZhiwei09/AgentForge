@@ -6,14 +6,14 @@
 路由层 (src/routes/)       → HTTP 关心的事：请求解析、参数校验、SSE 流
 服务层 (src/services/)      → 业务逻辑：编排 DB 操作 + LLM 调用 + 向量搜索
 Provider 层 (src/providers/) → LLM 抽象：统一不同 AI 厂商的接口
-数据库层 (packages/database/) → Prisma ORM + PostgreSQL + Milvus
+数据库层 (packages/database/) → Prisma ORM + PostgreSQL
 ```
 
 ---
 
 ## 文件总览
 
-9 个 Service 文件按职责分为三类：
+7 个 Service 文件按职责分为三类：
 
 ### 一、聊天服务（核心编排层）
 
@@ -27,15 +27,13 @@ Provider 层 (src/providers/) → LLM 抽象：统一不同 AI 厂商的接口
 | 文件                     | 类                          | 职责                                                                   |
 | ------------------------ | --------------------------- | ---------------------------------------------------------------------- |
 | `knowledge.ts`           | `KnowledgeService`          | 混合检索：dense 向量 + BM25 稀疏向量，可选 LLM Rerank 重排序           |
-| `knowledge-ingestion.ts` | `KnowledgeIngestionService` | 文档摄取：切分 → embedding → Milvus → PG，支持批量/删除/重建 BM25 索引 |
+| `knowledge-ingestion.ts` | `KnowledgeIngestionService` | 文档摄取：切分 → embedding → PGVector + Elasticsearch，支持批量/删除/重建 ES 索引 |
 
 ### 三、基础设施服务（底层工具）
 
 | 文件               | 类                               | 职责                                                      |
 | ------------------ | -------------------------------- | --------------------------------------------------------- |
-| `memory-engine.ts` | `MemoryEngine`                   | 长期记忆：CRUD + 向量搜索 + LLM 从对话中提取用户事实/偏好 |
 | `embeddings.ts`    | `OpenAIEmbeddingProvider`        | Embedding 封装：OpenAI API → 1536 维向量                  |
-| `milvus.ts`        | （函数模块）                     | Milvus 客户端单例 + Collection 自动创建/索引              |
 | `bm25.ts`          | `BM25SparseEncoder`              | 稀疏向量编码器（当前为 stub，返回空向量）                 |
 | `text-splitter.ts` | `RecursiveCharacterTextSplitter` | 递归文本切分，按分隔符优先级降级，带 overlap              |
 
@@ -49,13 +47,11 @@ Provider 层 (src/providers/) → LLM 抽象：统一不同 AI 厂商的接口
 路由 chatRoutes
   └→ ChatService.streamChat()
       ├─ 1. 查 PG 获取 conversation + user
-      ├─ 2. MemoryEngine.search() → Milvus 向量搜索找相关记忆
-      ├─ 3. 注入记忆文本到 system prompt
-      ├─ 4. 保存用户消息到 PG
-      ├─ 5. 加载历史消息
-      ├─ 6. provider.streamChat() → 流式调用 OpenAI / DeepSeek
-      ├─ 7. 逐 token yield → SSE → 前端实时渲染
-      └─ 8. [done] 保存助手消息 + 自动生成标题 + MemoryEngine.extractAndStore()
+      ├─ 2. 保存用户消息到 PG
+      ├─ 3. 加载历史消息
+      ├─ 4. provider.streamChat() → 流式调用 OpenAI / DeepSeek
+      ├─ 5. 逐 token yield → SSE → 前端实时渲染
+      └─ 6. [done] 保存助手消息 + 自动生成标题
 ```
 
 ---
@@ -74,6 +70,6 @@ Provider 层 (src/providers/) → LLM 抽象：统一不同 AI 厂商的接口
 
 - **路由不碰业务逻辑**：routes/ 只做参数校验和 HTTP 响应，具体"怎么做"全在 services/
 - **Provider 抽象**：services 不直接调 OpenAI SDK，通过 `LLMProvider` 接口，换模型只改配置
-- **双写存储**：记忆和知识库同时写入 PostgreSQL（元数据/全文）和 Milvus（向量搜索）
-- **优雅降级**：Milvus 不可用时，MemoryEngine 回退到纯 PG 查询；BM25 stub 不阻塞主流程
-- **ChatService vs CustomerChatService**：两个独立实现，不共享基类——客服版多了知识库检索，少了记忆注入
+- **双写存储**：知识库写入 PostgreSQL（元数据 + PGVector 语义向量）和 Elasticsearch（BM25 关键词索引）
+- **优雅降级**：ES 不可用时知识检索降级为纯向量搜索；BM25 stub 不阻塞主流程
+- **ChatService vs CustomerChatService**：两个独立实现，不共享基类——客服版多了知识库检索

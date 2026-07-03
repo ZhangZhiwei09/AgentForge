@@ -18,7 +18,6 @@ model User {
   createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   conversations Conversation[]
-  memories      Memory[]
   refreshTokens RefreshToken[]
   apiKeys       ApiKey[]
   workflows     Workflow[]
@@ -73,7 +72,6 @@ model Conversation {
   status         String?        @default("active") @db.VarChar(20)
   customerMeta   Json?          @map("customer_meta")
   user           User           @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  memories       Memory[]
   messages       Message[]
   agentSessions  AgentSession[]
   ratings        SatisfactionRating[]
@@ -102,24 +100,6 @@ model Message {
   @@map("messages")
 }
 
-model Memory {
-  id             String        @id @db.VarChar(36)
-  userId         String        @map("user_id") @db.VarChar(36)
-  type           memory_type
-  content        String
-  importance     Float
-  embeddingId    Int?          @map("embedding_id")
-  metadata       Json?         @map("metadata")
-  conversationId String?       @map("conversation_id") @db.VarChar(36)
-  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  user           User          @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([userId], map: "ix_memories_user_id")
-  @@map("memories")
-}
-
 model KnowledgeBase {
   id          String              @id @db.VarChar(36)
   name        String              @db.VarChar(255)
@@ -146,9 +126,8 @@ model KnowledgeBase {
   removeExtraSpaces Boolean  @default(true)  @map("remove_extra_spaces")
   removeUrlsEmails  Boolean  @default(false) @map("remove_urls_emails")
 
-  chunks               KnowledgeChunk[]
-  documents            KnowledgeDocument[]
-  invertedIndexEntries KnowledgeInvertedIndex[]
+  chunks    KnowledgeChunk[]
+  documents KnowledgeDocument[]
 
   @@map("knowledge_bases")
 }
@@ -202,7 +181,6 @@ model KnowledgeChunk {
   chunkIndex      Int               @map("chunk_index")
   content         String
   tokenCount      Int               @default(0) @map("token_count")
-  milvusId        BigInt?           @map("milvus_id")
   embedding       Unsupported("vector(1024)")?  // PGVector 语义向量（bge-m3 / text-embedding-v3 = 1024 维）
   enabled         Boolean           @default(true)
   created_at      DateTime?         @default(now()) @db.Timestamptz(6)
@@ -216,31 +194,12 @@ model KnowledgeChunk {
   parentChunk   KnowledgeChunk? @relation("ChildChunks", fields: [parentChunkId], references: [id], onDelete: SetNull)
   childChunks   KnowledgeChunk[] @relation("ChildChunks")
 
-  document             KnowledgeDocument         @relation(fields: [documentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  knowledgeBase        KnowledgeBase             @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  invertedIndexEntries KnowledgeInvertedIndex[]
+  document      KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  knowledgeBase KnowledgeBase     @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([documentId], map: "ix_knowledge_chunks_doc_id")
   @@index([knowledgeBaseId], map: "ix_knowledge_chunks_kb_id")
   @@map("knowledge_chunks")
-}
-
-model KnowledgeInvertedIndex {
-  id       String   @id @db.VarChar(36)
-  term     String   @db.VarChar(255)
-  chunkId  String   @map("chunk_id") @db.VarChar(36)
-  kbId     String   @map("kb_id") @db.VarChar(36)
-  termFreq Int      @default(1) @map("term_freq")
-  createdAt DateTime? @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  chunk        KnowledgeChunk @relation(fields: [chunkId], references: [id], onDelete: Cascade)
-  knowledgeBase KnowledgeBase @relation(fields: [kbId], references: [id], onDelete: Cascade)
-
-  @@index([term], map: "ix_inverted_index_term")
-  @@index([chunkId], map: "ix_inverted_index_chunk")
-  @@index([kbId, term], map: "ix_inverted_index_kb_term")
-
-  @@map("knowledge_inverted_index")
 }
 
 // V3.5: 检索审计日志（hit-testing / 搜索查询记录）
@@ -557,10 +516,4 @@ model KnowledgeGraphRelation {
 
 model alembic_version {
   version_num String @id(map: "alembic_version_pkc") @db.VarChar(32)
-}
-
-enum memory_type {
-  episodic
-  semantic
-  preference
 }

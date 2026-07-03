@@ -19,7 +19,6 @@ import { esKeywordSearch, isESAvailable } from "./elasticsearch.js";
 import { getReranker, type RerankerDocument } from "./reranker.js";
 import { getProvider } from "../providers/registry.js";
 import { logger } from "@agentforge/logger";
-import { milvusSearchDurationMs } from "../observability/metrics.js";
 import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
 import { settings } from "../config.js";
 

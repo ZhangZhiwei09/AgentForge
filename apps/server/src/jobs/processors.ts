@@ -8,39 +8,23 @@ import type {
 import { logger } from "@agentforge/logger";
 
 /**
- * Process a memory extraction job.
- * Called by the worker — extracts memories from conversation messages
- * and stores them via MemoryService (Mem0 → PG+Milvus fallback).
+ * Process a memory extraction job（长期记忆已移除，no-op）。
+ * 保留函数签名以维持 API 兼容性，不再执行实际提取逻辑。
  */
 export async function processMemoryExtraction(
   job: Job<MemoryExtractionJobData>,
 ) {
-  const { messages, userId, conversationId } = job.data;
   logger.info(
-    { jobId: job.id, userId, messageCount: messages.length },
-    "Processing memory extraction job",
+    { jobId: job.id, userId: job.data.userId },
+    "Memory extraction job skipped（长期记忆已移除，no-op）",
   );
-
-  // Dynamic import to avoid loading unnecessary server deps in worker
-  const { getMemoryService } = await import("../services/memory-service.js");
-  const memoryService = getMemoryService();
-  const extracted = await memoryService.extractAndStore(
-    messages,
-    userId,
-    conversationId,
-  );
-
-  logger.info(
-    { jobId: job.id, extractedCount: extracted.length },
-    "Memory extraction job complete",
-  );
-  return { extractedCount: extracted.length };
+  return { extractedCount: 0 };
 }
 
 /**
  * Process a knowledge ingestion job.
  * Called by the worker — reads the pre-created KnowledgeDocument,
- * chunks the content, generates embeddings, and writes to Milvus + PostgreSQL.
+ * chunks the content, generates embeddings, and writes to PostgreSQL.
  */
 export async function processKnowledgeIngestion(
   job: Job<KnowledgeIngestionJobData>,
