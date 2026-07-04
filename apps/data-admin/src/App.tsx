@@ -7,11 +7,9 @@ import { LoginPage } from "./components/auth/LoginPage";
 import { AdminDashboard } from "./components/analytics/AdminDashboard";
 import { AnalyticsPage } from "./components/analytics/AnalyticsPage";
 import { KnowledgePanel } from "./components/knowledge/KnowledgePanel";
-import { KnowledgePage } from "./components/knowledge/KnowledgePage";
 import { KnowledgeBaseList } from "./components/knowledge/KnowledgeBaseList";
 import { DocumentListPage } from "./components/knowledge/DocumentListPage";
 import { DocumentDetailPage } from "./components/knowledge/DocumentDetailPage";
-import { MemoryPanel } from "./components/memory/MemoryPanel";
 import { ObservabilityPage } from "./components/analytics/ObservabilityPage";
 import { HitTestingPage } from "./components/knowledge/HitTestingPage";
 import { Loader2 } from "lucide-react";
@@ -109,16 +107,6 @@ function HitTestingView() {
   return <HitTestingPage kbId={kbId} kbName={kb?.name ?? kbId} />;
 }
 
-// ── 路由级组件：记忆管理 ─────────────────────────────
-
-function MemoryManagement() {
-  return (
-    <div className="p-6">
-      <MemoryPanel />
-    </div>
-  );
-}
-
 export default function App() {
   return (
     <AppShell>
@@ -133,8 +121,8 @@ export default function App() {
           }
         >
           {/* 知识库路由（V2 重构） */}
-          <Route path="cs/knowledge" element={<KnowledgePage />} />
-          <Route path="cs/knowledge/bases" element={<KnowledgeBaseList />} />
+          <Route path="cs/knowledge" element={<KnowledgeBaseList />} />
+          <Route path="cs/knowledge/bases" element={<Navigate to="/admin/cs/knowledge" replace />} />
           {/* 旧版知识库面板路由（过渡期保留） */}
           <Route path="cs/knowledge-legacy" element={<KnowledgeManagement />} />
           <Route
@@ -148,10 +136,9 @@ export default function App() {
           <Route path="cs/knowledge/bases/:kbId" element={<DocumentListView />} />
 
           {/* 其他模块 */}
-          <Route path="cs/memory" element={<MemoryManagement />} />
           <Route path="cs/analytics" element={<AnalyticsPage />} />
           <Route path="cs/observability" element={<ObservabilityPage />} />
-          <Route index element={<Navigate to="cs/analytics" replace />} />
+          <Route index element={<Navigate to="cs/knowledge" replace />} />
         </Route>
         <Route path="/*" element={<Navigate to="/admin" replace />} />
       </Routes>

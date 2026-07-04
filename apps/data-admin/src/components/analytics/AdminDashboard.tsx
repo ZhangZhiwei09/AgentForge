@@ -1,10 +1,9 @@
 // 数据管理仪表盘 —— Tab 布局
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { BarChart3, BookOpen, Brain, Eye } from "lucide-react";
+import { BarChart3, BookOpen, Eye } from "lucide-react";
 
 const TABS = [
   { to: "/admin/cs/knowledge", label: "知识库管理", icon: BookOpen },
-  { to: "/admin/cs/memory", label: "记忆管理", icon: Brain },
   { to: "/admin/cs/analytics", label: "数据分析", icon: BarChart3 },
   { to: "/admin/cs/observability", label: "LLM 追踪", icon: Eye },
 ];
@@ -17,7 +16,9 @@ export function AdminDashboard() {
       {/* Sub-navigation */}
       <nav className="flex items-center gap-0 border-b border-[hsl(var(--border))] bg-[hsl(var(--background))] px-4">
         {TABS.map((tab) => {
-          const isActive = location.pathname === tab.to;
+          const isActive =
+            location.pathname === tab.to ||
+            location.pathname.startsWith(`${tab.to}/`);
           return (
             <NavLink
               key={tab.to}

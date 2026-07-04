@@ -1,8 +1,5 @@
 import type {
   DebugInfo,
-  Memory,
-  MemoryInfo,
-  MemorySearchResult,
   Message,
   ToolDefinition,
   ToolCall,
@@ -11,9 +8,6 @@ import type {
 
 export type {
   DebugInfo,
-  Memory,
-  MemoryInfo,
-  MemorySearchResult,
   Message,
   ToolDefinition,
   ToolCall,

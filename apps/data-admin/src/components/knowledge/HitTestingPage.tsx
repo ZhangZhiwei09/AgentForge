@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type {
   CreateKnowledgeRegressionCaseRequest,
   HitTestingRequestDTO,
@@ -11,6 +11,7 @@ import type {
 } from "@agentforge/shared-types";
 import { AgentForgeClient } from "@agentforge/sdk";
 import {
+  ArrowLeft,
   CheckCircle2,
   FlaskConical,
   History,
@@ -90,6 +91,7 @@ function defaultCaseForm(): CreateKnowledgeRegressionCaseRequest {
 
 export function HitTestingPage({ kbId, kbName }: HitTestingPageProps) {
   const client = useMemo(() => getClient(), []);
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState<HitTestingTab>(() => {
@@ -281,11 +283,18 @@ export function HitTestingPage({ kbId, kbName }: HitTestingPageProps) {
         <div className="max-w-3xl mx-auto px-6 py-6">
           <div className="mb-6">
             <div className="flex items-center gap-2.5 mb-1">
+              <button
+                onClick={() => navigate(`/admin/cs/knowledge/bases/${kbId}`)}
+                className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-[hsl(var(--accent))] hover:text-foreground"
+                title="返回知识库内容"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
               <FlaskConical className="h-5 w-5 text-muted-foreground" />
-              <h1 className="text-base font-semibold text-foreground">知识回归测试</h1>
+              <h1 className="text-base font-semibold text-foreground">检索测试</h1>
             </div>
             <p className="text-[13px] text-muted-foreground ml-7.5">
-              管理知识库 <span className="text-foreground font-medium">{kbName}</span> 的回归用例、召回结果和 prompt 上下文快照
+              测试知识库 <span className="text-foreground font-medium">{kbName}</span> 的召回结果、回归用例和 prompt 上下文快照
             </p>
           </div>
 
