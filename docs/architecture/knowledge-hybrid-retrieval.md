@@ -186,8 +186,8 @@ UPDATE knowledge_chunks SET embedding = '[0.1, 0.2, ...]'::vector WHERE id = $1;
 }
 ```
 
-**PostgreSQL Inverted Index (knowledge_inverted_index)** — V3.5 已停止写入:
-此表在 V3.5 之前用于 PG 端关键词回退检索，现已停止在摄入时写入。表结构和 `rebuildInvertedIndex()` 静态方法保留用于历史数据修复，后续阶段将清理 Schema。
+**PostgreSQL Inverted Index (knowledge_inverted_index)** — 已完全移除:
+此表在 V3.5 之前用于 PG 端关键词回退检索。V3.5 已停止写入，后续阶段已清理 Schema 和 `rebuildInvertedIndex()` 方法。
 
 **写入策略（V3.5）**:
 - PGVector embedding 写入失败 → 抛出异常，触发 BullMQ 重试
@@ -365,16 +365,14 @@ PGVector 查询失败？
 删除文档时同步清理所有存储：
 
 ```
-deleteDocument(docId) — V3.5 清理策略:
-  1. 查询所有 chunk IDs + Milvus IDs（新文档 milvusId 为 null，跳过 Milvus 清理）
-  2. Milvus: DELETE WHERE id IN [...]（仅历史数据，新文档为 no-op）
-  3. PostgreSQL: DELETE knowledge_inverted_index WHERE chunkId IN [...]（仅历史数据）
-  4. Elasticsearch: DELETE BY QUERY terms: { docId: [...] }
-  5. PostgreSQL: DELETE knowledge_chunks WHERE documentId = docId
-  6. PostgreSQL: DELETE knowledge_document WHERE id = docId
+deleteDocument(docId):
+  1. 查询所有 chunk IDs
+  2. Elasticsearch: DELETE BY QUERY terms: { docId: [...] }
+  3. PostgreSQL: DELETE knowledge_chunks WHERE documentId = docId
+  4. PostgreSQL: DELETE knowledge_document WHERE id = docId
 ```
 
-ES 和历史 Milvus 删除失败时仅 warn 日志，不阻塞（后续可通过 rebuild 修复）。
+ES 删除失败时仅 warn 日志，不阻塞（后续可通过 rebuild 修复）。
 
 ---
 
@@ -385,13 +383,6 @@ ES 和历史 Milvus 删除失败时仅 warn 日志，不阻塞（后续可通过
 KnowledgeIngestionService.rebuildESIndex(kbId?):
   1. 从 PostgreSQL 读取所有 chunk
   2. 分批 500 条写入 Elasticsearch
-```
-
-### 重建倒排索引（从 PG 全量）
-```
-KnowledgeIngestionService.rebuildInvertedIndex(kbId?):
-  1. 清空旧索引
-  2. 逐 chunk 重新分词 → termFreqMap → INSERT
 ```
 
 ---
@@ -432,8 +423,7 @@ KnowledgeIngestionService.rebuildInvertedIndex(kbId?):
 | **PostgreSQL** | chunk 元数据 + PGVector embedding（语义搜索主引擎） | **致命**，系统不可用 |
 | **Elasticsearch** | BM25 关键词倒排索引 | 降级为纯向量搜索，召回率下降 |
 | **Reranker** | Cross-Encoder 精排 | 降级为 RRF 融合分数排序，精度略降 |
-| **Milvus** | 向量存储（仅 long-term memory） | Knowledge Collection 已停止写入（V3.5），仅 MemoryEngine 使用 |
-| **PG Inverted Index** | term→chunk（已停止写入 V3.5） | 表结构保留，rebuildInvertedIndex 保留用于历史数据修复 |
+| **Milvus** | 已从项目中完全移除 | 所有向量存储已迁移到 PGVector |
 | **MinIO** | 原始文件存储（PDF/Word 等） | 仅影响文件解析入口，不影响已索引数据的检索 |
 
 ---

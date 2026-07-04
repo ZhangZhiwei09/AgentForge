@@ -37,12 +37,6 @@ vi.mock("../providers/registry.js", () => ({
   resolveModel: vi.fn(() => ["openai", "gpt-4o"]),
 }));
 
-vi.mock("./memory-engine.js", () => ({
-  MemoryEngine: vi.fn().mockImplementation(() => ({
-    search: vi.fn().mockResolvedValue([]),
-  })),
-}));
-
 vi.mock("../../db.js", () => {
   const messageStore: Array<Record<string, unknown>> = [];
   return {

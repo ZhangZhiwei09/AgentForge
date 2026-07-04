@@ -159,9 +159,7 @@ function isDegradable(msg: string, source: string, toolName?: string): boolean {
     /model overloaded/i,
     /model not available/i,
     /provider error/i,
-    // 知识库/Milvus
     /collection not loaded/i,
-    /milvus/i,
     // 通用服务不可用
     /service unavailable/i,
     /temporarily unavailable/i,

@@ -26,6 +26,11 @@ import type {
   ChunkPreviewResponseDTO,
   HitTestingRequestDTO,
   HitTestingResponseDTO,
+  KnowledgeRegressionRunDTO,
+  KnowledgeRegressionTestSetDTO,
+  KnowledgeRegressionCaseDTO,
+  CreateKnowledgeRegressionCaseRequest,
+  CreateKnowledgeRegressionTestSetRequest,
 } from "@agentforge/shared-types";
 import { VoiceService } from "./services/voice.js";
 
@@ -407,6 +412,82 @@ export class AgentForgeClient {
           score_threshold: params.scoreThreshold ?? 0,
         }),
       },
+    );
+  }
+
+  async listKnowledgeRegressionTestSets(
+    kbId: string,
+  ): Promise<KnowledgeRegressionTestSetDTO[]> {
+    return this.request<KnowledgeRegressionTestSetDTO[]>(
+      `/api/knowledge/bases/${encodeURIComponent(kbId)}/regression/test-sets`,
+    );
+  }
+
+  async createKnowledgeRegressionTestSet(
+    kbId: string,
+    input: CreateKnowledgeRegressionTestSetRequest,
+  ): Promise<KnowledgeRegressionTestSetDTO> {
+    return this.request<KnowledgeRegressionTestSetDTO>(
+      `/api/knowledge/bases/${encodeURIComponent(kbId)}/regression/test-sets`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    );
+  }
+
+  async createKnowledgeRegressionCase(
+    kbId: string,
+    input: CreateKnowledgeRegressionCaseRequest,
+  ): Promise<KnowledgeRegressionCaseDTO> {
+    return this.request<KnowledgeRegressionCaseDTO>(
+      `/api/knowledge/bases/${encodeURIComponent(kbId)}/regression/cases`,
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    );
+  }
+
+  async updateKnowledgeRegressionCase(
+    caseId: string,
+    input: CreateKnowledgeRegressionCaseRequest,
+  ): Promise<KnowledgeRegressionCaseDTO> {
+    return this.request<KnowledgeRegressionCaseDTO>(`/api/knowledge/regression/cases/${encodeURIComponent(caseId)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async deleteKnowledgeRegressionCase(caseId: string): Promise<void> {
+    await this.request<void>(
+      `/api/knowledge/regression/cases/${encodeURIComponent(caseId)}`,
+      { method: "DELETE" },
+    );
+  }
+
+  async runKnowledgeRegression(
+    kbId: string,
+    testSetId?: string,
+  ): Promise<KnowledgeRegressionRunDTO> {
+    return this.request<KnowledgeRegressionRunDTO>(
+      `/api/knowledge/bases/${encodeURIComponent(kbId)}/regression/runs`,
+      {
+        method: "POST",
+        body: JSON.stringify({ testSetId }),
+      },
+    );
+  }
+
+  async listKnowledgeRegressionRuns(
+    kbId: string,
+    testSetId?: string,
+  ): Promise<KnowledgeRegressionRunDTO[]> {
+    const suffix = testSetId
+      ? `?testSetId=${encodeURIComponent(testSetId)}`
+      : "";
+    return this.request<KnowledgeRegressionRunDTO[]>(
+      `/api/knowledge/bases/${encodeURIComponent(kbId)}/regression/runs${suffix}`,
     );
   }
 

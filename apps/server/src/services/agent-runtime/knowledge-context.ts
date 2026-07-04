@@ -193,8 +193,9 @@ import { getMemoryService } from "../memory-service.js";
 const CUSTOMER_USER_ID = "00000000-0000-0000-0000-000000000002";
 
 /**
- * 注入用户记忆上下文（V3.0: 升级到分层记忆系统）。
- * 从 MemoryService 获取短期摘要 + 最近窗口 + 长期记忆，格式化注入 Agent Prompt。
+ * 注入用户短期记忆上下文。
+ * 从 MemoryService 获取短期摘要 + 最近窗口，格式化注入 Agent Prompt。
+ * 长期记忆已移除，longTermContent 始终为空。
  */
 export async function injectMemories(
   userMessage: string,
@@ -210,16 +211,7 @@ export async function injectMemories(
       query: userMessage,
     });
 
-    if (contextText) {
-      const longTermContent = (
-        await memoryService.buildContext({
-          userId: CUSTOMER_USER_ID,
-          conversationId: conversationId || sessionId,
-          query: userMessage,
-        })
-      ).longTermMemories.map((m) => m.content);
-      return [contextText, longTermContent];
-    }
+    return [contextText, []];
   } catch (e) {
     logger.warn(e, "Memory injection skipped");
   }

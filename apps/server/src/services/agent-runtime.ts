@@ -20,7 +20,6 @@ import {
   agentRequestDurationMs,
 } from "../observability/metrics.js";
 import { intentDetector } from "./intent-detector.js";
-import { getMemoryService } from "./memory-service.js";
 import { createExecutionScope } from "../runtime/scope.js";
 import { getObservabilityProvider } from "../observability/index.js";
 
@@ -498,35 +497,6 @@ export class AgentRuntimeService {
         }
       }
 
-      // ── 8. 提取记忆（fire-and-forget） ──
-      if (conversation.sessionId && streamedAnswer) {
-        const allMessages = [
-          ...historyMessages.map((m) => ({
-            role: m.role,
-            content: m.content ?? "",
-          })),
-          { role: "user" as const, content: userMessage },
-          { role: "assistant" as const, content: streamedAnswer },
-        ];
-        getMemoryService()
-          .extractAndStore(
-            allMessages,
-            AGENT_USER_ID,
-            conversation.id,
-            conversation.sessionId,
-          )
-          .then((extracted) => {
-            if (extracted.length > 0) {
-              logger.info(
-                { count: extracted.length, sessionId: conversation.sessionId },
-                "Agent memories extracted via MemoryService",
-              );
-            }
-          })
-          .catch((e) => {
-            logger.warn(e, "Memory extraction failed");
-          });
-      }
       // ── Close observability trace（正常完成）──
       lfTrace.update({
         output: { answer: streamedAnswer.slice(0, 500) },

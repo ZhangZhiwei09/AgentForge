@@ -65,25 +65,6 @@ export const circuitBreakerState = new Gauge({
   registers: [registry],
 });
 
-// ---- Memory Metrics ----
-
-export const memoryExtractionsTotal = new Counter({
-  name: "memory_extractions_total",
-  help: "Total number of memory extractions performed",
-  labelNames: [] as const,
-  registers: [registry],
-});
-
-// ---- Milvus / Vector Search Metrics ----
-
-export const milvusSearchDurationMs = new Histogram({
-  name: "milvus_search_duration_ms",
-  help: "Milvus vector search duration in milliseconds",
-  labelNames: ["operation"], // operation = memory | knowledge
-  buckets: [1, 5, 10, 25, 50, 100, 250, 500, 1000],
-  registers: [registry],
-});
-
 // ---- Voice Metrics ----
 
 export const voiceSessionsTotal = new Counter({

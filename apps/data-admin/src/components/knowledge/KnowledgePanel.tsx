@@ -523,9 +523,9 @@ export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
           {/* 命中测试按钮（仅在文档视图显示） */}
           {viewMode === "documents" && selectedKb && (
             <button
-              onClick={() => navigate(`/admin/cs/knowledge/${selectedKb.id}/hit-testing`)}
+              onClick={() => navigate(`/admin/cs/knowledge/bases/${selectedKb.id}/hit-testing?tab=cases`)}
               className="rounded p-0.5 text-muted-foreground transition-colors hover:text-[hsl(var(--cs-primary))]"
-              title="命中测试"
+              title="回归测试"
             >
               <FlaskConical className="h-3.5 w-3.5" />
             </button>

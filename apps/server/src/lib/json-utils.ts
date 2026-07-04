@@ -1,5 +1,5 @@
 // JSON工具函数 —— 从LLM响应中提取JSON对象
-// 多个Service（agent、customer-chat、knowledge、memory-engine）共享
+// 多个Service（agent、customer-chat、knowledge）共享
 
 /**
  * 从LLM原始文本响应中提取JSON字符串

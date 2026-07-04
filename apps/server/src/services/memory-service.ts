@@ -1,27 +1,32 @@
-// 记忆服务 Facade —— 统一短期记忆 + 长期记忆接口
+// 记忆服务 Facade —— 短期记忆接口
 //
 // 职责：
-//   1. 构建完整上下文：系统指令 → 短期摘要 + 窗口消息 → 长期记忆 → 图谱链路 → RAG 证据
-//   2. Agent 只依赖此统一接口，不直接使用 ShortTermMemoryStore 或 LongTermMemoryStore
-//   3. 各子系统不可用时优雅降级
+//   1. 构建短期上下文：系统指令 → 短期摘要 + 窗口消息
+//   2. Agent 只依赖此统一接口
+//   3. 长期记忆已移除，相关方法均为 no-op
 //
 // 对旧接口 backward compatibility：
-//   - extractAndStore 和 search 仍可用
-//   - list / delete 仍委托给 MemoryEngine
+//   - extractAndStore / search / store / list / delete 均为 no-op
 
 import { ShortTermMemoryStore, type ShortTermMemoryMsg } from "./short-term-memory.js";
-import { LongTermMemoryStore, type LongTermMemoryContext } from "./long-term-memory.js";
-import type { MemoryCreate, MemoryOut, MemorySearchResult } from "./memory-engine.js";
 import { logger } from "@agentforge/logger";
+
+// ── 内联类型（替代已删除的 memory-engine 类型） ──────────────
+
+interface MemoryResultItem {
+  id: string;
+  content: string;
+  score: number;
+}
 
 // ── 类型 ──────────────────────────────────────────────────
 
 export interface MemoryContext {
   summary: string;                          // 短期窗口摘要
   recentMessages: ShortTermMemoryMsg[];     // 最近窗口消息
-  sessionMemories: MemorySearchResult[];    // 会话级长期记忆（当前会话相关）
-  userMemories: MemorySearchResult[];       // 用户级长期记忆（跨会话偏好/事实）
-  longTermMemories: MemorySearchResult[];   // 全部长期记忆（会话级 + 用户级，去重排序）
+  sessionMemories: MemoryResultItem[];      // 长期记忆已移除，始终为空
+  userMemories: MemoryResultItem[];         // 长期记忆已移除，始终为空
+  longTermMemories: MemoryResultItem[];     // 长期记忆已移除，始终为空
   memoryCount: number;                      // 总记忆条目数
 }
 
@@ -35,62 +40,39 @@ export interface BuildContextParams {
 
 export class MemoryService {
   private shortTerm: ShortTermMemoryStore;
-  private longTerm: LongTermMemoryStore;
 
   constructor() {
     this.shortTerm = new ShortTermMemoryStore();
-    this.longTerm = new LongTermMemoryStore();
   }
 
   // ══ 核心接口：构建完整上下文 ═════════════════════════════
 
   /**
-   * 构建 Agent Prompt 上下文所需的全部记忆信息。
-   * 注入顺序：短期摘要 → 最近窗口消息 → 会话级长期记忆 → 用户级长期记忆。
+   * 构建 Agent Prompt 上下文所需的短期记忆信息。
+   * 长期记忆已移除，sessionMemories / userMemories / longTermMemories 始终为空。
    */
   async buildContext(params: BuildContextParams): Promise<MemoryContext> {
-    const { userId, conversationId, query } = params;
+    const { conversationId } = params;
 
-    // 并行获取短期上下文和长期记忆
-    const [shortContext, longContext] = await Promise.all([
-      this.shortTerm.getContext(conversationId).catch((e) => {
-        logger.warn(e, "Short-term context failed");
-        return { summary: "", recentMessages: [], messageCount: 0 };
-      }),
-      this.longTerm.getUserContext(userId, conversationId, query).catch((e) => {
-        logger.warn(e, "Long-term context failed");
-        return { userMemories: [], sessionMemories: [] } as LongTermMemoryContext;
-      }),
-    ]);
-
-    // 会话级记忆去重（保留高分）
-    const sessionMemories = this.deduplicate(longContext.sessionMemories);
-    // 用户级记忆去重，并排除与会话级重复的内容
-    const sessionContentKeys = new Set(
-      sessionMemories.map((m) => m.content.slice(0, 80)),
-    );
-    const userMemories = this.deduplicate(
-      longContext.userMemories.filter(
-        (m) => !sessionContentKeys.has(m.content.slice(0, 80)),
-      ),
-    );
-
-    // 合并：会话级优先 → 用户级补充
-    const allLongTerm = [...sessionMemories, ...userMemories].slice(0, 10);
+    // 仅获取短期上下文
+    const shortContext = await this.shortTerm.getContext(conversationId).catch((e) => {
+      logger.warn(e, "Short-term context failed");
+      return { summary: "", recentMessages: [], messageCount: 0 };
+    });
 
     return {
       summary: shortContext.summary,
       recentMessages: shortContext.recentMessages,
-      sessionMemories,
-      userMemories,
-      longTermMemories: allLongTerm,
-      memoryCount: shortContext.messageCount + allLongTerm.length,
+      sessionMemories: [],
+      userMemories: [],
+      longTermMemories: [],
+      memoryCount: shortContext.messageCount,
     };
   }
 
   /**
-   * 构建格式化后的 Prompt 上下文字符串（可直接注入 Agent system prompt）。
-   * 注入顺序：短期摘要 → 最近窗口消息 → 会话级长期记忆 → 用户级长期记忆。
+   * 构建格式化后的 Prompt 上下文字符串（仅包含短期记忆）。
+   * 注入顺序：短期摘要 → 最近窗口消息。
    */
   async buildContextText(params: BuildContextParams): Promise<string> {
     const context = await this.buildContext(params);
@@ -107,22 +89,6 @@ export class MemoryService {
       for (const msg of context.recentMessages.slice(-5)) {
         const roleLabel = msg.role === "user" ? "用户" : "助手";
         lines.push(`**${roleLabel}**: ${msg.content.slice(0, 200)}`);
-      }
-    }
-
-    // 3. 会话级长期记忆（当前会话相关的上下文）
-    if (context.sessionMemories.length > 0) {
-      lines.push("\n## 当前会话记忆\n");
-      for (const mem of context.sessionMemories) {
-        lines.push(`- ${mem.content} (相关度: ${(mem.score * 100).toFixed(0)}%)`);
-      }
-    }
-
-    // 4. 用户级长期记忆（跨会话偏好/事实）
-    if (context.userMemories.length > 0) {
-      lines.push("\n## 用户偏好与事实\n");
-      for (const mem of context.userMemories) {
-        lines.push(`- ${mem.content} (相关度: ${(mem.score * 100).toFixed(0)}%)`);
       }
     }
 
@@ -144,66 +110,49 @@ export class MemoryService {
     );
   }
 
-  /** 从对话中提取并存储长期记忆 */
-  async extractAndStore(
-    messages: Array<{ role: string; content: string }>,
-    userId: string,
-    conversationId: string,
-    sessionId?: string,
-  ): Promise<MemoryOut[]> {
-    return this.longTerm.extractAndStore(
-      messages,
-      userId,
-      conversationId,
-      sessionId,
-    );
-  }
-
-  // ══ 向后兼容接口 ═════════════════════════════════════════
-
-  /** 搜索记忆（向后兼容旧 MemoryEngine API） */
-  async search(
-    query: string,
-    userId: string,
-    topK: number = 5,
-    sessionId?: string,
-  ): Promise<MemorySearchResult[]> {
-    return this.longTerm.search(query, userId, topK);
-  }
-
-  /** 存储记忆（向后兼容） */
-  async store(memory: MemoryCreate, userId: string): Promise<MemoryOut> {
-    return this.longTerm.storeUserMemory(userId, memory);
-  }
-
-  /** 列出用户记忆（向后兼容） */
-  async list(userId: string, type?: string): Promise<MemoryOut[]> {
-    return this.longTerm.list(userId, type);
-  }
-
-  /** 删除记忆（向后兼容） */
-  async delete(memoryId: string): Promise<boolean> {
-    return this.longTerm.delete(memoryId);
-  }
-
   /** 清理会话数据 */
   async cleanupSession(conversationId: string): Promise<void> {
     await this.shortTerm.cleanup(conversationId);
   }
 
-  // ── 私有工具方法 ───────────────────────────────────────
+  // ══ 长期记忆接口（no-op，保留 API 兼容性） ═══════════════════
 
-  /** 按内容去重，保留高分记忆 */
-  private deduplicate(memories: MemorySearchResult[]): MemorySearchResult[] {
-    const seen = new Set<string>();
-    return memories
-      .sort((a, b) => b.score - a.score)
-      .filter((m) => {
-        const key = m.content.slice(0, 80);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
+  /** 长期记忆提取已移除，始终返回空数组 */
+  async extractAndStore(
+    _messages: Array<{ role: string; content: string }>,
+    _userId: string,
+    _conversationId: string,
+    _sessionId?: string,
+  ): Promise<MemoryResultItem[]> {
+    return [];
+  }
+
+  /** 长期记忆搜索已移除，始终返回空数组 */
+  async search(
+    _query: string,
+    _userId: string,
+    _topK: number = 5,
+    _sessionId?: string,
+  ): Promise<MemoryResultItem[]> {
+    return [];
+  }
+
+  /** 长期记忆存储已移除，返回空结果 */
+  async store(
+    _memory: { type: string; content: string; importance?: number; metadata?: Record<string, unknown>; conversationId?: string | null },
+    _userId: string,
+  ): Promise<MemoryResultItem> {
+    throw new Error("长期记忆存储已禁用");
+  }
+
+  /** 长期记忆列表已移除，始终返回空数组 */
+  async list(_userId: string, _type?: string): Promise<MemoryResultItem[]> {
+    return [];
+  }
+
+  /** 长期记忆删除已移除，始终返回 false */
+  async delete(_memoryId: string): Promise<boolean> {
+    return false;
   }
 }
 

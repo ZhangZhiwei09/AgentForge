@@ -36,7 +36,7 @@
     "@opentelemetry/sdk-trace-node": "^2.8.0",
     "@opentelemetry/semantic-conventions": "^1.41.1",
     "@prisma/client": "^6.0",
-    "@zilliz/milvus2-sdk-node": "^2.4",
+
     "bcryptjs": "^3.0.3",
     "bullmq": "^5.78.0",
     "dockerode": "^4.0.2",

@@ -351,7 +351,6 @@ knowledgeManagementRoutes.delete("/api/knowledge/bases/:kbId", async (c) => {
   }
 
   // 按 FK 依赖顺序删除：chunks → documents → knowledge_base
-  // KnowledgeInvertedIndex 有 ON DELETE CASCADE，会随 chunk/kb 自动删除
   await prisma.$transaction(async (tx) => {
     await tx.knowledgeChunk.deleteMany({ where: { knowledgeBaseId: kbId } });
     await tx.knowledgeDocument.deleteMany({ where: { knowledgeBaseId: kbId } });
@@ -708,7 +707,7 @@ knowledgeManagementRoutes.post(
   },
 );
 
-// DELETE /api/knowledge/documents/:docId —— 删除文档（PG + Milvus 双删）
+// DELETE /api/knowledge/documents/:docId —— 删除文档（PG + Elasticsearch 双删）
 knowledgeManagementRoutes.delete("/api/knowledge/documents/:docId", async (c) => {
   const docId = c.req.param("docId");
   const ingestion = new KnowledgeIngestionService();
@@ -730,11 +729,18 @@ knowledgeManagementRoutes.get("/api/knowledge/documents/:docId/chunks", async (c
     orderBy: { chunkIndex: "asc" },
   });
 
-  // BigInt 字段（milvusId）无法被 JSON.stringify 序列化，映射为 Number
-  // 注意：0n 是 falsy，必须用 != null 判断
   return c.json(chunks.map((c) => ({
-    ...c,
-    milvusId: c.milvusId != null ? Number(c.milvusId) : null,
+    id: c.id,
+    documentId: c.documentId,
+    knowledgeBaseId: c.knowledgeBaseId,
+    content: c.content,
+    chunkIndex: c.chunkIndex,
+    tokenCount: c.tokenCount,
+    enabled: c.enabled,
+    qualityLabel: c.qualityLabel,
+    sourceType: c.sourceType,
+    parentChunkId: c.parentChunkId,
+    createdAt: c.created_at,
   })));
 });
 
@@ -990,7 +996,7 @@ knowledgeManagementRoutes.post(
 // GET /api/knowledge/stats —— 获取知识库整体统计
 knowledgeManagementRoutes.get("/api/knowledge/stats", async (c) => {
   const service = new KnowledgeService();
-  const milvusStats = await service.getCollectionStats();
+  const retrievalStats = await service.getCollectionStats();
 
   const kbCount = await prisma.knowledgeBase.count();
   const docCount = await prisma.knowledgeDocument.count();
@@ -1000,7 +1006,7 @@ knowledgeManagementRoutes.get("/api/knowledge/stats", async (c) => {
     knowledge_bases: kbCount,
     documents: docCount,
     chunks: chunkCount,
-    milvus: milvusStats,
+    retrieval: retrievalStats,
   });
 });
 

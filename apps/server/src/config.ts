@@ -33,9 +33,6 @@ export const settings = {
   simpleQaModel: process.env.SIMPLE_QA_MODEL || process.env.DEFAULT_MODEL || "gpt-4o-mini",
   corsOrigins: process.env.CORS_ORIGINS || "",
   debug: process.env.DEBUG === "true",
-  // Milvus 向量数据库地址（用于记忆搜索和知识库检索）
-  milvusHost: process.env.MILVUS_HOST || "localhost",
-  milvusPort: process.env.MILVUS_PORT || "19530",
   // Embedding 模型名称
   embeddingModel: process.env.EMBEDDING_MODEL || "text-embedding-v2",
   // Embedding API 独立端点（默认跟随 OPENAI_BASE_URL）
@@ -127,17 +124,11 @@ export const settings = {
   minioBucket: process.env.MINIO_BUCKET || "agentforge-docs",
   minioUseSSL: process.env.MINIO_USE_SSL === "true",
 
-  // ── Mem0 ─────────────────────────────────────────────
-  mem0ApiKey: process.env.MEM0_API_KEY || "",
-  mem0BaseUrl: process.env.MEM0_BASE_URL || "",
-
-  // ── 分层记忆可配置参数 ──────────────────────────────
+  // ── 短期记忆可配置参数 ──────────────────────────────
   // 短期记忆滑动窗口大小（保留最近 N 条消息）
   memoryWindowSize: parseInt(process.env.MEMORY_WINDOW_SIZE || "20", 10),
   // 触发摘要生成的阈值（消息数超过此值 → LLM 压缩旧消息）
   memorySummaryTrigger: parseInt(process.env.MEMORY_SUMMARY_TRIGGER || "30", 10),
   // 短期记忆 TTL（天），过期自动清理
   memoryTtlDays: parseInt(process.env.MEMORY_TTL_DAYS || "7", 10),
-  // 长期记忆检索默认 topK
-  memoryLongTermTopK: parseInt(process.env.MEMORY_LONGTERM_TOPK || "5", 10),
 };

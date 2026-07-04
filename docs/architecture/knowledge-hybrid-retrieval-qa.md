@@ -453,8 +453,8 @@ chunk text + vector
 
 - **PGVector → 必须。** 语义搜索的主引擎，没它系统就废了。
 - **Elasticsearch → 应该要。** BM25 关键词搜索是"混合检索"的另一条腿。但它是可选依赖——代码已经做了降级处理。
-- **Milvus（Knowledge Collection）→ 已从摄入路径移除。** 早期 PGVector 不成熟时选用 Milvus 做向量存储，后来 PG vector 列直接加到 PG 表里变成冗余。V3.5 已停止写入，仅 deleteDocument 保留历史数据清理。
-- **PG 倒排索引（knowledge_inverted_index）→ 已从摄入路径移除。** V3.5 已停止写入，仅保留 rebuildInvertedIndex 静态方法用于数据修复。新文档不再写入该表。
+- **Milvus → 已完全移除。** 早期用于知识检索和长期记忆的向量存储，现已全部迁移到 PGVector。V3.5 停止知识写入，后续阶段已清理所有 Milvus 代码路径、MemoryEngine 迁移到 PG-only、Schema 和依赖。
+- **PG 倒排索引（knowledge_inverted_index）→ 已完全移除。** V3.5 已停止写入，后续阶段已清理表结构、Prisma Schema 和 `rebuildInvertedIndex()` 方法。
 
 当前写入路径：
 
@@ -465,7 +465,7 @@ chunk text + vector
   └── Elasticsearch（BM25 关键词）        ← 混合检索需要，但可降级
 ```
 
-**总结：V3.5 已完成清理，技术债务已解决。** 核心只需要 PG + ES 两个就够了。
+**总结：知识索引已完全迁移到 PGVector + Elasticsearch。** Milvus 已从项目中完全移除，MemoryEngine 也迁移到 PG-only。核心只需要 PG + ES 两个就够了。
 
 ---
 
