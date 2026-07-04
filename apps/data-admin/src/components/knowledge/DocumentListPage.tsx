@@ -2,7 +2,7 @@
 import { useState, useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, Database } from "lucide-react";
+import { ArrowLeft, Database, FlaskConical } from "lucide-react";
 import { DocumentToolbar } from "./DocumentToolbar";
 import { DocumentTable } from "./DocumentTable";
 import { UploadWizard } from "./UploadWizard";
@@ -43,21 +43,28 @@ export function DocumentListPage({ kbId, kbName }: DocumentListPageProps) {
       {/* 顶部标题栏 */}
       <div className="flex items-center gap-3 px-6 py-3 border-b border-[hsl(var(--border))]">
         <button
-          onClick={() => navigate("/admin/cs/knowledge/bases")}
+          onClick={() => navigate("/admin/cs/knowledge")}
           className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--accent))] transition-colors"
           title="返回知识库列表"
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
-        <div className="flex items-center gap-2 min-w-0">
-          <Database className="h-4 w-4 text-muted-foreground flex-shrink-0" />
-          <h1 className="text-sm font-semibold text-foreground truncate">
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <Database className="h-4 w-4 flex-shrink-0 text-muted-foreground" />
+          <h1 className="truncate text-sm font-semibold text-foreground">
             {kbName}
           </h1>
+          <span className="flex-shrink-0 rounded bg-[hsl(var(--muted))] px-1.5 py-0.5 text-[10px] text-muted-foreground">
+            文档列表
+          </span>
         </div>
-        <span className="text-[10px] text-muted-foreground bg-[hsl(var(--muted))] rounded px-1.5 py-0.5 flex-shrink-0">
-          文档列表
-        </span>
+        <button
+          onClick={() => navigate(`/admin/cs/knowledge/bases/${kbId}/hit-testing`)}
+          className="inline-flex flex-shrink-0 items-center gap-1.5 rounded-md bg-[hsl(var(--primary))] px-3 py-1.5 text-xs font-medium text-[hsl(var(--primary-foreground))] transition-opacity hover:opacity-90"
+        >
+          <FlaskConical className="h-3.5 w-3.5" />
+          检索测试
+        </button>
       </div>
 
       {/* 工具栏 */}

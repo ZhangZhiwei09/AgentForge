@@ -17,7 +17,9 @@ export function AdminDashboard() {
       {/* Sub-navigation */}
       <nav className="flex items-center gap-0 border-b border-[hsl(var(--border))] bg-[hsl(var(--background))] px-4">
         {TABS.map((tab) => {
-          const isActive = location.pathname === tab.to;
+          const isActive =
+            location.pathname === tab.to ||
+            location.pathname.startsWith(`${tab.to}/`);
           return (
             <NavLink
               key={tab.to}
