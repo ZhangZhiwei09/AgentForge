@@ -218,6 +218,96 @@ model KnowledgeQueryLog {
   @@map("knowledge_query_logs")
 }
 
+model KnowledgeRegressionTestSet {
+  id          String   @id @db.VarChar(36)
+  kbId        String   @map("kb_id") @db.VarChar(36)
+  name        String   @db.VarChar(255)
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  cases KnowledgeRegressionCase[]
+  runs  KnowledgeRegressionRun[]
+
+  @@index([kbId], map: "ix_regression_test_sets_kb")
+  @@map("knowledge_regression_test_sets")
+}
+
+model KnowledgeRegressionCase {
+  id             String   @id @db.VarChar(36)
+  testSetId      String   @map("test_set_id") @db.VarChar(36)
+  kbId           String   @map("kb_id") @db.VarChar(36)
+  name           String   @db.VarChar(255)
+  query          String   @db.VarChar(1000)
+  expectedTopK   Int      @default(5) @map("expected_top_k")
+  minScore       Float?   @map("min_score")
+  searchMethod   String   @default("hybrid") @map("search_method") @db.VarChar(20)
+  topK           Int      @default(10) @map("top_k")
+  rerankingEnable Boolean @default(true) @map("reranking_enable")
+  scoreThreshold Float    @default(0) @map("score_threshold")
+
+  expectedDocTitles       Json @default("[]") @map("expected_doc_titles")
+  expectedDocIds          Json @default("[]") @map("expected_doc_ids")
+  requiredText            Json @default("[]") @map("required_text")
+  forbiddenText           Json @default("[]") @map("forbidden_text")
+  promptRequiredContextText Json @default("[]") @map("prompt_required_context_text")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  testSet KnowledgeRegressionTestSet @relation(fields: [testSetId], references: [id], onDelete: Cascade)
+  items   KnowledgeRegressionRunItem[]
+
+  @@index([testSetId], map: "ix_regression_cases_test_set")
+  @@index([kbId], map: "ix_regression_cases_kb")
+  @@map("knowledge_regression_cases")
+}
+
+model KnowledgeRegressionRun {
+  id           String    @id @db.VarChar(36)
+  testSetId    String    @map("test_set_id") @db.VarChar(36)
+  kbId         String    @map("kb_id") @db.VarChar(36)
+  status       String    @default("running") @db.VarChar(20)
+  totalCases   Int       @default(0) @map("total_cases")
+  passedCases  Int       @default(0) @map("passed_cases")
+  failedCases  Int       @default(0) @map("failed_cases")
+  hitRate      Float     @default(0) @map("hit_rate")
+  averageRank  Float?    @map("average_rank")
+  averageElapsedMs Float? @map("average_elapsed_ms")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt  DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  testSet KnowledgeRegressionTestSet @relation(fields: [testSetId], references: [id], onDelete: Cascade)
+  items   KnowledgeRegressionRunItem[]
+
+  @@index([testSetId], map: "ix_regression_runs_test_set")
+  @@index([kbId], map: "ix_regression_runs_kb")
+  @@index([createdAt], map: "ix_regression_runs_created")
+  @@map("knowledge_regression_runs")
+}
+
+model KnowledgeRegressionRunItem {
+  id              String   @id @db.VarChar(36)
+  runId           String   @map("run_id") @db.VarChar(36)
+  caseId          String   @map("case_id") @db.VarChar(36)
+  passed          Boolean
+  rank            Int?
+  score           Float?
+  matchedDocId    String?  @map("matched_doc_id") @db.VarChar(36)
+  failureReason   String?  @map("failure_reason") @db.VarChar(2000)
+  resultsSnapshot Json     @default("[]") @map("results_snapshot")
+  promptSnapshot  String?  @map("prompt_snapshot")
+  elapsedMs       Int      @default(0) @map("elapsed_ms")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  run      KnowledgeRegressionRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  testCase KnowledgeRegressionCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([runId], map: "ix_regression_run_items_run")
+  @@index([caseId], map: "ix_regression_run_items_case")
+  @@map("knowledge_regression_run_items")
+}
+
 model AgentSession {
   id                String       @id @db.VarChar(36)
   conversationId    String       @map("conversation_id") @db.VarChar(36)

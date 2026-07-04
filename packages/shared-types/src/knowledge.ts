@@ -240,3 +240,105 @@ export interface HitTestingResponseDTO {
   results: HitTestingResultDTO[];
   elapsedMs: number;
 }
+
+// â”€â”€ å›žå½’æµ‹è¯• â”€â”€
+
+export interface RegressionRetrievalConfigDTO {
+  searchMethod: 'hybrid' | 'semantic' | 'keyword';
+  topK: number;
+  rerankingEnable: boolean;
+  scoreThreshold: number;
+}
+
+export interface KnowledgeRegressionCaseDTO {
+  id: string;
+  testSetId: string;
+  kbId: string;
+  name: string;
+  query: string;
+  expectedDocTitles: string[];
+  expectedDocIds: string[];
+  requiredText: string[];
+  forbiddenText: string[];
+  expectedTopK: number;
+  minScore: number | null;
+  retrievalConfig: RegressionRetrievalConfigDTO;
+  promptRequiredContextText: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateKnowledgeRegressionCaseRequest {
+  testSetId?: string;
+  name: string;
+  query: string;
+  expectedDocTitles?: string[];
+  expectedDocIds?: string[];
+  requiredText?: string[];
+  forbiddenText?: string[];
+  expectedTopK?: number;
+  minScore?: number | null;
+  retrievalConfig?: Partial<RegressionRetrievalConfigDTO>;
+  promptRequiredContextText?: string[];
+}
+
+export interface KnowledgeRegressionTestSetDTO {
+  id: string;
+  kbId: string;
+  name: string;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+  cases: KnowledgeRegressionCaseDTO[];
+}
+
+export interface CreateKnowledgeRegressionTestSetRequest {
+  name: string;
+  description?: string | null;
+}
+
+export interface KnowledgeRegressionResultSnapshotDTO {
+  rank: number;
+  chunkId: string;
+  docId: string;
+  docTitle: string;
+  chunkIndex: number;
+  score: number;
+  content: string;
+  recallSources: string[];
+  fusionScore?: number;
+  rerankScore?: number;
+}
+
+export interface KnowledgeRegressionRunItemDTO {
+  id: string;
+  runId: string;
+  caseId: string;
+  caseName: string;
+  query: string;
+  passed: boolean;
+  rank: number | null;
+  score: number | null;
+  matchedDocId: string | null;
+  failureReason: string | null;
+  resultsSnapshot: KnowledgeRegressionResultSnapshotDTO[];
+  promptSnapshot: string | null;
+  elapsedMs: number;
+  createdAt: string;
+}
+
+export interface KnowledgeRegressionRunDTO {
+  id: string;
+  testSetId: string;
+  kbId: string;
+  status: string;
+  totalCases: number;
+  passedCases: number;
+  failedCases: number;
+  hitRate: number;
+  averageRank: number | null;
+  averageElapsedMs: number | null;
+  createdAt: string;
+  completedAt: string | null;
+  items: KnowledgeRegressionRunItemDTO[];
+}

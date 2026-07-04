@@ -396,7 +396,7 @@ export class KnowledgeService {
       let kbFilter = "";
       const kbParams: string[] = [];
       if (kbIds && kbIds.length > 0) {
-        kbFilter = `AND knowledge_base_id IN (${kbIds.map((_, i) => `$${i + 2}`).join(",")})`;
+        kbFilter = `AND kc.knowledge_base_id IN (${kbIds.map((_, i) => `$${i + 2}`).join(",")})`;
         kbParams.push(...kbIds);
       }
 
@@ -449,8 +449,99 @@ export class KnowledgeService {
   }
 
   /**
+   * PostgreSQL keyword fallback for development and degraded ES scenarios.
+   * Uses exact substring matching so Chinese content can still be recalled
+   * without a tokenizer-specific full-text index.
+   */
+  private async searchByPostgresKeyword(
+    query: string,
+    kbIds?: string[],
+    topK: number = 20,
+  ): Promise<RawCandidate[]> {
+    const terms = query
+      .trim()
+      .split(/\s+/)
+      .map((term) => term.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+
+    if (terms.length === 0) return [];
+
+    try {
+      const params: Array<string | number> = [];
+      const conditions: string[] = [];
+
+      for (const term of terms) {
+        params.push(`%${term}%`);
+        const contentParam = `$${params.length}`;
+        params.push(`%${term}%`);
+        const titleParam = `$${params.length}`;
+        conditions.push(`(kc.content ILIKE ${contentParam} OR kd.title ILIKE ${titleParam})`);
+      }
+
+      let kbFilter = "";
+      if (kbIds && kbIds.length > 0) {
+        const placeholders = kbIds.map((kbId) => {
+          params.push(kbId);
+          return `$${params.length}`;
+        });
+        kbFilter = `AND kc.knowledge_base_id IN (${placeholders.join(",")})`;
+      }
+
+      params.push(topK);
+      const limitParam = `$${params.length}`;
+      const scoreExpression = conditions
+        .map((condition) => `CASE WHEN ${condition} THEN 1 ELSE 0 END`)
+        .join(" + ");
+
+      const sql = `
+        SELECT
+          kc.id AS "chunkId",
+          kc.document_id AS "docId",
+          kc.knowledge_base_id AS "kbId",
+          kc.content,
+          kc.chunk_index AS "chunkIndex",
+          COALESCE(kd.title, '') AS "docTitle",
+          (${scoreExpression})::float AS "score"
+        FROM knowledge_chunks kc
+        JOIN knowledge_documents kd ON kc.document_id = kd.id
+        WHERE kc.enabled = true
+          ${kbFilter}
+          AND (${conditions.join(" OR ")})
+        ORDER BY "score" DESC, kc.created_at DESC
+        LIMIT ${limitParam}
+      `;
+
+      const rows = await prisma.$queryRawUnsafe<Array<{
+        chunkId: string;
+        docId: string;
+        kbId: string;
+        content: string;
+        chunkIndex: number;
+        docTitle: string;
+        score: number;
+      }>>(sql, ...params);
+
+      const maxScore = Math.max(1, terms.length);
+      return rows.map((row) => ({
+        chunkId: row.chunkId,
+        docId: row.docId,
+        kbId: row.kbId,
+        content: row.content,
+        docTitle: row.docTitle,
+        chunkIndex: row.chunkIndex,
+        sourceScore: Math.min(1, Number(row.score || 0) / maxScore),
+        source: "elasticsearch" as const,
+      }));
+    } catch (e) {
+      logger.warn(e, "PostgreSQL keyword fallback failed");
+      return [];
+    }
+  }
+
+  /**
    * ES 关键词召回（包装 elasticsearch.ts 的方法）
-   * ES 不可用时回退到空结果（RRF 融合时仅依赖 PGVector 单路）
+   * ES 不可用时回退到 PostgreSQL ILIKE 关键词检索
    */
   async searchByKeyword(
     query: string,
@@ -460,8 +551,8 @@ export class KnowledgeService {
     try {
       const esAvailable = await isESAvailable();
       if (!esAvailable) {
-        logger.debug("ES unavailable, skipping keyword recall");
-        return [];
+        logger.debug("ES unavailable, using PostgreSQL keyword fallback");
+        return this.searchByPostgresKeyword(query, kbIds, topK);
       }
 
       const results = await esKeywordSearch(query, kbIds, topK);
@@ -485,7 +576,7 @@ export class KnowledgeService {
       });
     } catch (e) {
       logger.warn(e, "ES keyword recall failed");
-      return [];
+      return this.searchByPostgresKeyword(query, kbIds, topK);
     }
   }
 

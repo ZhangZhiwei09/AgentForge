@@ -8,6 +8,7 @@ import {
   Trash2,
   FileText,
   Layers,
+  ListChecks,
 } from "lucide-react";
 import type { KnowledgeBaseDTO } from "@agentforge/shared-types";
 
@@ -70,6 +71,10 @@ export function KnowledgeBaseCard({ kb, onDelete }: KnowledgeBaseCardProps) {
 
   const handleEnter = () => {
     navigate(`/admin/cs/knowledge/bases/${kb.id}`);
+  };
+
+  const handleRegression = () => {
+    navigate(`/admin/cs/knowledge/bases/${kb.id}/hit-testing?tab=cases`);
   };
 
   const handleDelete = () => {
@@ -153,6 +158,29 @@ export function KnowledgeBaseCard({ kb, onDelete }: KnowledgeBaseCardProps) {
         )}
 
         {/* 底部元信息 */}
+        <div className="mb-3 flex items-center gap-2">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleEnter();
+            }}
+            className="inline-flex items-center gap-1.5 rounded-md border border-[hsl(var(--border))] px-2.5 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-[hsl(var(--accent))] hover:text-foreground"
+          >
+            <FileText className="h-3.5 w-3.5" />
+            文档
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              handleRegression();
+            }}
+            className="inline-flex items-center gap-1.5 rounded-md bg-[hsl(var(--primary))] px-2.5 py-1.5 text-[11px] font-medium text-[hsl(var(--primary-foreground))] transition-opacity hover:opacity-90"
+          >
+            <ListChecks className="h-3.5 w-3.5" />
+            回归测试
+          </button>
+        </div>
+
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             {/* 文档数 */}

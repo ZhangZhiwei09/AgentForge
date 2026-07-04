@@ -231,4 +231,12 @@ export type {
   HitTestingRequestDTO,
   HitTestingResultDTO,
   HitTestingResponseDTO,
+  RegressionRetrievalConfigDTO,
+  KnowledgeRegressionCaseDTO,
+  CreateKnowledgeRegressionCaseRequest,
+  KnowledgeRegressionTestSetDTO,
+  CreateKnowledgeRegressionTestSetRequest,
+  KnowledgeRegressionResultSnapshotDTO,
+  KnowledgeRegressionRunItemDTO,
+  KnowledgeRegressionRunDTO,
 } from "./knowledge";
