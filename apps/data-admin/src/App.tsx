@@ -10,7 +10,6 @@ import { KnowledgePanel } from "./components/knowledge/KnowledgePanel";
 import { KnowledgeBaseList } from "./components/knowledge/KnowledgeBaseList";
 import { DocumentListPage } from "./components/knowledge/DocumentListPage";
 import { DocumentDetailPage } from "./components/knowledge/DocumentDetailPage";
-import { MemoryPanel } from "./components/memory/MemoryPanel";
 import { ObservabilityPage } from "./components/analytics/ObservabilityPage";
 import { HitTestingPage } from "./components/knowledge/HitTestingPage";
 import { Loader2 } from "lucide-react";
@@ -108,16 +107,6 @@ function HitTestingView() {
   return <HitTestingPage kbId={kbId} kbName={kb?.name ?? kbId} />;
 }
 
-// ── 路由级组件：记忆管理 ─────────────────────────────
-
-function MemoryManagement() {
-  return (
-    <div className="p-6">
-      <MemoryPanel />
-    </div>
-  );
-}
-
 export default function App() {
   return (
     <AppShell>
@@ -147,10 +136,9 @@ export default function App() {
           <Route path="cs/knowledge/bases/:kbId" element={<DocumentListView />} />
 
           {/* 其他模块 */}
-          <Route path="cs/memory" element={<MemoryManagement />} />
           <Route path="cs/analytics" element={<AnalyticsPage />} />
           <Route path="cs/observability" element={<ObservabilityPage />} />
-          <Route index element={<Navigate to="cs/analytics" replace />} />
+          <Route index element={<Navigate to="cs/knowledge" replace />} />
         </Route>
         <Route path="/*" element={<Navigate to="/admin" replace />} />
       </Routes>
