@@ -29,6 +29,7 @@ import { sandboxTools } from "./sandbox-tools.js";
 import { appGenTools } from "./app-gen-tools.js";
 import { searchKnowledgeBaseTool } from "./builtin/search-knowledge-base.js";
 import { createSupportTicketTool } from "./business/create-ticket.js";
+import { diagnosisMonitoringTools } from "./business/diagnosis-tools.js";
 import { logger } from "@agentforge/logger";
 import {
   toolCallsTotal,
@@ -59,6 +60,8 @@ class ToolRegistry {
       // ── Agent Runtime 工具分层 ──
       searchKnowledgeBaseTool,     // Builtin: KB 检索（Runtime 核心）
       createSupportTicketTool,      // Business: 工单创建
+      // ── Diagnosis 场景工具（Mock 监控数据）──
+      ...diagnosisMonitoringTools,  // Business: 核身排障监控工具
     ];
     for (const tool of allTools) {
       this.register(tool);

@@ -10,6 +10,7 @@ import {
   Check,
   Loader2,
 } from "lucide-react";
+import { DiagnosisSection } from "./DiagnosisSection";
 
 export function DebugPanel() {
   const debugInfo = useChatStore((s) => s.debugInfo);
@@ -134,6 +135,9 @@ export function DebugPanel() {
               value={debugInfo ? String(debugInfo.max_tokens) : "-"}
             />
           </Section>
+
+          {/* Multi-Agent Diagnosis Test */}
+          <DiagnosisSection />
         </div>
       </div>
     </aside>

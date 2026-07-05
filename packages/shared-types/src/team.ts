@@ -20,7 +20,7 @@ export interface AgentRole {
 
 // ---- Team Definition ----
 
-export type CollaborationMode = "orchestrator" | "peer" | "debate";
+export type CollaborationMode = "orchestrator" | "peer" | "debate" | "diagnosis";
 
 export type StopCondition = "all_done" | "orchestrator_decides" | "consensus";
 

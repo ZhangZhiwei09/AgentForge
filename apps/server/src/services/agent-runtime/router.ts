@@ -1,10 +1,10 @@
 // QueryRouter —— LLM 驱动的 Agent 查询分类器
-// 将用户消息路由到 4 条路径之一：SAFETY | CHAT | TASK | HUMAN
+// 将用户消息路由到 5 条路径之一：SAFETY | CHAT | TASK | HUMAN | DIAGNOSIS
 // 使用 chatSync + jsonMode 做结构化分类（~60 token 输出）
 // 降级策略：LLM 失败或低置信度 → 回退到 regex IntentDetector → TASK
 //
 // Rule First + LLM Fallback 架构：
-// SAFETY 和 HUMAN 走关键词规则（高确定性），其余交给 Router LLM 统一分类
+// SAFETY、HUMAN、DIAGNOSIS 走关键词规则（高确定性），其余交给 Router LLM 统一分类
 
 import { z } from "zod";
 import { getProvider, resolveModel } from "../../providers/registry.js";
@@ -17,7 +17,7 @@ import type { ObservabilityTrace } from "../../observability/provider.js";
 // ── Zod Schema：Router LLM 输出的结构化 JSON ──
 
 const RouterDecisionSchema = z.object({
-  route: z.enum(["SAFETY", "CHAT", "TASK", "HUMAN"]),
+  route: z.enum(["SAFETY", "CHAT", "TASK", "HUMAN", "DIAGNOSIS"]),
   confidence: z.number().min(0).max(1),
   reasoning: z.string().max(200),
   escalation_reason: z.string().max(100).default(""),
@@ -41,6 +41,11 @@ const ROUTER_SYSTEM_PROMPT = `你是一个智能助手 Intent Classifier。分�
 ### TASK（任务执行 — 默认）
 所有业务问题、知识查询、需要工具的任务 → route: "TASK"
 Agent 会自主决定是否搜索知识库、调用业务工具，或组合使用。
+
+### DIAGNOSIS（故障诊断）
+用户描述了具体的故障现象（报错、失败、超时、崩溃、打不开），
+或明确要求排查/诊断帮助，或提供了 traceId/errorCode → route: "DIAGNOSIS"
+触发多 Agent 协同诊断流程（前端排查 → 后端排查 → 综合分析）。
 
 ## 输出格式（仅 JSON）
 {"route":"TASK","confidence":0.9,"reasoning":"简短的意图分析"}`;
@@ -100,6 +105,18 @@ export const HUMAN_KEYWORDS = [
   /叫.*(经理|领导|负责人)/,
 ];
 
+export const DIAGNOSIS_KEYWORDS = [
+  // 强信号：错误码 + traceId
+  /traceId\s*[:：]\s*\w+/i,
+  /error[_ ]?code\s*[:：]\s*\w+/i,
+  // 故障关键词
+  /(报错|失败|超时|打不开|连不上|崩溃|闪退|白屏|卡死)/,
+  /(排查|诊断|定位|帮我看下|帮我查下|帮我查|帮我看看|帮我看|帮我分析).*(问题|原因|怎么回事|什么情况|什么原因)/,
+  /(摄像头|麦克风|活体|刷脸|人脸|认证|识别).*(失败|打不开|不能用|没反应|超时|异常)/,
+  /(WebSocket|网络|连接).*(断开|超时|失败)/,
+  /(成功率|通过率).*(下跌|下降|降低|异常|掉|低)/,
+];
+
 interface QuickRouteResult {
   route: RouteName;
   confidence: number;
@@ -107,7 +124,7 @@ interface QuickRouteResult {
 }
 
 /**
- * 规则优先扫描：仅处理 SAFETY 和 HUMAN 两类高确定性场景。
+ * 规则优先扫描：处理 SAFETY、HUMAN、DIAGNOSIS 三类高确定性场景。
  * 其余所有查询返回 null，交给 Router LLM 统一分类。
  */
 function quickRouteScan(message: string): QuickRouteResult | null {
@@ -126,6 +143,15 @@ function quickRouteScan(message: string): QuickRouteResult | null {
       route: "HUMAN",
       confidence: 0.95,
       reasoning: "转人工关键词命中",
+    };
+  }
+
+  // DIAGNOSIS —— 故障排查/诊断类问题
+  if (DIAGNOSIS_KEYWORDS.some((p) => p.test(message))) {
+    return {
+      route: "DIAGNOSIS",
+      confidence: 0.85,
+      reasoning: "诊断关键词命中",
     };
   }
 
@@ -206,8 +232,16 @@ export class QueryRouter {
           : undefined,
       });
 
-      if (parsed && parsed.confidence >= 0.5) {
-        return parsed;
+      if (parsed) {
+        // DIAGNOSIS 需要更高置信度以避免误触发多 Agent 诊断
+        if (parsed.route === "DIAGNOSIS" && parsed.confidence < 0.7) {
+          logger.info(
+            { confidence: parsed.confidence },
+            "Router LLM classified as DIAGNOSIS but confidence < 0.7, falling back",
+          );
+        } else if (parsed.confidence >= 0.5) {
+          return parsed;
+        }
       }
 
       logger.warn(

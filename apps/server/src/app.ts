@@ -17,6 +17,7 @@ import { voiceRoutes } from "./routes/voice.js";
 import { videoRoutes } from "./routes/video.js";
 import { workflowRoutes } from "./routes/workflows.js";
 import { teamRoutes } from "./routes/teams.js";
+import { debugDiagnosisRoutes } from "./routes/debug-diagnosis.js";
 import { registerMetricsEndpoint } from "./observability/metrics.js";
 import { appCreationModule } from "./modules/app-creation/index.js";
 import { dataManagementModule } from "./modules/data-management/index.js";
@@ -64,6 +65,7 @@ export async function createApp() {
   app.route("/", videoRoutes);        // /api/video/*, WS /api/video/stream
   app.route("/", workflowRoutes);     // /api/workflows/*, /api/workflows/runs/*
   app.route("/", teamRoutes);         // /api/teams/*, /api/teams/runs/*
+  app.route("/", debugDiagnosisRoutes); // /debug/diagnosis (public debug page)
 
   // 注册业务模块路由（可插拔：设置 enabled: false 即可禁用整个模块）
   const modules: ServerModule[] = [

@@ -14,8 +14,12 @@ import { SessionList } from "./SessionList";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { QuickReplies } from "@/components/customer-chat/QuickReplies";
 import { SatisfactionRating } from "@/components/customer-chat/SatisfactionRating";
+import { DebugPanel } from "@/components/debug/DebugPanel";
+import { DiagnosisCard } from "@/components/chat/DiagnosisCard";
+import { useChatStore } from "@/stores/chat";
 
 export function AgentChatPage() {
+  const isDebugOpen = useChatStore((s) => s.isDebugOpen);
   const {
     messages,
     isStreaming,
@@ -125,6 +129,10 @@ export function AgentChatPage() {
                             : "bg-white border border-[hsl(var(--cs-border))] text-[hsl(var(--foreground))] rounded-bl-md"
                         }`}
                       >
+                        {/* 诊断进度卡片 */}
+                        {msg.role === "assistant" && msg.diagnosis && (
+                          <DiagnosisCard diagnosis={msg.diagnosis} />
+                        )}
                         {msg.id === "__stream__" && isStreaming ? (
                           <div>
                             <RichMessageRenderer
@@ -279,6 +287,9 @@ export function AgentChatPage() {
           </div>
         </div>
       </main>
+
+      {/* 右侧调试面板 */}
+      {isDebugOpen && <DebugPanel />}
     </div>
   );
 }
