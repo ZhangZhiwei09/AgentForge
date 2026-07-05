@@ -218,6 +218,44 @@ model KnowledgeQueryLog {
   @@map("knowledge_query_logs")
 }
 
+// V12: 意图语义分类样本表（Embedding + pgvector k-NN 路由使用）
+model IntentSample {
+  id        String   @id @db.VarChar(36)
+  route     String   @db.VarChar(20)       // SAFETY|CHAT|TASK|HUMAN|DIAGNOSIS
+  text      String   @db.VarChar(2000)     // 用户典型表达
+  embedding Unsupported("vector(1024)")?   // 文本向量（bge-m3 / text-embedding-v3）
+  source    String   @default("manual") @db.VarChar(20)  // manual|feedback|synthetic
+  active    Boolean  @default(true)        // 软删除/禁用
+  usageCount Int     @default(0) @map("usage_count")  // L2 匹配命中次数
+  lastUsedAt DateTime? @map("last_used_at")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([route], map: "ix_intent_samples_route")
+  @@index([active], map: "ix_intent_samples_active")
+  @@map("intent_samples")
+}
+
+// V12: 意图分类审计日志
+model RouteClassificationLog {
+  id          String   @id @db.VarChar(36)
+  sessionId   String?  @map("session_id") @db.VarChar(64)
+  conversationId String? @map("conversation_id") @db.VarChar(36)
+  userMessage String   @map("user_message") @db.VarChar(2000)
+  route       String   @db.VarChar(20)       // 最终路由结果
+  confidence  Float
+  source      String   @db.VarChar(20)       // keyword|l2_semantic|l3_fewshot|llm|fallback
+  topMatches  Json?    @map("top_matches")   // L2 匹配到的 Top-K 样本
+  latencyMs   Int      @default(0) @map("latency_ms")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([source], map: "ix_route_classification_log_source")
+  @@index([route], map: "ix_route_classification_log_route")
+  @@index([sessionId], map: "ix_route_classification_log_session")
+  @@index([createdAt], map: "ix_route_classification_log_created")
+  @@map("route_classification_logs")
+}
+
 model KnowledgeRegressionTestSet {
   id          String   @id @db.VarChar(36)
   kbId        String   @map("kb_id") @db.VarChar(36)
