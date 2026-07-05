@@ -392,9 +392,13 @@ export class AgentRuntimeService {
 
       const source = decision.reasoning.includes("关键词命中")
         ? "keyword"
-        : decision.reasoning.includes("fallback")
-          ? "fallback"
-          : "llm";
+        : decision.reasoning.includes("L2语义匹配")
+          ? "l2_semantic"
+          : decision.reasoning.includes("L3少样本增强")
+            ? "l3_fewshot"
+            : decision.reasoning.includes("fallback")
+              ? "fallback"
+              : "llm";
       agentRouteClassificationTotal.inc({
         route: decision.route,
         source,

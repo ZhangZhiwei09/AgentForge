@@ -3,8 +3,12 @@
 // 使用 chatSync + jsonMode 做结构化分类（~60 token 输出）
 // 降级策略：LLM 失败或低置信度 → 回退到 regex IntentDetector → TASK
 //
-// Rule First + LLM Fallback 架构：
-// SAFETY、HUMAN、DIAGNOSIS 走关键词规则（高确定性），其余交给 Router LLM 统一分类
+// V12 多层路由架构：
+//   L1: 关键词快速路由（SAFETY、HUMAN、DIAGNOSIS 走关键词规则，零延迟）
+//   L2: 语义意图分类（Embedding + pgvector k-NN，<50ms）
+//   L3: Few-Shot 增强 LLM Router（L2 中置信度时，注入相似样本作参考）
+//   L4: 原始 LLM Router（兜底）
+//   L5: IntentDetector fallback（regex 最终兜底）
 
 import { z } from "zod";
 import { getProvider, resolveModel } from "../../providers/registry.js";
@@ -13,6 +17,11 @@ import { logger } from "@agentforge/logger";
 import { intentDetector } from "../intent-detector.js";
 import type { RouteName, RouterDecision } from "./types.js";
 import type { ObservabilityTrace } from "../../observability/provider.js";
+import {
+  SemanticClassifier,
+  getSemanticClassifier,
+  type SemanticMatch,
+} from "./semantic-classifier.js";
 
 // ── Zod Schema：Router LLM 输出的结构化 JSON ──
 
@@ -124,8 +133,8 @@ interface QuickRouteResult {
 }
 
 /**
- * 规则优先扫描：处理 SAFETY、HUMAN、DIAGNOSIS 三类高确定性场景。
- * 其余所有查询返回 null，交给 Router LLM 统一分类。
+ * L1 规则优先扫描：处理 SAFETY、HUMAN、DIAGNOSIS 三类高确定性场景。
+ * 其余所有查询返回 null，交给 L2 SemanticClassifier。
  */
 function quickRouteScan(message: string): QuickRouteResult | null {
   // SAFETY 优先 —— 安全合规不能有任何延迟
@@ -158,36 +167,131 @@ function quickRouteScan(message: string): QuickRouteResult | null {
   return null; // → Router LLM
 }
 
+// ── L3 Few-Shot Prompt Builder ──
+
+const ROUTE_LABELS: Record<string, string> = {
+  SAFETY: "安全违规",
+  CHAT: "社交对话",
+  TASK: "任务执行",
+  HUMAN: "人工转接",
+  DIAGNOSIS: "故障诊断",
+};
+
+/**
+ * 用 L2 检索到的相似样本构建 few-shot 增强 prompt。
+ * 选取 Top-3 相似度 > 0.4 的样本注入 system prompt 末尾。
+ */
+function buildFewShotPrompt(topMatches: SemanticMatch[]): string {
+  const examples = topMatches
+    .filter((m) => m.similarity > 0.4)
+    .slice(0, 3)
+    .map(
+      (m) =>
+        `用户："${m.text}"\n→ 分类: ${ROUTE_LABELS[m.route] ?? m.route} (route: "${m.route}")`,
+    )
+    .join("\n\n");
+
+  if (!examples) return ROUTER_SYSTEM_PROMPT;
+
+  return (
+    ROUTER_SYSTEM_PROMPT +
+    `\n\n## 参考示例（从历史样本中检索到的相似消息及其正确分类）\n\n${examples}` +
+    `\n\n注意：当用户描述任何异常现象（卡住、闪退、报错、超时、弹回、进不去、没反应等），` +
+    `即使没有明确的错误码，也应优先考虑 DIAGNOSIS 路由。客户服务场景中的模糊故障描述通常意味着需要排查。`
+  );
+}
+
 // ═══════════════════════════════════════════════════════
 // QueryRouter
 // ═══════════════════════════════════════════════════════
 
 export class QueryRouter {
   private modelId: string | null;
+  private semanticRouter: SemanticClassifier;
 
   constructor(modelId?: string | null) {
     this.modelId = modelId || null;
+    this.semanticRouter = getSemanticClassifier();
   }
 
   /**
    * 对用户消息进行分类，返回路由决策。
    *
-   * 流程：
-   * 1. 关键词快速路由（SAFETY/HUMAN）→ 零延迟
-   * 2. LLM 调用（廉价模型 + jsonMode）→ 结构化分类
-   * 3. 失败/低置信度 → 回退 regex IntentDetector → TASK
+   * V12 多层流程：
+   *   1. L1 关键词快速路由（SAFETY/HUMAN/DIAGNOSIS）→ 零延迟
+   *   2. L2 语义意图分类（Embedding + pgvector k-NN）→ <50ms
+   *   3. L3 Few-Shot 增强 LLM Router（L2 中置信度时）→ ~500ms
+   *   4. L4 原始 LLM Router（兜底）→ ~500ms
+   *   5. Fallback: regex IntentDetector → TASK
    */
   async classify(
     message: string,
     history: ChatMessage[],
     trace?: ObservabilityTrace,
   ): Promise<RouterDecision> {
-    // ── 快速路由扫描 ──
+    // ── L1: 关键词快速路由 ──
     const quickResult = quickRouteScan(message);
     if (quickResult) {
       return quickResult;
     }
 
+    // ── L2: 语义意图分类（Embedding + pgvector k-NN）──
+    const l2Start = Date.now();
+    const semanticResult = await this.semanticRouter.classify(message);
+    const l2Ms = Date.now() - l2Start;
+
+    if (semanticResult) {
+      // L2 高置信度（≥ 0.8）→ 直接返回
+      if (semanticResult.confidence >= 0.8) {
+        logger.info(
+          { route: semanticResult.route, confidence: semanticResult.confidence, l2Ms },
+          "Router: L2 semantic classification (high confidence), returning directly",
+        );
+        return {
+          route: semanticResult.route,
+          confidence: semanticResult.confidence,
+          reasoning: semanticResult.reasoning,
+        };
+      }
+
+      // L2 中置信度（0.5 ~ 0.8）→ L3 Few-Shot 增强
+      if (semanticResult.confidence >= 0.5 && semanticResult.matches.length > 0) {
+        logger.info(
+          {
+            route: semanticResult.route,
+            confidence: semanticResult.confidence,
+            matchCount: semanticResult.matches.length,
+            l2Ms,
+          },
+          "Router: L2 medium confidence, escalating to L3 Few-Shot LLM",
+        );
+
+        const l3Result = await this.fewShotClassify(
+          message,
+          history,
+          semanticResult.matches,
+          trace,
+        );
+        if (l3Result) return l3Result;
+      }
+    } else {
+      logger.info({ l2Ms }, "Router: L2 skipped (no embedding provider or no matches)");
+    }
+
+    // ── L4: 原始 LLM Router ──
+    return this.llmClassify(message, history, trace);
+  }
+
+  /**
+   * L3: Few-Shot 增强 LLM Router。
+   * 将 L2 检索到的相似样本注入 system prompt 作为参考示例。
+   */
+  private async fewShotClassify(
+    message: string,
+    history: ChatMessage[],
+    topMatches: SemanticMatch[],
+    trace?: ObservabilityTrace,
+  ): Promise<RouterDecision | null> {
     const [providerName, model] = resolveModel(this.modelId);
 
     try {
@@ -196,7 +300,82 @@ export class QueryRouter {
         { role: "user", content: message },
       ];
 
-      // ── Observability: Router LLM Generation ──
+      const enhancedPrompt = buildFewShotPrompt(topMatches);
+
+      const lfGen = trace?.generation({
+        name: "llm-router-few-shot",
+        model,
+        input: { message, fewShotCount: topMatches.length },
+        metadata: { provider: providerName },
+      });
+
+      const provider = getProvider(providerName);
+      const result = await provider.chatSync(
+        contextMessages,
+        model,
+        enhancedPrompt,
+        0.0,
+        200,
+        true,
+      );
+
+      const parsed = this.parseDecision(result.content);
+
+      lfGen?.end({
+        output: {
+          route: parsed?.route ?? "unknown",
+          confidence: parsed?.confidence ?? 0,
+        },
+        usage: result.usage
+          ? {
+              promptTokens: result.usage.prompt_tokens,
+              completionTokens: result.usage.completion_tokens,
+              totalTokens: result.usage.prompt_tokens + result.usage.completion_tokens,
+            }
+          : undefined,
+      });
+
+      if (parsed && parsed.confidence >= 0.5) {
+        // DIAGNOSIS 高门槛
+        if (parsed.route === "DIAGNOSIS" && parsed.confidence < 0.7) {
+          logger.info(
+            { confidence: parsed.confidence },
+            "Router L3: DIAGNOSIS but confidence < 0.7, falling through to L4",
+          );
+          return null;
+        }
+        parsed.reasoning = `L3少样本增强: ${parsed.reasoning}`;
+        return parsed;
+      }
+
+      logger.warn(
+        { confidence: parsed?.confidence, route: parsed?.route },
+        "Router L3: low confidence or parse failure, falling through to L4",
+      );
+      return null;
+    } catch (e) {
+      logger.warn(e, "Router L3: LLM call failed, falling through to L4");
+      return null;
+    }
+  }
+
+  /**
+   * L4: 原始 LLM Router（无 few-shot 示例增强）。
+   * 当 L2 和 L3 都无法确定时兜底。
+   */
+  private async llmClassify(
+    message: string,
+    history: ChatMessage[],
+    trace?: ObservabilityTrace,
+  ): Promise<RouterDecision> {
+    const [providerName, model] = resolveModel(this.modelId);
+
+    try {
+      const contextMessages: ChatMessage[] = [
+        ...history.slice(-4),
+        { role: "user", content: message },
+      ];
+
       const lfGen = trace?.generation({
         name: "llm-router-classification",
         model,
@@ -209,14 +388,13 @@ export class QueryRouter {
         contextMessages,
         model,
         ROUTER_SYSTEM_PROMPT,
-        0.0, // temperature = 0，确定性分类
-        150, // maxTokens
-        true, // jsonMode
+        0.0,
+        150,
+        true,
       );
 
       const parsed = this.parseDecision(result.content);
 
-      // End generation with usage（chatSync 已返回 usage）
       lfGen?.end({
         output: {
           route: parsed?.route ?? "unknown",
@@ -226,18 +404,16 @@ export class QueryRouter {
           ? {
               promptTokens: result.usage.prompt_tokens,
               completionTokens: result.usage.completion_tokens,
-              totalTokens:
-                result.usage.prompt_tokens + result.usage.completion_tokens,
+              totalTokens: result.usage.prompt_tokens + result.usage.completion_tokens,
             }
           : undefined,
       });
 
       if (parsed) {
-        // DIAGNOSIS 需要更高置信度以避免误触发多 Agent 诊断
         if (parsed.route === "DIAGNOSIS" && parsed.confidence < 0.7) {
           logger.info(
             { confidence: parsed.confidence },
-            "Router LLM classified as DIAGNOSIS but confidence < 0.7, falling back",
+            "Router L4: DIAGNOSIS but confidence < 0.7, falling back to IntentDetector",
           );
         } else if (parsed.confidence >= 0.5) {
           return parsed;
@@ -245,18 +421,13 @@ export class QueryRouter {
       }
 
       logger.warn(
-        {
-          confidence: parsed?.confidence,
-          route: parsed?.route,
-          rawResponse: result.content.slice(0, 200),
-        },
-        "Router low confidence, falling back to IntentDetector",
+        { confidence: parsed?.confidence, route: parsed?.route },
+        "Router L4: low confidence, falling back to IntentDetector",
       );
     } catch (e) {
-      logger.warn(e, "Router LLM call failed, falling back to IntentDetector");
+      logger.warn(e, "Router L4: LLM call failed, falling back to IntentDetector");
     }
 
-    // ── Fallback：regex IntentDetector ──
     return this.fallbackClassify(message);
   }
 

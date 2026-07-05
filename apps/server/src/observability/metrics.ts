@@ -117,6 +117,24 @@ export const agentRouteConfidence = new Histogram({
   registers: [registry],
 });
 
+/** L2 语义路由 k-NN 匹配相似度分布 */
+export const agentRouteL2Similarity = new Histogram({
+  name: "agent_route_l2_similarity",
+  help: "L2 semantic router top-K match similarity distribution",
+  labelNames: ["route"],
+  buckets: [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.85, 0.9, 0.95],
+  registers: [registry],
+});
+
+/** L2 语义路由分类时延 */
+export const agentRouteL2LatencyMs = new Histogram({
+  name: "agent_route_l2_latency_ms",
+  help: "L2 semantic router classification latency in ms",
+  labelNames: ["outcome"],
+  buckets: [5, 10, 20, 30, 50, 100, 200, 500],
+  registers: [registry],
+});
+
 /** Agent Runtime ReAct 循环迭代次数分布 */
 export const agentReActIterations = new Histogram({
   name: "agent_react_iterations",
