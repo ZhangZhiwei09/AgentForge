@@ -1264,6 +1264,11 @@ export class LegacyAgentRunner {
     const provider = getProvider(providerName);
     const signal = scope?.context.signal;
 
+    // AgentGuardService — security parity with run().
+    // Initialized with undefined guardConfig (defaults); full guardConfig passthrough
+    // from session state is scheduled for Phase B (dedup + state unification).
+    const guard = new AgentGuardService();
+
     const toolDefs = [AGENT_DECIDE_TOOL, ...toolRegistry.getDefinitions()];
 
     const systemPrompt = REACT_PROMPT_WITH_TOOLS;
@@ -1691,6 +1696,10 @@ export class LegacyAgentRunner {
       const decision = step.decision;
 
       if (decision.action === "respond") {
+        // PII guard — security parity with run()
+        const responseGuard = guard.guardResponse(decision.content);
+        const safeContent = responseGuard.sanitizedContent;
+
         yield { type: "agent_responding", step: totalSteps };
         yield { type: "agent_act", step: totalSteps, decision };
         await prisma.message.create({
@@ -1698,7 +1707,7 @@ export class LegacyAgentRunner {
             id: streamMsgId,
             conversationId,
             role: "assistant",
-            content: decision.content,
+            content: safeContent,
             model: resolvedModel,
           },
         });
@@ -1706,7 +1715,7 @@ export class LegacyAgentRunner {
         scratchpad.push(step);
         yield {
           type: "agent_respond",
-          content: decision.content,
+          content: safeContent,
           summary: decision.summary,
           message_id: streamMsgId,
         };
@@ -1786,6 +1795,38 @@ export class LegacyAgentRunner {
             timeout_ms: timeoutMs,
           } satisfies AgentApprovalRequiredEvent;
           return;
+        }
+
+        // AgentGuard tool call allowlist — security parity with run()
+        const guardCheck = guard.guardToolCall(
+          decision.tool,
+          decision.args,
+          0, // tokensUsed — tracked per-iteration; pass 0 for guard baseline
+          0, // costCentsUsed — tracked per-iteration; pass 0 for guard baseline
+          resolvedModel,
+        );
+        if (!guardCheck.allowed) {
+          logger.warn(
+            {
+              sessionId,
+              tool: decision.tool,
+              blockReason: guardCheck.blockReason,
+            },
+            "AgentGuard blocked tool call in continue loop",
+          );
+          step.result = `Blocked: ${guardCheck.blockReason}`;
+          scratchpad.push(step);
+          yield {
+            type: "agent_guard_block",
+            step: totalSteps,
+            reason: "tool_blocked",
+            detail: guardCheck.blockReason!,
+          };
+          conversationMessages.push({
+            role: "user",
+            content: `[系统提示] 工具 "${decision.tool}" 被安全策略拦截：${guardCheck.blockReason}`,
+          });
+          continue; // Skip to next ReAct iteration
         }
 
         const toolResult = await executeToolWithRetry(
