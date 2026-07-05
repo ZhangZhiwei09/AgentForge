@@ -11,6 +11,7 @@ import { contentSafetyMiddleware } from "./middleware/content-safety.js";
 import { authRoutes } from "./routes/auth.js";
 import { agentRuntimeRoutes } from "./routes/agent-runtime.js";
 import { toolRoutes } from "./routes/tools.js";
+import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { agentRoutes } from "./routes/agent.js";
 import { voiceRoutes } from "./routes/voice.js";
 import { videoRoutes } from "./routes/video.js";
@@ -57,6 +58,7 @@ export async function createApp() {
   app.route("/", authRoutes);         // /api/auth/* (public)
   app.route("/", agentRuntimeRoutes); // /api/agent/chat, /api/agent/chat/history
   app.route("/", toolRoutes);         // /api/tools
+  app.route("/", diagnosisRoutes);    // /api/diagnosis/query
   app.route("/", agentRoutes);        // /api/agent/*, /api/agent-sessions/*
   app.route("/", voiceRoutes);        // /api/voice/*, WS /api/voice/stream
   app.route("/", videoRoutes);        // /api/video/*, WS /api/video/stream
