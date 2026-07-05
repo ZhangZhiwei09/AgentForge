@@ -206,6 +206,8 @@ export type {
 export type {
   AgentMessage,
   AgentStreamMeta,
+  DiagnosisProgress,
+  DiagnosisPhase,
 } from "./agent-chat";
 export type {
   KnowledgeBaseDTO,

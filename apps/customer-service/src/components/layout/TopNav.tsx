@@ -1,9 +1,11 @@
 import { useNavigate } from "react-router-dom";
-import { LogOut, User } from "lucide-react";
+import { LogOut, User, Bug } from "lucide-react";
+import { useChatStore } from "@/stores/chat";
 
 export function TopNav() {
   const token = localStorage.getItem("accessToken");
   const navigate = useNavigate();
+  const toggleDebugPanel = useChatStore((s) => s.toggleDebugPanel);
 
   function handleLogout() {
     localStorage.removeItem("accessToken");
@@ -22,6 +24,14 @@ export function TopNav() {
       <div className="flex items-center gap-3">
         {token ? (
           <>
+            <button
+              onClick={toggleDebugPanel}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-[hsl(var(--muted-foreground))] transition-colors hover:text-orange-500 hover:bg-orange-50"
+              title="调试面板"
+            >
+              <Bug className="h-3.5 w-3.5" />
+              <span className="hidden sm:inline">Debug</span>
+            </button>
             <span className="hidden sm:flex items-center gap-1.5 text-xs text-[hsl(var(--muted-foreground))]">
               <User className="h-3.5 w-3.5" />
               <span>已登录</span>

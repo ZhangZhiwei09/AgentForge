@@ -46,7 +46,7 @@ export const TeamDefinitionSchema = z
     name: z.string().min(1).max(200),
     version: z.string().min(1),
     description: z.string().optional(),
-    collaborationMode: z.enum(["orchestrator", "peer", "debate"]),
+    collaborationMode: z.enum(["orchestrator", "peer", "debate", "diagnosis"]),
     agents: z.array(AgentRoleSchema).min(2).max(10),
     orchestrator: z.string().optional(),
     debate: TeamDebateConfigSchema.optional(),

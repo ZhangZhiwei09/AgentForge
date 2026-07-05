@@ -28,6 +28,7 @@ import { SafetyAgent } from "./agent-runtime/safety-agent.js";
 import { ChatAgent } from "./agent-runtime/chat-agent.js";
 import { AgentExecutor } from "./agent-runtime/agent-executor.js";
 import { HumanAgent } from "./agent-runtime/human-agent.js";
+import { DiagnosisRouteAgent } from "./agent-runtime/diagnosis-agent.js";
 
 import { injectMemories } from "./agent-runtime/knowledge-context.js";
 
@@ -120,6 +121,7 @@ export class AgentRuntimeService {
   private chatAgent: ChatAgent;
   private agentExecutor: AgentExecutor;
   private humanAgent: HumanAgent;
+  private diagnosisAgent: DiagnosisRouteAgent;
 
   // 会话级并发控制
   private static sessionLocks = new Map<string, Promise<void>>();
@@ -133,6 +135,7 @@ export class AgentRuntimeService {
     this.chatAgent = new ChatAgent();
     this.agentExecutor = new AgentExecutor();
     this.humanAgent = new HumanAgent();
+    this.diagnosisAgent = new DiagnosisRouteAgent();
 
     // 强类型路由注册表
     this.agentRegistry = {
@@ -140,6 +143,7 @@ export class AgentRuntimeService {
       CHAT: this.chatAgent,
       TASK: this.agentExecutor,
       HUMAN: this.humanAgent,
+      DIAGNOSIS: this.diagnosisAgent,
     };
   }
 

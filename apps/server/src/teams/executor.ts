@@ -3,6 +3,7 @@ import type { TeamDefinition, TeamStreamEvent } from "@agentforge/shared-types";
 import { OrchestratorMode } from "./modes/orchestrator.js";
 import { PeerMode } from "./modes/peer.js";
 import { DebateMode } from "./modes/debate.js";
+import { DiagnosisMode } from "./modes/diagnosis.js";
 import type {
   CollaborationModeExecutor,
   ExecutionContext,
@@ -16,6 +17,7 @@ export class TeamExecutor {
       ["orchestrator", new OrchestratorMode()],
       ["peer", new PeerMode()],
       ["debate", new DebateMode()],
+      ["diagnosis", new DiagnosisMode()],
     ]);
   }
 
@@ -96,6 +98,14 @@ export class TeamExecutor {
             `Judge agent "${debate.judgeAgent}" not found in team agents`,
           );
         }
+      }
+    }
+
+    if (definition.collaborationMode === "diagnosis") {
+      if (!names.includes("frontend_agent")) {
+        errors.push(
+          "Diagnosis mode requires an agent named 'frontend_agent'",
+        );
       }
     }
 

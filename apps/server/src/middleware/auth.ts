@@ -11,9 +11,11 @@ const PUBLIC_PATHS = [
   "/api/auth/refresh",
   "/api/health",
   "/api/agent/chat", // Anonymous agent SSE chat
+  "/api/diagnosis/query", // Anonymous diagnosis demo endpoint
   "/api/agent/chat/history", // Load session history
   "/api/agent/chat/conversations", // List conversations (auth-aware internally)
   "/api/agent/chat/rate", // Submit satisfaction rating
+  "/debug/diagnosis", // Debug: DiagnosisMode visual verification page
 ];
 
 // Prefix-based public paths (any path starting with these is public)

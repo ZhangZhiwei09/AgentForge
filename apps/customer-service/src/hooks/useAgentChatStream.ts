@@ -6,10 +6,12 @@ import type {
   KnowledgeResult,
   ContentBlock,
   AgentMessage,
+  DiagnosisProgress,
+  DiagnosisPhase,
 } from "@agentforge/shared-types";
 
 // Re-export for backward compatibility
-export type { KnowledgeResult, ContentBlock, AgentMessage };
+export type { KnowledgeResult, ContentBlock, AgentMessage, DiagnosisProgress, DiagnosisPhase };
 
 interface StreamMeta {
   messageId: string;
@@ -157,6 +159,31 @@ export function useAgentChatStream() {
         let knowledgeResults: KnowledgeResult[] | undefined;
         const contentBlocks: ContentBlock[] = [];
         let meta: StreamMeta | null = null;
+        let diagnosisProgress: DiagnosisProgress | undefined;
+
+        // Helper: update the stream message with current diagnosis progress
+        function updateStreamWithDiagnosis(dp: DiagnosisProgress | undefined) {
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last?.id === "__stream__") {
+              return [
+                ...prev.slice(0, -1),
+                { ...last, diagnosis: dp },
+              ];
+            }
+            // Create stream message if it doesn't exist yet (diagnosis may arrive before tokens)
+            return [
+              ...prev,
+              {
+                id: "__stream__",
+                role: "assistant" as const,
+                content: "",
+                timestamp: Date.now(),
+                diagnosis: dp,
+              },
+            ];
+          });
+        }
 
         while (true) {
           const { done, value } = await reader.read();
@@ -203,6 +230,78 @@ export function useAgentChatStream() {
                 continue;
               }
 
+              // ── 诊断事件处理 ──
+
+              if (chunk.type === "diagnosis_started") {
+                diagnosisProgress = {
+                  status: "running",
+                  phases: (chunk.agents as Array<{ name: string; role: string }>).map(
+                    (a) => ({
+                      phase:
+                        a.name === "frontend_agent"
+                          ? 1
+                          : a.name === "backend_agent"
+                            ? 2
+                            : 3,
+                      label: a.role,
+                      agent: a.name,
+                      status: "pending" as const,
+                    }),
+                  ),
+                };
+                updateStreamWithDiagnosis(diagnosisProgress);
+                continue;
+              }
+
+              if (chunk.type === "diagnosis_phase") {
+                if (diagnosisProgress) {
+                  diagnosisProgress = {
+                    ...diagnosisProgress,
+                    phases: diagnosisProgress.phases.map((p) =>
+                      p.phase === (chunk.phase as number)
+                        ? { ...p, status: "running" as const }
+                        : p,
+                    ),
+                  };
+                  updateStreamWithDiagnosis(diagnosisProgress);
+                }
+                continue;
+              }
+
+              if (chunk.type === "diagnosis_phase_done") {
+                if (diagnosisProgress) {
+                  diagnosisProgress = {
+                    ...diagnosisProgress,
+                    phases: diagnosisProgress.phases.map((p) =>
+                      p.phase === (chunk.phase as number)
+                        ? {
+                            ...p,
+                            status: "done" as const,
+                            summary: (chunk.summary as string) ?? p.summary,
+                          }
+                        : p,
+                    ),
+                  };
+                  updateStreamWithDiagnosis(diagnosisProgress);
+                }
+                continue;
+              }
+
+              if (chunk.type === "diagnosis_completed") {
+                if (diagnosisProgress) {
+                  const output = chunk.output as Record<string, unknown>;
+                  diagnosisProgress = {
+                    ...diagnosisProgress,
+                    status: "done",
+                    resolution: String(output.resolution ?? ""),
+                    finalConclusion:
+                      extractConclusionFromOutput(output),
+                  };
+                  updateStreamWithDiagnosis(diagnosisProgress);
+                }
+                continue;
+              }
+
               if (chunk.type === "token" && chunk.content) {
                 streamContent += chunk.content;
                 setMessages((prev) => {
@@ -210,7 +309,7 @@ export function useAgentChatStream() {
                   if (last?.id === "__stream__") {
                     return [
                       ...prev.slice(0, -1),
-                      { ...last, content: streamContent },
+                      { ...last, content: streamContent, diagnosis: diagnosisProgress },
                     ];
                   }
                   return [
@@ -221,6 +320,7 @@ export function useAgentChatStream() {
                       content: streamContent,
                       timestamp: Date.now(),
                       knowledge: knowledgeResults,
+                      diagnosis: diagnosisProgress,
                     },
                   ];
                 });
@@ -252,6 +352,7 @@ export function useAgentChatStream() {
                           knowledge: knowledgeResults,
                           contentBlocks:
                             allBlocks.length > 0 ? allBlocks : undefined,
+                          diagnosis: diagnosisProgress ?? last.diagnosis,
                         },
                       ];
                     }
@@ -328,4 +429,42 @@ function blockKey(block: ContentBlock): string {
     return `action:${(block.data as unknown as Record<string, unknown>).title}`;
   }
   return `${block.type}:${JSON.stringify((block as unknown as Record<string, unknown>).data || block)}`;
+}
+
+/** Extract a human-readable conclusion string from diagnosis_completed output */
+function extractConclusionFromOutput(
+  output: Record<string, unknown>,
+): string {
+  const finalDiag = output.final_diagnosis as Record<string, unknown> | undefined;
+  if (finalDiag) {
+    if (typeof finalDiag.conclusion === "string") return finalDiag.conclusion;
+    if (typeof finalDiag.message === "string") return finalDiag.message;
+  }
+  if (typeof output.conclusion === "string") {
+    // output.conclusion 可能是 LLM 原始 JSON 文本，尝试从中提取
+    const parsed = tryExtractJsonField(output.conclusion, "conclusion");
+    return parsed ?? output.conclusion;
+  }
+  return "";
+}
+
+/** Try to extract a field value from a JSON string */
+function tryExtractJsonField(text: string, field: string): string | null {
+  try {
+    const parsed = JSON.parse(text) as Record<string, unknown>;
+    if (typeof parsed[field] === "string") return parsed[field] as string;
+  } catch {
+    // Not valid JSON, try regex-based extraction
+  }
+  // Try finding JSON in the text via regex
+  const match = text.match(/\{[\s\S]*\}/);
+  if (match) {
+    try {
+      const parsed = JSON.parse(match[0]) as Record<string, unknown>;
+      if (typeof parsed[field] === "string") return parsed[field] as string;
+    } catch {
+      // Not parseable
+    }
+  }
+  return null;
 }

@@ -7,7 +7,7 @@ import type { ExecutionScope } from "../../runtime/scope.js";
 
 // ── 路由分类 ──
 
-export type RouteName = "SAFETY" | "CHAT" | "TASK" | "HUMAN";
+export type RouteName = "SAFETY" | "CHAT" | "TASK" | "HUMAN" | "DIAGNOSIS";
 
 export interface RouterDecision {
   route: RouteName;
@@ -115,6 +115,31 @@ export type RouteStreamEvent =
     }
   | {
       type: "clear_stream";
+      message_id: string;
+    }
+  | {
+      type: "diagnosis_started";
+      agents: Array<{ name: string; role: string }>;
+      message_id: string;
+    }
+  | {
+      type: "diagnosis_phase";
+      phase: number;
+      agent: string;
+      label: string;
+      message_id: string;
+    }
+  | {
+      type: "diagnosis_phase_done";
+      phase: number;
+      agent: string;
+      label: string;
+      summary: string;
+      message_id: string;
+    }
+  | {
+      type: "diagnosis_completed";
+      output: Record<string, unknown>;
       message_id: string;
     }
   | {
