@@ -194,6 +194,10 @@ export class AgentExecutor implements RouteAgent {
 
           case "agent_clear_stream":
             accumulatedContent = "";
+            yield {
+              type: "clear_stream",
+              message_id: assistantMsgId,
+            };
             break;
 
           case "agent_observe":
@@ -501,7 +505,10 @@ export class AgentExecutor implements RouteAgent {
         }
       };
       // Fire and forget — 不阻塞 done event
-      recordMemory();
+      recordMemory().catch(() => {
+        // Already logged inside recordMemory; explicit catch prevents
+        // unhandled promise rejection (Node.js warning/termination)
+      });
     }
 
     // 发送 done

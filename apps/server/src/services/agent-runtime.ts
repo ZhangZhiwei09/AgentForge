@@ -20,6 +20,7 @@ import {
   agentRequestDurationMs,
 } from "../observability/metrics.js";
 import { intentDetector } from "./intent-detector.js";
+import { checkContentSafety } from "../middleware/content-safety.js";
 import { createExecutionScope } from "../runtime/scope.js";
 import { getObservabilityProvider } from "../observability/index.js";
 
@@ -335,7 +336,7 @@ export class AgentRuntimeService {
 
       // ── 2. 传统对话快速通道（零延迟） ──
       const convMatch = this.matchConversational(userMessage);
-      if (convMatch) {
+      if (convMatch && checkContentSafety(userMessage).safe) {
         const convStartTime = Date.now();
 
         yield* this.streamConversationalMatch(
@@ -450,6 +451,9 @@ export class AgentRuntimeService {
             { route: decision.route, phase: "ttft" },
             Date.now() - startTime,
           );
+        }
+        if (event.type === "clear_stream") {
+          streamedAnswer = "";
         }
         if (event.type === "token") {
           streamedAnswer += event.content;

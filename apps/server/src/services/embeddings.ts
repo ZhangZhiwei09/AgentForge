@@ -2,6 +2,7 @@
 // 支持：Ollama 本地模型、OpenAI 兼容 API（DashScope/DeepSeek 等）
 import OpenAI from "openai";
 import { settings } from "../config.js";
+import { CircuitBreaker } from "../lib/circuit-breaker.js";
 
 // Embedding Provider 接口 —— 定义文本向量化的契约
 export interface EmbeddingProvider {
@@ -152,7 +153,33 @@ function initEmbeddingProviders(): void {
   embeddingInitialized = true;
 }
 
-// 按名称获取 Embedding Provider
+// 熔断器：每个 embedding provider 一个实例
+const embeddingBreakers = new Map<string, CircuitBreaker>();
+
+function getEmbeddingBreaker(providerName: string): CircuitBreaker {
+  if (!embeddingBreakers.has(providerName)) {
+    embeddingBreakers.set(
+      providerName,
+      new CircuitBreaker(`embedding-${providerName}`, 5, 30_000),
+    );
+  }
+  return embeddingBreakers.get(providerName)!;
+}
+
+/** 用熔断器包装 EmbeddingProvider，对 embed/embedSingle 自动熔断保护 */
+function wrapEmbeddingWithBreaker(
+  name: string,
+  p: EmbeddingProvider,
+): EmbeddingProvider {
+  const breaker = getEmbeddingBreaker(name);
+  return {
+    ...p,
+    embed: (texts: string[]) => breaker.call(() => p.embed(texts)),
+    embedSingle: (text: string) => breaker.call(() => p.embedSingle(text)),
+  };
+}
+
+// 按名称获取 Embedding Provider（自动包装熔断器）
 export function getEmbeddingProvider(name: string): EmbeddingProvider {
   initEmbeddingProviders();
   if (!embeddingProviders[name]) {
@@ -160,7 +187,7 @@ export function getEmbeddingProvider(name: string): EmbeddingProvider {
       `Embedding provider '${name}' not found. Available: ${Object.keys(embeddingProviders).join(", ")}`,
     );
   }
-  return embeddingProviders[name];
+  return wrapEmbeddingWithBreaker(name, embeddingProviders[name]);
 }
 
 // 获取默认 Embedding Provider —— Ollama 优先（本地免 Key），其次 OpenAI 兼容

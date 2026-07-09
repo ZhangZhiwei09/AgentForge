@@ -4,25 +4,68 @@ import type { LLMProvider } from "./types.js";
 import { OpenAIProvider } from "./openai.js";
 import { DeepSeekProvider } from "./deepseek.js";
 import { settings } from "../config.js";
+import { CircuitBreaker } from "../lib/circuit-breaker.js";
 
 // 所有已配置的 Provider 实例，key 为厂商名称
 const providers: Record<string, LLMProvider> = {};
+
+// 熔断器：每个 Provider 一个实例，独立计数
+const providerBreakers = new Map<string, CircuitBreaker>();
+
+function getBreaker(providerName: string): CircuitBreaker {
+  if (!providerBreakers.has(providerName)) {
+    providerBreakers.set(
+      providerName,
+      new CircuitBreaker(`llm-${providerName}`, 5, 30_000),
+    );
+  }
+  return providerBreakers.get(providerName)!;
+}
+
+/** 用熔断器包装 LLMProvider，对 chatSync/streamChat 调用自动熔断保护 */
+function wrapWithCircuitBreaker(
+  name: string,
+  provider: LLMProvider,
+): LLMProvider {
+  const breaker = getBreaker(name);
+  const originalChatSync = provider.chatSync.bind(provider);
+  const originalStreamChat = provider.streamChat.bind(provider);
+
+  return {
+    ...provider,
+    chatSync: async (...args: Parameters<LLMProvider["chatSync"]>) =>
+      breaker.call(() => originalChatSync(...args)),
+    streamChat: async function* (
+      ...args: Parameters<LLMProvider["streamChat"]>
+    ) {
+      try {
+        yield* originalStreamChat(...args);
+      } catch (e) {
+        // 流内错误通知熔断器（chatSync 有 call() 包装，streamChat 手动记录）
+        breaker.recordFailure();
+        throw e;
+      }
+    },
+  };
+}
 
 // 惰性初始化：根据 .env 中有无 API Key 决定是否注册该 Provider
 function initProviders(): void {
   if (Object.keys(providers).length > 0) return; // 已初始化则跳过
 
   if (settings.openaiApiKey) {
-    providers["openai"] = new OpenAIProvider(
+    const raw = new OpenAIProvider(
       settings.openaiApiKey,
       settings.openaiBaseUrl,
     );
+    providers["openai"] = wrapWithCircuitBreaker("openai", raw);
   }
   if (settings.deepseekApiKey) {
-    providers["deepseek"] = new DeepSeekProvider(
+    const raw = new DeepSeekProvider(
       settings.deepseekApiKey,
       settings.deepseekBaseUrl,
     );
+    providers["deepseek"] = wrapWithCircuitBreaker("deepseek", raw);
   }
 }
 
