@@ -4,15 +4,10 @@
 import { Worker, type Job } from "bullmq";
 import { getRedisConnection } from "./jobs/connection.js";
 import {
-  MEMORY_EXTRACTION_QUEUE,
   KNOWLEDGE_INGESTION_QUEUE,
-  type MemoryExtractionJobData,
   type KnowledgeIngestionJobData,
 } from "./jobs/queues.js";
-import {
-  processMemoryExtraction,
-  processKnowledgeIngestion,
-} from "./jobs/processors.js";
+import { processKnowledgeIngestion } from "./jobs/processors.js";
 import { logger } from "@agentforge/logger";
 
 function startWorker() {
@@ -23,16 +18,6 @@ function startWorker() {
     );
     process.exit(1);
   }
-
-  // Memory extraction worker
-  const memoryWorker = new Worker<MemoryExtractionJobData>(
-    MEMORY_EXTRACTION_QUEUE,
-    processMemoryExtraction,
-    {
-      connection,
-      concurrency: 1,
-    },
-  );
 
   // Knowledge ingestion worker
   const ingestionWorker = new Worker<KnowledgeIngestionJobData>(
@@ -45,20 +30,6 @@ function startWorker() {
   );
 
   // --- Event handlers ---
-
-  memoryWorker.on("completed", (job: Job) => {
-    logger.info(
-      { jobId: job.id, queue: MEMORY_EXTRACTION_QUEUE },
-      "Job completed",
-    );
-  });
-
-  memoryWorker.on("failed", (job: Job | undefined, err: Error) => {
-    logger.error(
-      { jobId: job?.id, queue: MEMORY_EXTRACTION_QUEUE, error: err.message },
-      "Job failed",
-    );
-  });
 
   ingestionWorker.on("completed", (job: Job) => {
     logger.info(
@@ -96,7 +67,7 @@ function startWorker() {
   });
 
   logger.info(
-    "BullMQ worker started — listening on queues: memory-extraction, knowledge-ingestion",
+    "BullMQ worker started — listening on queue: knowledge-ingestion",
   );
   logger.info("Press Ctrl+C to stop");
 }

@@ -25,8 +25,6 @@ import { builtinTools } from "./builtins.js";
 import { fileTools } from "./file-tools.js";
 import { databaseTools } from "./database-tools.js";
 import { networkTools } from "./network-tools.js";
-import { sandboxTools } from "./sandbox-tools.js";
-import { appGenTools } from "./app-gen-tools.js";
 import { searchKnowledgeBaseTool } from "./builtin/search-knowledge-base.js";
 import { createSupportTicketTool } from "./business/create-ticket.js";
 import { diagnosisMonitoringTools } from "./business/diagnosis-tools.js";
@@ -55,8 +53,6 @@ class ToolRegistry {
       ...fileTools,
       ...databaseTools,
       ...networkTools,
-      ...sandboxTools,
-      ...appGenTools,
       // ── Agent Runtime 工具分层 ──
       searchKnowledgeBaseTool,     // Builtin: KB 检索（Runtime 核心）
       createSupportTicketTool,      // Business: 工单创建

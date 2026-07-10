@@ -32,7 +32,8 @@ function wrapWithCircuitBreaker(
   const originalStreamChat = provider.streamChat.bind(provider);
 
   return {
-    ...provider,
+    // 显式绑定原型方法：spread 操作符不会拷贝 class 原型上的方法
+    listModels: provider.listModels.bind(provider),
     chatSync: async (...args: Parameters<LLMProvider["chatSync"]>) =>
       breaker.call(() => originalChatSync(...args)),
     streamChat: async function* (

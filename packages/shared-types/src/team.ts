@@ -20,22 +20,14 @@ export interface AgentRole {
 
 // ---- Team Definition ----
 
-export type CollaborationMode = "orchestrator" | "peer" | "debate" | "diagnosis";
+export type CollaborationMode = "diagnosis";
 
-export type StopCondition = "all_done" | "orchestrator_decides" | "consensus";
+export type StopCondition = "all_done" | "consensus";
 
 export interface TeamDefinitionVariable {
   type: "string" | "number" | "boolean" | "object" | "array";
   default?: unknown;
   description?: string;
-}
-
-export interface TeamDebateConfig {
-  question: string;
-  proAgent: string;
-  conAgent: string;
-  judgeAgent: string;
-  maxRounds: number;
 }
 
 export interface TeamDefinition {
@@ -44,8 +36,6 @@ export interface TeamDefinition {
   description?: string;
   collaborationMode: CollaborationMode;
   agents: AgentRole[];
-  orchestrator?: string;
-  debate?: TeamDebateConfig;
   maxTotalIterations: number;
   stopCondition?: StopCondition;
   timeout?: number;

@@ -1,8 +1,5 @@
 // TeamExecutor — dispatches to the correct collaboration mode executor
 import type { TeamDefinition, TeamStreamEvent } from "@agentforge/shared-types";
-import { OrchestratorMode } from "./modes/orchestrator.js";
-import { PeerMode } from "./modes/peer.js";
-import { DebateMode } from "./modes/debate.js";
 import { DiagnosisMode } from "./modes/diagnosis.js";
 import type {
   CollaborationModeExecutor,
@@ -14,9 +11,6 @@ export class TeamExecutor {
 
   constructor() {
     this.modeExecutors = new Map([
-      ["orchestrator", new OrchestratorMode()],
-      ["peer", new PeerMode()],
-      ["debate", new DebateMode()],
       ["diagnosis", new DiagnosisMode()],
     ]);
   }
@@ -69,38 +63,6 @@ export class TeamExecutor {
     }
 
     // Mode-specific validation
-    if (definition.collaborationMode === "orchestrator") {
-      const hasDelegate = definition.agents.some((a) => a.canDelegate);
-      if (!hasDelegate) {
-        errors.push(
-          "Orchestrator mode requires at least one agent with canDelegate=true",
-        );
-      }
-    }
-
-    if (definition.collaborationMode === "debate") {
-      const debate = definition.debate;
-      if (!debate) {
-        errors.push("Debate mode requires debate config");
-      } else {
-        if (!names.includes(debate.proAgent)) {
-          errors.push(
-            `Pro agent "${debate.proAgent}" not found in team agents`,
-          );
-        }
-        if (!names.includes(debate.conAgent)) {
-          errors.push(
-            `Con agent "${debate.conAgent}" not found in team agents`,
-          );
-        }
-        if (!names.includes(debate.judgeAgent)) {
-          errors.push(
-            `Judge agent "${debate.judgeAgent}" not found in team agents`,
-          );
-        }
-      }
-    }
-
     if (definition.collaborationMode === "diagnosis") {
       if (!names.includes("frontend_agent")) {
         errors.push(

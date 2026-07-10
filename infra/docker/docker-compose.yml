@@ -67,26 +67,6 @@ services:
       timeout: 10s
       retries: 10
 
-  # ── Neo4j ──────────────────────────────────────────────
-  neo4j:
-    image: neo4j:5.26-community
-    environment:
-      NEO4J_AUTH: neo4j/agentforge123
-      NEO4J_PLUGINS: '["apoc"]'
-      NEO4J_server_memory_heap_initial__size: 256m
-      NEO4J_server_memory_heap_max__size: 512m
-    ports:
-      - "7474:7474"
-      - "7687:7687"
-    volumes:
-      - neo4j_data:/data
-      - neo4j_logs:/logs
-    healthcheck:
-      test: ["CMD-SHELL", "cypher-shell -u neo4j -p agentforge123 'RETURN 1' || exit 1"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-
   # ── Jaeger Tracing ──────────────────────────────────────
   jaeger:
     image: jaegertracing/all-in-one:latest
@@ -129,20 +109,10 @@ services:
     env_file:
       - ../../apps/server/.env
 
-  # ── Code Execution Sandbox (build-only, not running) ─────
-  sandbox:
-    build:
-      context: ../../
-      dockerfile: infra/docker/Dockerfile.sandbox
-    image: agentforge-sandbox:latest
-    command: ["echo", "Sandbox image built"]
-
 volumes:
   pgdata:
   pgadmin_data:
   redis_data:
   ollama_data:
   es_data:
-  neo4j_data:
-  neo4j_logs:
   jaeger_data:

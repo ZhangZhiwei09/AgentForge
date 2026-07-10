@@ -63,7 +63,6 @@ describe("MemoryCompressor", () => {
         "web_search",
         "web_fetch",
         "http_request",
-        "code_execute",
         "file_search",
       ];
       for (const tool of criticalTools) {
@@ -254,7 +253,7 @@ describe("MemoryCompressor", () => {
           plan: "替代方案",
         }),
         makeStep(4, "tool_call", {
-          tool: "code_execute",
+          tool: "file_read",
           result: "R4",
           analysis: "重新评估",
           plan: "策略调整",

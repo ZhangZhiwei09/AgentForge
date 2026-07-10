@@ -16,7 +16,6 @@ const TOOL_ALTERNATIVES: Record<string, string[]> = {
   file_read: ["file_search"],
   file_write: ["file_read"], // 降级为只读
   db_query: [], // 无替代
-  code_execute: ["calculator"], // 降级为简单计算
   calculator: [], // 无替代
   file_search: [], // 无替代
   get_current_time: [], // 无替代

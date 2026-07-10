@@ -65,15 +65,6 @@ export const circuitBreakerState = new Gauge({
   registers: [registry],
 });
 
-// ---- Voice Metrics ----
-
-export const voiceSessionsTotal = new Counter({
-  name: "voice_sessions_total",
-  help: "Total number of voice sessions created",
-  labelNames: ["status"],
-  registers: [registry],
-});
-
 // ---- Workflow Metrics (V6) ----
 
 export const workflowRunsTotal = new Counter({

@@ -1,25 +1,8 @@
 // BullMQ job processors — extracted for testability
 // These are imported by worker.ts to register with BullMQ Workers
 import type { Job } from "bullmq";
-import type {
-  MemoryExtractionJobData,
-  KnowledgeIngestionJobData,
-} from "./queues.js";
+import type { KnowledgeIngestionJobData } from "./queues.js";
 import { logger } from "@agentforge/logger";
-
-/**
- * Process a memory extraction job（长期记忆已移除，no-op）。
- * 保留函数签名以维持 API 兼容性，不再执行实际提取逻辑。
- */
-export async function processMemoryExtraction(
-  job: Job<MemoryExtractionJobData>,
-) {
-  logger.info(
-    { jobId: job.id, userId: job.data.userId },
-    "Memory extraction job skipped（长期记忆已移除，no-op）",
-  );
-  return { extractedCount: 0 };
-}
 
 /**
  * Process a knowledge ingestion job.

@@ -13,8 +13,6 @@ import { agentRuntimeRoutes } from "./routes/agent-runtime.js";
 import { toolRoutes } from "./routes/tools.js";
 import { diagnosisRoutes } from "./routes/diagnosis.js";
 import { agentRoutes } from "./routes/agent.js";
-import { voiceRoutes } from "./routes/voice.js";
-import { videoRoutes } from "./routes/video.js";
 import { workflowRoutes } from "./routes/workflows.js";
 import { teamRoutes } from "./routes/teams.js";
 import { debugDiagnosisRoutes } from "./routes/debug-diagnosis.js";
@@ -61,8 +59,6 @@ export async function createApp() {
   app.route("/", toolRoutes);         // /api/tools
   app.route("/", diagnosisRoutes);    // /api/diagnosis/query
   app.route("/", agentRoutes);        // /api/agent/*, /api/agent-sessions/*
-  app.route("/", voiceRoutes);        // /api/voice/*, WS /api/voice/stream
-  app.route("/", videoRoutes);        // /api/video/*, WS /api/video/stream
   app.route("/", workflowRoutes);     // /api/workflows/*, /api/workflows/runs/*
   app.route("/", teamRoutes);         // /api/teams/*, /api/teams/runs/*
   app.route("/", debugDiagnosisRoutes); // /debug/diagnosis (public debug page)

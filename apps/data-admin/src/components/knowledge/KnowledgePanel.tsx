@@ -66,12 +66,6 @@ interface KnowledgeSearchResult {
   docTitle: string;
 }
 
-interface GraphStats {
-  available: boolean;
-  nodeCount: number;
-  relationCount: number;
-}
-
 interface KnowledgeStats {
   knowledge_bases: number;
   documents: number;
@@ -178,7 +172,6 @@ export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
 
   // Infrastructure stats state
   const [stats, setStats] = useState<KnowledgeStats | null>(null);
-  const [graphStats, setGraphStats] = useState<GraphStats | null>(null);
 
   // ── Data fetching ──────────────────────────
 
@@ -212,16 +205,8 @@ export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
 
   const fetchStats = useCallback(async () => {
     try {
-      const [knowStats, graph] = await Promise.all([
-        apiGet<KnowledgeStats>("/stats"),
-        apiGet<GraphStats>("/graph/stats").catch(() => ({
-          available: false,
-          nodeCount: 0,
-          relationCount: 0,
-        })),
-      ]);
+      const knowStats = await apiGet<KnowledgeStats>("/stats");
       setStats(knowStats);
-      setGraphStats(graph);
     } catch {
       // Stats fetch failure is silent — infrastructure indicators show red
     }
@@ -946,19 +931,6 @@ export function KnowledgePanel({ viewingDoc, onViewDoc }: KnowledgePanelProps) {
                 : " 离线"
               : ""}
           </span>
-
-          {/* Neo4j graph stats */}
-          {graphStats?.available ? (
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-green-500" />
-              Neo4j {graphStats.nodeCount} 节点 / {graphStats.relationCount} 关系
-            </span>
-          ) : (
-            <span className="inline-flex items-center gap-1">
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-red-500" />
-              Neo4j 离线
-            </span>
-          )}
 
           {/* Chunk stats */}
           {stats?.totalChunks != null && (

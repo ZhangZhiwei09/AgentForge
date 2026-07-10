@@ -1009,19 +1009,3 @@ knowledgeManagementRoutes.get("/api/knowledge/stats", async (c) => {
     retrieval: retrievalStats,
   });
 });
-
-// GET /api/knowledge/graph/stats —— 获取知识图谱统计
-knowledgeManagementRoutes.get("/api/knowledge/graph/stats", async (c) => {
-  const { getGraphStats } = await import("../../../services/neo4j.js");
-  try {
-    const stats = await getGraphStats();
-    return c.json({
-      available: stats !== null,
-      nodeCount: stats?.nodeCount ?? 0,
-      relationCount: stats?.relationCount ?? 0,
-    });
-  } catch (e) {
-    logger.warn(e, "Failed to get graph stats");
-    return c.json({ available: false, nodeCount: 0, relationCount: 0 });
-  }
-});
