@@ -24,11 +24,6 @@ describe("getAlternativeTools", () => {
     expect(alts).toContain("file_read");
   });
 
-  it("returns calculator alternative for code_execute", () => {
-    const alts = getAlternativeTools("code_execute");
-    expect(alts).toContain("calculator");
-  });
-
   it("returns empty array for tools with no alternatives", () => {
     expect(getAlternativeTools("get_current_time")).toEqual([]);
     expect(getAlternativeTools("calculator")).toEqual([]);

@@ -33,65 +33,21 @@ const TeamDefinitionVariableSchema = z.object({
   description: z.string().optional(),
 });
 
-const TeamDebateConfigSchema = z.object({
-  question: z.string().min(1),
-  proAgent: z.string().min(1),
-  conAgent: z.string().min(1),
-  judgeAgent: z.string().min(1),
-  maxRounds: z.number().int().min(1).max(10).default(3),
-});
-
 export const TeamDefinitionSchema = z
   .object({
     name: z.string().min(1).max(200),
     version: z.string().min(1),
     description: z.string().optional(),
-    collaborationMode: z.enum(["orchestrator", "peer", "debate", "diagnosis"]),
+    collaborationMode: z.enum(["diagnosis"]),
     agents: z.array(AgentRoleSchema).min(2).max(10),
-    orchestrator: z.string().optional(),
-    debate: TeamDebateConfigSchema.optional(),
     maxTotalIterations: z.number().int().min(1).max(500).default(50),
     stopCondition: z
-      .enum(["all_done", "orchestrator_decides", "consensus"])
+      .enum(["all_done", "consensus"])
       .optional(),
     timeout: z.number().int().min(10).max(3600).optional(),
     onFailure: z.enum(["stop", "continue", "retry"]).optional(),
     variables: z.record(z.string(), TeamDefinitionVariableSchema).optional(),
   })
-  .refine(
-    (def) => {
-      // Orchestrator mode: at least one agent must have canDelegate=true
-      if (def.collaborationMode === "orchestrator") {
-        return def.agents.some((a) => a.canDelegate);
-      }
-      return true;
-    },
-    {
-      message:
-        "Orchestrator mode requires at least one agent with canDelegate=true",
-      path: ["agents"],
-    },
-  )
-  .refine(
-    (def) => {
-      // Debate mode: must have proAgent, conAgent, judgeAgent defined in debate config
-      if (def.collaborationMode === "debate") {
-        if (!def.debate) return false;
-        const agentNames = def.agents.map((a) => a.name);
-        return (
-          agentNames.includes(def.debate.proAgent) &&
-          agentNames.includes(def.debate.conAgent) &&
-          agentNames.includes(def.debate.judgeAgent)
-        );
-      }
-      return true;
-    },
-    {
-      message:
-        "Debate mode requires debate config with valid pro/con/judge agent names",
-      path: ["debate"],
-    },
-  )
   .refine(
     (def) => {
       // Agent names must be unique

@@ -22,7 +22,6 @@ describe("ToolRegistry", () => {
     // New P1-6 tools
     expect(names).toContain("db_query");
     expect(names).toContain("web_fetch");
-    expect(names).toContain("code_execute");
     expect(names.length).toBeGreaterThanOrEqual(10);
   });
 
@@ -94,17 +93,6 @@ describe("ToolRegistry", () => {
       expect(t.definition.function.name).toBeTruthy();
       expect(typeof t.execute).toBe("function");
     });
-  });
-
-  it("should have sandbox field on code_execute tool", () => {
-    const all = toolRegistry.getAll();
-    const codeExec = all.find(
-      (t) => t.definition.function.name === "code_execute",
-    );
-    expect(codeExec).toBeDefined();
-    expect(codeExec!.sandbox).toBe(true);
-    expect(codeExec!.riskLevel).toBe("destructive");
-    expect(codeExec!.requireApproval).toBe(true);
   });
 
   it("should have correct metadata on db_query tool", () => {

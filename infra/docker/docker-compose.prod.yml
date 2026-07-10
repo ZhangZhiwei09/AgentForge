@@ -5,7 +5,6 @@
 # 前置条件：
 #   1. 构建镜像：docker build -f infra/docker/Dockerfile.server -t agentforge-server:latest .
 #              docker build -f infra/docker/Dockerfile.customer-service -t agentforge-customer-service:latest .
-#              docker build -f infra/docker/Dockerfile.sandbox -t agentforge-sandbox:latest .
 #   2. 设置环境变量：复制 .env.example 为 .env.production 并填入实际密钥
 #   3. 运行数据库迁移：pnpm --filter @agentforge/database db:migrate
 
@@ -117,9 +116,6 @@ services:
       LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-not-used}
       LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-not-used}
       OTEL_ENABLED: ${OTEL_ENABLED:-false}
-      # 语音/视频（按需启用）
-      VOICE_ENABLED: ${VOICE_ENABLED:-true}
-      VIDEO_ENABLED: ${VIDEO_ENABLED:-true}
       VIDEO_MODEL: ${VIDEO_MODEL:-gpt-4o}
     depends_on:
       db:
@@ -160,15 +156,6 @@ services:
         limits:
           memory: 128M
           cpus: "0.5"
-
-  # ── 代码执行沙箱（仅构建镜像，不常驻运行） ──
-  sandbox:
-    image: agentforge-sandbox:latest
-    command: ["echo", "Sandbox image ready"]
-    deploy:
-      resources:
-        limits:
-          memory: 256M
 
 volumes:
   pgdata:

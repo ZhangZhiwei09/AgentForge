@@ -1,5 +1,4 @@
-// TeamService — main orchestrator for V9 Multi-Agent System
-// Manages team CRUD, execution, and SSE streaming
+// TeamService — manages team CRUD, execution, and SSE streaming
 import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { logger } from "@agentforge/logger";

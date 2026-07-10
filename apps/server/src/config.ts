@@ -44,21 +44,8 @@ export const settings = {
   port: parseInt(process.env.PORT || "8000", 10),
   // Redis 连接 URL（可选，用于限流存储等场景）
   redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
-  // 代码执行沙箱配置（Docker 容器中执行 Python/JavaScript）
-  sandboxImage: process.env.SANDBOX_IMAGE || "agentforge-sandbox:latest",
-  sandboxTimeoutSec: parseInt(process.env.SANDBOX_TIMEOUT_SEC || "60", 10),
-  sandboxMemoryMb: parseInt(process.env.SANDBOX_MEMORY_MB || "256", 10),
-  sandboxCpuShares: parseInt(process.env.SANDBOX_CPU_SHARES || "512", 10), // 0.5 CPU
-  // 语音 Agent (V5) — 复用 openaiApiKey，无需额外密钥
-  voiceEnabled: process.env.VOICE_ENABLED !== "false",
-  asrModel: process.env.ASR_MODEL || "whisper-1",
-  ttsModel: process.env.TTS_MODEL || "tts-1",
-  ttsVoice: process.env.TTS_VOICE || "alloy",
-  ttsSpeed: parseFloat(process.env.TTS_SPEED || "1.0"),
-  // 视频对话 Agent (V11) — 复用 openaiApiKey，使用 GPT-4o 等多模态模型
-  videoEnabled: process.env.VIDEO_ENABLED !== "false",
+  // 视觉模型（VideoParser / ImageParser 知识库文档解析使用）
   videoModel: process.env.VIDEO_MODEL || "gpt-4o-mini",
-  videoVisionFps: parseInt(process.env.VIDEO_VISION_FPS || "1", 10),
   // Langfuse LLM Observability（自托管）
   langfuseEnabled: process.env.LANGFUSE_ENABLED !== "false",
   langfuseBaseUrl: process.env.LANGFUSE_BASE_URL || "http://localhost:3000",
@@ -110,11 +97,6 @@ export const settings = {
   kbDedupeSimilarityThreshold: parseFloat(
     process.env.KB_DEDUPE_SIMILARITY_THRESHOLD || "0.82",
   ),
-
-  // ── Neo4j ────────────────────────────────────────────
-  neo4jUri: process.env.NEO4J_URI || "bolt://localhost:7687",
-  neo4jUser: process.env.NEO4J_USER || "neo4j",
-  neo4jPassword: process.env.NEO4J_PASSWORD || "agentforge123",
 
   // ── MinIO ────────────────────────────────────────────
   minioEndpoint: process.env.MINIO_ENDPOINT || "localhost",

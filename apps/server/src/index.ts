@@ -1,8 +1,5 @@
 // 应用入口 —— 启动服务器、连接数据库、初始化种子数据
 import { serve } from "@hono/node-server";
-import type { Server } from "http";
-import type { IncomingMessage } from "http";
-import type { Socket } from "net";
 import { createApp } from "./app.js";
 import { settings } from "./config.js";
 import { prisma } from "./db.js";
@@ -67,13 +64,7 @@ async function main() {
   const httpServer = serve({
     fetch: app.fetch,
     port: settings.port,
-  }) as Server;
-
-  // WebSocket upgrades handled at the HTTP server level to avoid double-write:
-  // Hono route handlers call wss.handleUpgrade → writes 101 to raw socket,
-  // then Hono adapter writes another 101 → "Invalid frame header".
-  // server.on('upgrade') fires before Hono, so no duplicate response.
-  setupWebSocketUpgrades(httpServer);
+  });
 
   logger.info({ port: settings.port }, "Server listening");
 
@@ -85,25 +76,6 @@ async function main() {
   };
   process.on("SIGTERM", gracefulShutdown);
   process.on("SIGINT", gracefulShutdown);
-}
-
-// ---- WebSocket Upgrade Handler (server-level, no Hono response cycle) ----
-
-async function setupWebSocketUpgrades(httpServer: Server): Promise<void> {
-  httpServer.on(
-    "upgrade",
-    (request: IncomingMessage, socket: Socket, head: Buffer) => {
-      const url = new URL(
-        request.url || "/",
-        `http://${request.headers.host || "localhost"}`,
-      );
-
-      // Other WebSocket paths (/api/voice/stream, /api/video/stream) are
-      // handled by their respective Hono routes. Destroy the socket so
-      // the Hono handler can pick it up via the normal request flow.
-      socket.destroy();
-    },
-  );
 }
 
 // 顶层 await 包装：用 .catch 兜底未捕获错误

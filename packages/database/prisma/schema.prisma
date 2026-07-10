@@ -76,9 +76,6 @@ model Conversation {
   agentSessions  AgentSession[]
   ratings        SatisfactionRating[]
   approvals      AgentApproval[]
-  voiceSessions  VoiceSession[]
-  videoSessions  VideoSession[]
-
   @@index([sessionId], map: "ix_conversations_session_id")
   @@index([userId], map: "ix_conversations_user_id")
   @@index([userId, updatedAt], map: "ix_conversations_user_updated")
@@ -403,43 +400,6 @@ model SatisfactionRating {
   @@map("satisfaction_ratings")
 }
 
-model VoiceSession {
-  id               String       @id @db.VarChar(36)
-  conversationId   String       @map("conversation_id") @db.VarChar(36)
-  status           String       @default("active") @db.VarChar(20)
-  audioDurationSec Int          @default(0) @map("audio_duration_sec")
-  asrTokenCount    Int          @default(0) @map("asr_token_count")
-  ttsCharCount     Int          @default(0) @map("tts_char_count")
-  transcript       Json         @default("[]")
-  voice            String?      @db.VarChar(32)
-  createdAt        DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt        DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId], map: "ix_voice_sessions_conversation_id")
-  @@map("voice_sessions")
-}
-
-model VideoSession {
-  id                String       @id @db.VarChar(36)
-  conversationId    String       @map("conversation_id") @db.VarChar(36)
-  status            String       @default("active") @db.VarChar(20)
-  videoDurationSec  Int          @default(0) @map("video_duration_sec")
-  audioDurationSec  Int          @default(0) @map("audio_duration_sec")
-  asrTokenCount     Int          @default(0) @map("asr_token_count")
-  ttsCharCount      Int          @default(0) @map("tts_char_count")
-  visionFramesCount Int          @default(0) @map("vision_frames_count")
-  transcript        Json         @default("[]")
-  agentConfig       Json?        @map("agent_config")
-  endedAt           DateTime?    @map("ended_at") @db.Timestamptz(6)
-  createdAt         DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
-  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-
-  @@index([conversationId], map: "ix_video_sessions_conversation_id")
-  @@map("video_sessions")
-}
-
 model Workflow {
   id          String   @id @db.VarChar(36)
   userId      String   @map("user_id") @db.VarChar(36)
@@ -607,39 +567,6 @@ model AppGenRun {
 
   @@index([projectId])
   @@map("app_gen_runs")
-}
-
-model KnowledgeGraphEntity {
-  id        String   @id @db.VarChar(36)
-  name      String   @db.VarChar(500)
-  type      String   @db.VarChar(100)
-  kbId      String   @map("kb_id") @db.VarChar(36)
-  docIds    String[] @map("doc_ids")
-  aliases   String[]
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  @@unique([name, type], map: "ix_knowledge_graph_entities_name_type")
-  @@index([kbId], map: "ix_knowledge_graph_entities_kb_id")
-  @@index([type], map: "ix_knowledge_graph_entities_type")
-  @@map("knowledge_graph_entities")
-}
-
-model KnowledgeGraphRelation {
-  id            String   @id @db.VarChar(36)
-  fromEntityId  String   @map("from_entity_id") @db.VarChar(36)
-  toEntityId    String   @map("to_entity_id") @db.VarChar(36)
-  relType       String   @map("rel_type") @db.VarChar(100)
-  confidence    Float
-  sourceChunkId String   @map("source_chunk_id") @db.VarChar(36)
-  docId         String   @map("doc_id") @db.VarChar(36)
-  evidence      String?  @db.VarChar(2000)
-  createdAt     DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-
-  @@index([fromEntityId], map: "ix_kg_relations_from")
-  @@index([toEntityId], map: "ix_kg_relations_to")
-  @@index([sourceChunkId], map: "ix_kg_relations_chunk")
-  @@index([docId], map: "ix_kg_relations_doc")
-  @@map("knowledge_graph_relations")
 }
 
 model alembic_version {

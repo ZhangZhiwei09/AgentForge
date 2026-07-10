@@ -38,7 +38,7 @@ export class MemoryCompressor {
    *
    * 评分规则：
    *   +5: respond（最终回复）—— 最优先保留
-   *   +3: 关键工具调用（file_read, db_query, web_search, web_fetch, http_request, code_execute）
+   *   +3: 关键工具调用（file_read, db_query, web_search, web_fetch, http_request）
    *   +3: 计划变更（analysis/plan 中包含策略调整信号）
    *   +2: ask_user（需要用户澄清）
    *   +1: 包含错误/降级的步骤
@@ -229,7 +229,6 @@ export class MemoryCompressor {
       "web_search",
       "web_fetch",
       "http_request",
-      "code_execute",
       "file_search",
     ];
     return critical.includes(toolName);

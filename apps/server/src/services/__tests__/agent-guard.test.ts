@@ -184,8 +184,8 @@ describe("AgentGuardService", () => {
   // ---- Integrated Guard ----
   describe("guardToolCall", () => {
     it("blocks denied tools", () => {
-      const guard = new AgentGuardService({ deniedTools: ["code_execute"] });
-      const result = guard.guardToolCall("code_execute", {}, 0, 0, "gpt-4o");
+      const guard = new AgentGuardService({ deniedTools: ["calculator"] });
+      const result = guard.guardToolCall("calculator", {}, 0, 0, "gpt-4o");
       expect(result.allowed).toBe(false);
       expect(result.blockReason).toContain("禁用");
     });

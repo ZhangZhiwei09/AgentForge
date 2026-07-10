@@ -576,17 +576,6 @@ export class KnowledgeIngestionService {
           },
         });
 
-        // V3.0: 异步触发图谱抽取（不阻塞文档完成状态）
-        await prisma.knowledgeDocument.update({
-          where: { id: docId },
-          data: {
-            processingDetail: this.setProgress("graph_extracting", 0, 1, "正在构建知识图谱..."),
-          },
-        });
-        this.triggerGraphExtraction(docId, kbId, chunks, sourceType).catch(
-          (e) => logger.warn({ docId, error: String(e) }, "Graph extraction trigger failed"),
-        );
-
         logger.info(
           { docId, chunks: chunks.length, quality: qualityLabel, sourceType },
           "Document processed by worker",
@@ -607,54 +596,6 @@ export class KnowledgeIngestionService {
         progress: { phase: "failed", progress: 0, total: 1, message: `处理失败：${errorMessage}` },
       });
       throw e; // 重新抛出让 BullMQ 重试
-    }
-  }
-
-  // V3.0: 触发图谱抽取（异步，不阻塞主流程）
-  private async triggerGraphExtraction(
-    docId: string,
-    kbId: string,
-    chunks: string[],
-    sourceType?: string,
-  ): Promise<void> {
-    try {
-      const { getGraphExtractionService } = await import(
-        "./graph-extraction.js"
-      );
-      const extractor = getGraphExtractionService();
-
-      // 查询已创建的 chunk IDs
-      const chunkRecords = await prisma.knowledgeChunk.findMany({
-        where: { documentId: docId },
-        select: { id: true, content: true },
-        orderBy: { chunkIndex: "asc" },
-      });
-
-      // 逐 chunk 抽取（控制并发，一次处理 3 个）
-      const CONCURRENCY = 3;
-      for (let i = 0; i < chunkRecords.length; i += CONCURRENCY) {
-        const batch = chunkRecords.slice(i, i + CONCURRENCY);
-        await Promise.all(
-          batch.map((chunk) =>
-            extractor
-              .extractFromChunk(chunk.id, chunk.content, kbId, docId)
-              .catch((e) =>
-                logger.warn(
-                  { chunkId: chunk.id },
-                  e,
-                  "Individual chunk graph extraction failed",
-                ),
-              ),
-          ),
-        );
-      }
-
-      logger.info(
-        { docId, chunksProcessed: chunkRecords.length },
-        "Graph extraction triggered",
-      );
-    } catch (e) {
-      logger.warn({ docId, error: String(e) }, "Graph extraction trigger failed");
     }
   }
 

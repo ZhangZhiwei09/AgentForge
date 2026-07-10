@@ -5,13 +5,6 @@ import { getRedisConnection } from "./connection.js";
 
 // ---- Job Data Types ----
 
-export interface MemoryExtractionJobData {
-  messages: Array<{ role: string; content: string }>;
-  userId: string;
-  conversationId: string;
-  providerName: string;
-}
-
 export interface KnowledgeIngestionJobData {
   docId: string;
   kbId: string;
@@ -19,7 +12,6 @@ export interface KnowledgeIngestionJobData {
 
 // ---- Queue Names ----
 
-export const MEMORY_EXTRACTION_QUEUE = "memory-extraction";
 export const KNOWLEDGE_INGESTION_QUEUE = "knowledge-ingestion";
 
 // ---- Queue Lazy Singletons ----
@@ -27,8 +19,6 @@ export const KNOWLEDGE_INGESTION_QUEUE = "knowledge-ingestion";
 // Use a symbol to distinguish "not yet initialized" from "initialized as null (Redis down)"
 const UNINITIALIZED = Symbol("uninitialized");
 
-let _memoryQueue: Queue<MemoryExtractionJobData> | null | typeof UNINITIALIZED =
-  UNINITIALIZED;
 let _ingestionQueue:
   | Queue<KnowledgeIngestionJobData>
   | null
@@ -53,15 +43,6 @@ function createQueue<T>(name: string): Queue<T> | null {
   }
 }
 
-export function getMemoryQueue(): Queue<MemoryExtractionJobData> | null {
-  if (_memoryQueue === UNINITIALIZED) {
-    _memoryQueue = createQueue<MemoryExtractionJobData>(
-      MEMORY_EXTRACTION_QUEUE,
-    );
-  }
-  return _memoryQueue as Queue<MemoryExtractionJobData> | null;
-}
-
 export function getIngestionQueue(): Queue<KnowledgeIngestionJobData> | null {
   if (_ingestionQueue === UNINITIALIZED) {
     _ingestionQueue = createQueue<KnowledgeIngestionJobData>(
@@ -73,6 +54,5 @@ export function getIngestionQueue(): Queue<KnowledgeIngestionJobData> | null {
 
 /** For testing: reset queue instances */
 export function _resetQueues(): void {
-  _memoryQueue = UNINITIALIZED;
   _ingestionQueue = UNINITIALIZED;
 }
