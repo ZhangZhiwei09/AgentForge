@@ -1,3 +1,6 @@
+// ── Markdown 渲染器 ──
+// 基于 react-markdown 的轻量包装，提供代码高亮和 GFM 支持
+
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import rehypeRaw from "rehype-raw";
@@ -22,3 +25,5 @@ export function MarkdownRenderer({ content }: Props) {
     </div>
   );
 }
+
+export default MarkdownRenderer;

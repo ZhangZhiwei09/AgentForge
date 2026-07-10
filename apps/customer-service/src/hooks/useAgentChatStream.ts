@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { generateUUID } from "@/lib/uuid";
 import { isAbortError } from "@/lib/abort-utils";
-import { extractCardBlocks } from "@/components/markdown/card-parser";
+import { extractCardBlocks, dedupeBlocks } from "@agentforge/cui";
 import type {
   KnowledgeResult,
   ContentBlock,
@@ -334,7 +334,7 @@ export function useAgentChatStream() {
 
                 const { blocks: parsedBlocks } =
                   extractCardBlocks(streamContent);
-                const allBlocks = deduplicateBlocks([
+                const allBlocks = dedupeBlocks([
                   ...contentBlocks,
                   ...parsedBlocks.map((b) => b.block),
                 ]);
@@ -412,23 +412,6 @@ export function useAgentChatStream() {
     switchSession,
     abort,
   };
-}
-
-function deduplicateBlocks(blocks: ContentBlock[]): ContentBlock[] {
-  const seen = new Set<string>();
-  return blocks.filter((b) => {
-    const key = blockKey(b);
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function blockKey(block: ContentBlock): string {
-  if (block.type === "action_card") {
-    return `action:${(block.data as unknown as Record<string, unknown>).title}`;
-  }
-  return `${block.type}:${JSON.stringify((block as unknown as Record<string, unknown>).data || block)}`;
 }
 
 /** Extract a human-readable conclusion string from diagnosis_completed output */

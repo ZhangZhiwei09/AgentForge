@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractCardBlocks, hasUnclosedFence } from "../card-parser";
+import { extractCardBlocks, hasUnclosedFence } from "../parsing/card-parser";
 import type { ContentBlock } from "@agentforge/shared-types";
 
 /** Helper: assert block has data field (exclude TextBlock) */
