@@ -11,9 +11,8 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { QuickReplies } from "./QuickReplies";
-import { RichMessageRenderer } from "@/components/markdown/RichMessageRenderer";
-import { extractCardBlocks } from "@/components/markdown/card-parser";
-import { parseSSEChunk, dedupeBlocks } from "@/lib/sse-guards";
+import { RichMessageRenderer, extractCardBlocks, dedupeBlocks } from "@agentforge/cui";
+import { parseSSEChunk } from "@/lib/sse-guards";
 import type {
   KnowledgeResult,
   CSMessage,

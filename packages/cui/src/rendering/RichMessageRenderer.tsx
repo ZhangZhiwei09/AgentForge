@@ -10,9 +10,9 @@ import {
   extractCardBlocks,
   hasUnclosedFence,
   tryParseStreamingCard,
-} from "./card-parser";
-import { ActionCard } from "./cards/ActionCard";
-import type { ContentBlock } from "@agentforge/shared-types";
+} from "../parsing/card-parser";
+import { ActionCard, OrderCard, PolicyCard, StatusCard, TableCard } from "../cards";
+import type { ContentBlock, ActionCardData, OrderCardData, PolicyCardData, StatusCardData, TableBlockData } from "@agentforge/shared-types";
 
 interface Props {
   content: string;
@@ -77,29 +77,52 @@ function renderStreamingCard(
   if (!streaming) return null;
 
   const { type, partialData } = streaming;
-  const key = `streaming-card`;
+  const key = "streaming-card";
 
-  // 将部分数据包装为 ContentBlock 传给卡片组件
+  // 将部分数据包装为对应卡片组件的 props
   // 卡片组件通过 isStreaming prop 显示骨架
   switch (type) {
     case "action":
       return (
-        <ActionCard key={key} data={partialData as any} isStreaming={true} />
+        <ActionCard
+          key={key}
+          // partialData 来自流式截断 JSON 的宽松解析，运行时无法保证类型安全，需显式断言
+          data={partialData as unknown as ActionCardData}
+          isStreaming={true}
+        />
+      );
+    case "order":
+      return (
+        <OrderCard
+          key={key}
+          data={partialData as unknown as OrderCardData}
+          isStreaming={true}
+        />
+      );
+    case "policy":
+      return (
+        <PolicyCard
+          key={key}
+          data={partialData as unknown as PolicyCardData}
+          isStreaming={true}
+        />
+      );
+    case "status":
+      return (
+        <StatusCard
+          key={key}
+          data={partialData as unknown as StatusCardData}
+          isStreaming={true}
+        />
       );
     case "table":
-      // 表格回退到 Markdown 渲染（部分行）
-      if (partialData.headers && partialData.rows) {
-        return (
-          <MarkdownRenderer
-            key={key}
-            content={buildTableMarkdown(
-              partialData.headers as string[],
-              partialData.rows as string[][],
-            )}
-          />
-        );
-      }
-      return null;
+      return (
+        <TableCard
+          key={key}
+          data={partialData as unknown as TableBlockData}
+          isStreaming={true}
+        />
+      );
     default:
       return null;
   }
@@ -132,24 +155,23 @@ function renderBlock(block: ContentBlock, key: string): React.ReactNode {
   switch (block.type) {
     case "action_card":
       return <ActionCard key={key} data={block.data} />;
+    case "order_card":
+      return <OrderCard key={key} data={block.data} />;
+    case "policy_card":
+      return <PolicyCard key={key} data={block.data} />;
+    case "status_card":
+      return <StatusCard key={key} data={block.data} />;
     case "table":
+      return <TableCard key={key} data={block.data} />;
+    case "text":
+    default:
       return (
         <MarkdownRenderer
           key={key}
-          content={buildTableMarkdown(block.data.headers, block.data.rows)}
+          content={(block as { content: string }).content}
         />
       );
-    case "text":
-    default:
-      return <MarkdownRenderer key={key} content={(block as { content: string }).content} />;
   }
-}
-
-function buildTableMarkdown(headers: string[], rows: string[][]): string {
-  const headerLine = `| ${headers.join(" | ")} |`;
-  const sepLine = `| ${headers.map(() => "---").join(" | ")} |`;
-  const rowLines = rows.map((row) => `| ${row.join(" | ")} |`);
-  return [headerLine, sepLine, ...rowLines].join("\n");
 }
 
 export default RichMessageRenderer;

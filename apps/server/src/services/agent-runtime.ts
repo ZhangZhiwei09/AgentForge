@@ -32,6 +32,7 @@ import { HumanAgent } from "./agent-runtime/human-agent.js";
 import { DiagnosisRouteAgent } from "./agent-runtime/diagnosis-agent.js";
 
 import { injectMemories } from "./agent-runtime/knowledge-context.js";
+import { AGENTFORGE_PERSONA } from "@agentforge/shared-prompts";
 
 import type {
   RouteName,
@@ -89,23 +90,22 @@ const CONVERSATIONAL_RULES: ConversationalRule[] = [
       /^(你好|hi|hello|嗨|您好|早上好|下午好|晚上好|在吗|在不在)[\s!！。.,，]*$/,
     response: {
       answer:
-        "您好！欢迎来到 AgentForge 智能助手 😊 请问有什么可以帮助您的？",
-      suggestions: ["知识库查询", "任务执行", "联系人工客服"],
+        "你好，我是 AgentForge 智能助手，我能查询知识库、诊断系统故障。需要什么帮助？",
+      suggestions: ["查询知识库", "诊断系统故障"],
     },
   },
   {
     pattern:
       /^(谢谢|感谢|多谢|谢谢你|谢谢您|thanks|thank you|3q)[\s!！。.,，]*$/,
     response: {
-      answer:
-        "不客气！很高兴能帮到您。如果后续还有任何问题，随时联系我。祝您生活愉快！",
+      answer: "不客气。还有其他问题可以随时找我。",
       suggestions: [],
     },
   },
   {
     pattern: /^(再见|拜拜|Bye|bye|88|下次见|回头见)[\s!！。.,，]*$/,
     response: {
-      answer: "再见！感谢您的咨询，祝您生活愉快。如有需要，欢迎随时回来！",
+      answer: "再见。",
       suggestions: [],
     },
   },
@@ -133,7 +133,7 @@ export class AgentRuntimeService {
     this.modelId = modelId || null;
     this.router = new QueryRouter(modelId);
     this.safetyAgent = new SafetyAgent();
-    this.chatAgent = new ChatAgent();
+    this.chatAgent = new ChatAgent(AGENTFORGE_PERSONA);
     this.agentExecutor = new AgentExecutor();
     this.humanAgent = new HumanAgent();
     this.diagnosisAgent = new DiagnosisRouteAgent();

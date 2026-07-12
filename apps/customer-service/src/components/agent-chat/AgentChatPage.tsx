@@ -9,13 +9,12 @@ import {
 } from "lucide-react";
 import { useAgentChatStream } from "@/hooks/useAgentChatStream";
 import type { AgentMessage } from "@/hooks/useAgentChatStream";
-import { RichMessageRenderer } from "@/components/markdown/RichMessageRenderer";
+import { RichMessageRenderer, DiagnosisCard } from "@agentforge/cui";
 import { SessionList } from "./SessionList";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { QuickReplies } from "@/components/customer-chat/QuickReplies";
 import { SatisfactionRating } from "@/components/customer-chat/SatisfactionRating";
 import { DebugPanel } from "@/components/debug/DebugPanel";
-import { DiagnosisCard } from "@/components/chat/DiagnosisCard";
 import { useChatStore } from "@/stores/chat";
 
 export function AgentChatPage() {

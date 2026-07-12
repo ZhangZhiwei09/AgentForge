@@ -1,5 +1,6 @@
-// ChatAgent —— 处理社交对话（问候、自我介绍、感谢、道别、能力询问）
-// 用聚焦的对话 prompt + jsonMode，不查知识库，不调工具
+// ChatAgent —— 处理社交对话（问候、自我介绍、能力询问）
+// 角色定义从 @agentforge/shared-prompts 的 AGENTFORGE_PERSONA 加载
+// 不查知识库，不调工具，只做对话路由
 // 天然多语言：LLM 理解 "Who are you?"、"你是谁"、"あなたは誰？"
 
 import { z } from "zod";
@@ -10,6 +11,11 @@ import { extractJSONFromLLMResponse } from "../../lib/json-utils.js";
 import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
 import type { ExecutionScope } from "../../runtime/scope.js";
 import { streamTokens } from "./types.js";
+import {
+  AGENTFORGE_PERSONA,
+  buildChatSystemPrompt,
+  type Persona,
+} from "@agentforge/shared-prompts";
 
 // ── Zod Schema ──
 
@@ -18,36 +24,18 @@ const ChatResponseSchema = z.object({
   suggestions: z.array(z.string().max(50)).max(3).default([]),
 });
 
-// ── Chat System Prompt ──
-
-const CHAT_SYSTEM_PROMPT = `你是 AgentForge 平台的智能助手，当前正在进行基本社交对话。
-
-你的身份：
-- 你是 AgentForge 智能助手，由 AI 驱动
-- 你可以帮助用户解答各类问题，包括知识查询、任务执行等
-
-## 规则
-1. 自然友好地回复，不需要引用知识库
-2. 绝对禁止编造任何业务政策、价格、流程等事实信息
-3. 如果用户问你能做什么，请简洁列出你的能力范围（使用无序列表格式）
-4. 如果用户的问题超出社交范围（涉及具体业务），引导他们提出具体问题
-5. 回复简洁礼貌，1-3 句话为佳
-6. 多语言支持：用户用什么语言问候，你就用什么语言回复
-7. 可以适当使用 Markdown 格式（**粗体**、列表）让回复更有层次
-
-## 输出格式
-严格按照以下 JSON 格式输出，不要任何前言后记：
-{"answer": "你的回答文本（可含 Markdown 格式）", "suggestions": ["建议追问1", "建议追问2"]}
-
-- answer: 给用户的回答，1-2000 字符
-- suggestions: 2-3 个建议后续问题，每个不超过 50 字符。无法生成时写空数组 []`;
-
 // ═══════════════════════════════════════════════════════
 // ChatAgent
 // ═══════════════════════════════════════════════════════
 
 export class ChatAgent implements RouteAgent {
   readonly route = "CHAT" as const;
+  private systemPrompt: string;
+
+  constructor(persona?: Persona) {
+    const p = persona ?? AGENTFORGE_PERSONA;
+    this.systemPrompt = buildChatSystemPrompt(p);
+  }
 
   async *execute(
     context: RouteContext,
@@ -57,6 +45,7 @@ export class ChatAgent implements RouteAgent {
       resolvedModel,
       providerName,
       userMessage,
+      history,
       sessionId,
       assistantMsgId,
     } = context;
@@ -82,12 +71,17 @@ export class ChatAgent implements RouteAgent {
 
     try {
       const provider = getProvider(providerName);
-      const messages: ChatMessage[] = [{ role: "user", content: userMessage }];
+
+      // 构建消息列表：传入最近对话历史 + 当前用户消息
+      const messages: ChatMessage[] = [
+        ...(history ?? []).slice(-6), // 最近 3 轮对话
+        { role: "user" as const, content: userMessage },
+      ];
 
       const result = await provider.chatSync(
         messages,
         resolvedModel,
-        CHAT_SYSTEM_PROMPT,
+        this.systemPrompt,
         0.3,
         512,
         true, // jsonMode
@@ -99,12 +93,12 @@ export class ChatAgent implements RouteAgent {
         suggestions = parsed.suggestions;
       } else {
         // JSON 解析失败 → 使用原始文本
-        answer = result.content.trim() || "您好！有什么可以帮助您的吗？";
-        fallbackUsed = answer === "您好！有什么可以帮助您的吗？"; // 空内容兜底
+        answer = result.content.trim() || "你好，有什么可以帮助你的？";
+        fallbackUsed = answer === "你好，有什么可以帮助你的？"; // 空内容兜底
       }
     } catch (e) {
       logger.warn(e, "ChatAgent LLM call failed, using fallback");
-      answer = "您好！我是 AgentForge 智能助手，有什么可以帮助您的吗？";
+      answer = "我是 AgentForge 智能助手，我能查询知识库、诊断系统故障。请告诉我你需要什么帮助？";
       fallbackUsed = true;
     }
 

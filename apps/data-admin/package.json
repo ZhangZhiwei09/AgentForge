@@ -11,6 +11,7 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@agentforge/cui": "workspace:*",
     "@agentforge/sdk": "workspace:*",
     "@agentforge/shared-types": "workspace:*",
     "@agentforge/ui": "workspace:*",

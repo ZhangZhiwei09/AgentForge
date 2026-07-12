@@ -1,8 +1,8 @@
 import { useState, useRef, useCallback } from "react";
 import { generateUUID } from "@/lib/uuid";
 import { isAbortError } from "@/lib/abort-utils";
-import { parseSSEChunk, blockKey, dedupeBlocks } from "@/lib/sse-guards";
-import { extractCardBlocks } from "@/components/markdown/card-parser";
+import { parseSSEChunk } from "@/lib/sse-guards";
+import { extractCardBlocks, blockKey, dedupeBlocks } from "@agentforge/cui";
 import type {
   KnowledgeResult,
   CSMessage,

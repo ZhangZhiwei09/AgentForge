@@ -4,10 +4,13 @@
 // 支持快速通道（Phase 2/3 跳过）、升级通道、分歧/转人工等结果展示。
 
 import { Stethoscope, Loader2, CheckCircle2, Circle, ChevronRight } from "lucide-react";
+import { cn } from "../utils/cn";
 import type { DiagnosisProgress, DiagnosisPhase } from "@agentforge/shared-types";
 
 interface Props {
   diagnosis: DiagnosisProgress;
+  /** 覆写根容器 className */
+  className?: string;
 }
 
 const RESOLUTION_LABELS: Record<string, string> = {
@@ -26,11 +29,16 @@ const RESOLUTION_ICONS: Record<string, string> = {
   needs_human: "🆘",
 };
 
-export function DiagnosisCard({ diagnosis }: Props) {
+export function DiagnosisCard({ diagnosis, className }: Props) {
   const { status, phases, resolution, finalConclusion } = diagnosis;
 
   return (
-    <div className="my-2 rounded-xl border border-blue-200 bg-blue-50/60 shadow-sm">
+    <div
+      className={cn(
+        "my-2 rounded-xl border border-blue-200 bg-blue-50/60 shadow-sm",
+        className,
+      )}
+    >
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-blue-200 px-3 py-2.5">
         <Stethoscope className="h-4 w-4 text-blue-600" />
