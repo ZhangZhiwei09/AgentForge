@@ -6,6 +6,10 @@ export interface Prompt {
   tags: string[];
 }
 
+// Re-export persona module
+export { AGENTFORGE_PERSONA, buildChatSystemPrompt } from "./persona.js";
+export type { Persona, PersonaExample } from "./persona.js";
+
 export const system_prompt: Prompt = {
   id: "system-default",
   name: "Default System Prompt",
