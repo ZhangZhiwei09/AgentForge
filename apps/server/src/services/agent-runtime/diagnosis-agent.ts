@@ -13,6 +13,11 @@ import type { ExecutionScope } from "../../runtime/scope.js";
 import type { TeamStreamEvent } from "@agentforge/shared-types";
 import { logger } from "@agentforge/logger";
 import { teamService } from "../../teams/service.js";
+import {
+  classifyIntentFromQuery,
+  extractEntitiesFromQuery,
+  getMissingFields,
+} from "../diagnosis/nodes.js";
 
 const AGENT_USER_ID = "00000000-0000-0000-0000-000000000002";
 const DIAGNOSIS_TEMPLATE_ID = "identity-diagnosis";
@@ -30,6 +35,149 @@ const AGENT_LABEL_MAP: Record<string, string> = {
   backend_agent: "后端排查",
   leader: "综合分析",
 };
+
+// ── 诊断信息充分性检查 ──
+
+interface InfoSufficiencyResult {
+  sufficient: boolean;
+  intent: string;
+  missingFields: string[];
+  promptMessage: string;
+  hints: string[];
+}
+
+/**
+ * 检查用户消息是否包含足够的诊断信息。
+ * 复用 diagnosis/nodes.ts 的纯函数进行意图分类、实体提取和缺失字段检查。
+ */
+function checkDiagnosisInfoSufficiency(message: string): InfoSufficiencyResult {
+  const intent = classifyIntentFromQuery(message);
+  const entities = extractEntitiesFromQuery(message);
+  const missingFields = getMissingFields(intent, entities);
+
+  if (missingFields.length === 0) {
+    return {
+      sufficient: true,
+      intent,
+      missingFields: [],
+      promptMessage: "",
+      hints: [],
+    };
+  }
+
+  const { promptMessage, hints } = buildClarificationContent(
+    intent,
+    missingFields,
+    entities,
+  );
+
+  return {
+    sufficient: false,
+    intent,
+    missingFields,
+    promptMessage,
+    hints,
+  };
+}
+
+/** 意图类型 → 用户友好的中文名称 */
+const INTENT_LABELS: Record<string, string> = {
+  single_trace_diagnosis: "单笔交易失败",
+  merchant_rate_drop: "商户通过率下降",
+  error_code_explanation: "错误码含义查询",
+  integration_guidance: "接入配置问题",
+  unknown: "故障排查",
+};
+
+/** 字段名 → 用户友好的中文名称 + 获取提示 */
+const FIELD_HINTS: Record<string, { label: string; hint: string }> = {
+  traceId: {
+    label: "Trace ID",
+    hint: "可在浏览器开发者工具（Network 面板）或服务端日志中查找，通常格式为 traceId: xxx-xxx-xxx",
+  },
+  "traceId 或 orderId": {
+    label: "Trace ID 或 订单号",
+    hint: "请提供其中任意一项。Trace ID 可在日志中查找，订单号可在业务系统中查看",
+  },
+  orderId: {
+    label: "订单号",
+    hint: "可在业务系统的订单详情页或用户提供的截图中查看",
+  },
+  errorCode: {
+    label: "错误码",
+    hint: "通常是报错信息中的错误码，如 MIDDLEWARE_TIMEOUT、BIZ_CHECK_FAILED 等",
+  },
+  merchantId: {
+    label: "商户号",
+    hint: "可在商户管理后台或业务系统中查看",
+  },
+  timeRange: {
+    label: "失败时间范围",
+    hint: "例如：今天上午 10:00-11:00、昨天下午、最近 1 小时内",
+  },
+  "merchantId / traceId / orderId / errorCode": {
+    label: "可定位的标识信息",
+    hint: "请提供以下任意一项：商户号、Trace ID、订单号、错误码",
+  },
+  "product 或 clientType": {
+    label: "产品类型 或 客户端类型",
+    hint: "例如：活体检测/人脸识别/OCR、H5/小程序/App/Web",
+  },
+};
+
+function buildClarificationContent(
+  intent: string,
+  missingFields: string[],
+  entities: Record<string, unknown>,
+): { promptMessage: string; hints: string[] } {
+  const intentLabel = INTENT_LABELS[intent] ?? INTENT_LABELS.unknown;
+  const fieldLabels = missingFields
+    .map((f) => FIELD_HINTS[f]?.label ?? f)
+    .join("、");
+  const hints = missingFields
+    .map((f) => FIELD_HINTS[f]?.hint)
+    .filter((h): h is string => Boolean(h));
+
+  // 列出已识别的信息
+  const recognizedParts: string[] = [];
+  for (const [key, value] of Object.entries(entities)) {
+    if (value && typeof value === "string") {
+      const labelMap: Record<string, string> = {
+        traceId: "Trace ID",
+        orderId: "订单号",
+        errorCode: "错误码",
+        merchantId: "商户号",
+        appId: "应用 ID",
+        product: "产品",
+        clientType: "客户端类型",
+        environment: "环境",
+      };
+      recognizedParts.push(`${labelMap[key] ?? key}: ${value}`);
+    }
+  }
+
+  const recognizedLine =
+    recognizedParts.length > 0
+      ? `\n\n已识别到的信息：\n${recognizedParts.map((p) => `- ${p}`).join("\n")}`
+      : "";
+
+  const promptMessage = [
+    `我理解您遇到了${intentLabel}相关的问题。为了帮您更准确地排查，还需要补充以下信息：`,
+    "",
+    `**需要补充**：${fieldLabels}`,
+    recognizedLine,
+    "",
+    "请直接在聊天框中回复以上信息，我会立即开始帮您诊断。",
+  ]
+    .join("\n")
+    .trim();
+
+  return { promptMessage, hints };
+}
+
+// ═══════════════════════════════════════════════════════
+// DiagnosisRouteAgent
+// ═══════════════════════════════════════════════════════
 
 export class DiagnosisRouteAgent implements RouteAgent {
   readonly route = "DIAGNOSIS" as const;
@@ -54,7 +202,47 @@ export class DiagnosisRouteAgent implements RouteAgent {
       route: "DIAGNOSIS",
     };
 
-    // 2. Instantiate identity-diagnosis team template
+    // 2. 信息充分性检查 —— 信息不足时提示用户补充，避免启动无效的重型诊断
+    const infoCheck = checkDiagnosisInfoSufficiency(context.userMessage);
+    if (!infoCheck.sufficient) {
+      logger.info(
+        {
+          intent: infoCheck.intent,
+          missingFields: infoCheck.missingFields,
+          sessionId: context.sessionId,
+        },
+        "DiagnosisRouteAgent: insufficient info, requesting clarification",
+      );
+
+      yield {
+        type: "clarification_needed",
+        message_id: messageId,
+        intent: infoCheck.intent,
+        missing_fields: infoCheck.missingFields,
+        prompt_message: infoCheck.promptMessage,
+        hints: infoCheck.hints,
+      };
+
+      // 以 token 形式流式输出提示文本，确保旧版前端至少看到文本
+      for (const char of infoCheck.promptMessage) {
+        yield {
+          type: "token",
+          content: char,
+          message_id: messageId,
+        };
+      }
+
+      yield {
+        type: "done",
+        message_id: messageId,
+        usage: {},
+        memory: { injected: context.injectedMemories.length, extracted: 0 },
+        route: "DIAGNOSIS",
+      };
+      return;
+    }
+
+    // 3. Instantiate identity-diagnosis team template
     let team;
     try {
       team = await teamService.createFromTemplate(
@@ -80,7 +268,7 @@ export class DiagnosisRouteAgent implements RouteAgent {
       return;
     }
 
-    // 3. 运行 Team，翻译事件流（带超时保护）
+    // 4. 运行 Team，翻译事件流（带超时保护）
     const startTime = Date.now();
     let streamedOutput = "";
     let hasCompleted = false;
@@ -134,7 +322,7 @@ export class DiagnosisRouteAgent implements RouteAgent {
       };
     }
 
-    // 4. 流式输出最终结论文本
+    // 5. 流式输出最终结论文本
     if (streamedOutput) {
       for (const char of streamedOutput) {
         yield {
@@ -145,7 +333,7 @@ export class DiagnosisRouteAgent implements RouteAgent {
       }
     }
 
-    // 5. 发送 done 事件
+    // 6. 发送 done 事件
     yield {
       type: "done",
       message_id: messageId,

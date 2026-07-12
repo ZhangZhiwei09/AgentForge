@@ -196,8 +196,8 @@ function buildFewShotPrompt(topMatches: SemanticMatch[]): string {
   return (
     ROUTER_SYSTEM_PROMPT +
     `\n\n## 参考示例（从历史样本中检索到的相似消息及其正确分类）\n\n${examples}` +
-    `\n\n注意：当用户描述任何异常现象（卡住、闪退、报错、超时、弹回、进不去、没反应等），` +
-    `即使没有明确的错误码，也应优先考虑 DIAGNOSIS 路由。客户服务场景中的模糊故障描述通常意味着需要排查。`
+    `\n\n注意：DIAGNOSIS 路由要求用户提供了具体的故障信息（明确的错误现象、traceId、errorCode 等）。` +
+    `仅有模糊的"有问题"、"不行"等描述而没有任何具体细节时，应路由到 TASK 或 CHAT，让 Agent 进一步询问。`
   );
 }
 

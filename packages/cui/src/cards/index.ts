@@ -4,3 +4,4 @@ export { PolicyCard } from "./PolicyCard";
 export { StatusCard } from "./StatusCard";
 export { TableCard } from "./TableCard";
 export { DiagnosisCard } from "./DiagnosisCard";
+export { ClarificationCard } from "./ClarificationCard";

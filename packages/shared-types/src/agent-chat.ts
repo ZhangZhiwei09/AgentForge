@@ -11,6 +11,15 @@ export interface KnowledgeResult {
   docTitle: string;
 }
 
+// ── 诊断信息采集（信息不足时提示用户补充） ──
+
+export interface ClarificationRequest {
+  intent: string;
+  missingFields: string[];
+  promptMessage: string;
+  hints: string[];
+}
+
 // ── 诊断进度（多 Agent 协同诊断） ──
 
 export interface DiagnosisPhase {
@@ -38,6 +47,8 @@ export interface AgentMessage {
   knowledge?: KnowledgeResult[];
   /** 从 SSE content_block 解析出的结构化卡片 */
   contentBlocks?: ContentBlock[];
+  /** 诊断信息采集请求（信息不足时提示用户补充） */
+  clarification?: ClarificationRequest;
   /** 多 Agent 协同诊断过程数据 */
   diagnosis?: DiagnosisProgress;
 }
