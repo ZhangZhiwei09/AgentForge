@@ -16,6 +16,7 @@ import {
   buildChatSystemPrompt,
   type Persona,
 } from "@agentforge/shared-prompts";
+import { agentRouteInvocations } from "../../observability/metrics.js";
 
 // ── Zod Schema ──
 
@@ -98,6 +99,7 @@ export class ChatAgent implements RouteAgent {
       }
     } catch (e) {
       logger.warn(e, "ChatAgent LLM call failed, using fallback");
+      agentRouteInvocations.inc({ route: "CHAT", status: "error" });
       answer = "我是 AgentForge 智能助手，我能查询知识库、诊断系统故障。请告诉我你需要什么帮助？";
       fallbackUsed = true;
     }
@@ -106,6 +108,7 @@ export class ChatAgent implements RouteAgent {
     yield* streamTokens(answer, assistantMsgId);
 
     // 发送 done
+    agentRouteInvocations.inc({ route: "CHAT", status: "success" });
     yield {
       type: "done" as const,
       message_id: assistantMsgId,

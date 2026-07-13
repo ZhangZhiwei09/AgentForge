@@ -68,14 +68,44 @@ async function main() {
 
   logger.info({ port: settings.port }, "Server listening");
 
-  // 优雅关闭：flush Langfuse 待发送事件
-  const gracefulShutdown = async () => {
-    logger.info("Shutting down observability...");
-    await shutdownObservability();
+  // 优雅关闭：依次断开外部依赖，等待进行中请求完成
+  let isShuttingDown = false;
+  const gracefulShutdown = async (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    logger.info({ signal }, "Received shutdown signal, starting graceful shutdown...");
+
+    // 1. 停止接受新连接，等待进行中请求完成（最多 10s）
+    const SHUTDOWN_TIMEOUT_MS = 10_000;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, SHUTDOWN_TIMEOUT_MS);
+      httpServer.close(() => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
+
+    // 2. 断开数据库连接
+    try {
+      await prisma.$disconnect();
+      logger.info("Prisma disconnected");
+    } catch (err) {
+      logger.warn(err, "Failed to disconnect Prisma");
+    }
+
+    // 3. Flush 可观测性数据
+    try {
+      await shutdownObservability();
+      logger.info("Observability shutdown complete");
+    } catch (err) {
+      logger.warn(err, "Failed to shutdown observability");
+    }
+
+    logger.info("Graceful shutdown complete");
     process.exit(0);
   };
-  process.on("SIGTERM", gracefulShutdown);
-  process.on("SIGINT", gracefulShutdown);
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
 }
 
 // 顶层 await 包装：用 .catch 兜底未捕获错误

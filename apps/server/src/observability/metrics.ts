@@ -152,6 +152,22 @@ export const agentToolCallsTotal = new Counter({
   registers: [registry],
 });
 
+/** Agent Runtime 记忆记录失败次数（fire-and-forget 路径异常） */
+export const agentMemoryRecordFailures = new Counter({
+  name: "agent_memory_record_failures_total",
+  help: "Total number of failed async memory recordings",
+  labelNames: ["reason"],
+  registers: [registry],
+});
+
+/** Agent Runtime 各路由 Agent 调用统计 */
+export const agentRouteInvocations = new Counter({
+  name: "agent_route_invocations_total",
+  help: "Agent Runtime route agent invocation count",
+  labelNames: ["route", "status"], // status = success | error
+  registers: [registry],
+});
+
 /** Agent Runtime 请求端到端延迟 */
 export const agentRequestDurationMs = new Histogram({
   name: "agent_request_duration_ms",

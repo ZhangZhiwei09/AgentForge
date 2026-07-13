@@ -6,6 +6,7 @@ import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
 import type { ExecutionScope } from "../../runtime/scope.js";
 import { streamTokens } from "./types.js";
 import { logger } from "@agentforge/logger";
+import { agentRouteInvocations } from "../../observability/metrics.js";
 
 const SAFETY_REJECT_MESSAGE =
   "抱歉，您的消息包含不安全的请求内容，无法处理。如有实际业务问题，欢迎重新描述。";
@@ -35,6 +36,7 @@ export class SafetyAgent implements RouteAgent {
     yield* streamTokens(SAFETY_REJECT_MESSAGE, context.assistantMsgId);
 
     // 发送 done
+    agentRouteInvocations.inc({ route: "SAFETY", status: "success" });
     yield {
       type: "done",
       message_id: context.assistantMsgId,

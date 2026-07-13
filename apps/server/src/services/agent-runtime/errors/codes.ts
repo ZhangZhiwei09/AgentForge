@@ -67,6 +67,10 @@ export const ErrorCode = {
   /** L4 置信度过低，降级到 L5 */
   RT_L4_LOW_CONFIDENCE: "RT_L4_LOW_CONFIDENCE",
 
+  // ── HumanAgent ──
+  /** 人工转接时更新会话状态失败（非阻塞） */
+  HM_ESCALATE_FAILED: "HM_ESCALATE_FAILED",
+
   // ── Validation ──
   /** LLM 响应 JSON 解析失败 */
   VL_PARSE_FAILED: "VL_PARSE_FAILED",

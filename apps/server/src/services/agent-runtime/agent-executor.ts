@@ -17,6 +17,7 @@ import {
   agentReActIterations,
   agentToolCallsTotal,
   agentCitationCoverage,
+  agentMemoryRecordFailures,
 } from "../../observability/metrics.js";
 import { AgentService } from "../agent.js";
 import { sanitizeReActJSON } from "./react-json-utils.js";
@@ -285,8 +286,9 @@ export class AgentExecutor implements RouteAgent {
       };
       // Fire and forget — 不阻塞 done event
       recordMemory().catch(() => {
-        // Already logged inside recordMemory; explicit catch prevents
-        // unhandled promise rejection (Node.js warning/termination)
+        // recordMemory 内部已 try/catch 并 logger.warn；
+        // 此处捕获的是 dynamic import 或其他同步抛出的异常
+        agentMemoryRecordFailures.inc({ reason: "unhandled_rejection" });
       });
     }
 
