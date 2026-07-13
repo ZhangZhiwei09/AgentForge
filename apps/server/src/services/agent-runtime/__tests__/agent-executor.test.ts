@@ -8,7 +8,7 @@
 //   - Hardcoded fallback 常量
 
 import { describe, it, expect } from "vitest";
-import { AgentExecutor } from "../agent-executor.js";
+import { AgentExecutor, isKnowledgeBaseResult, extractKBChunks } from "../agent-executor.js";
 import {
   looksLikeReActJSON,
   sanitizeReActJSON,
@@ -198,6 +198,131 @@ describe("sanitizeReActJSON", () => {
       decision: {},
     });
     expect(sanitizeReActJSON(reactJSON)).toBeNull();
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+// isKnowledgeBaseResult —— KB 工具结果检测
+// ═══════════════════════════════════════════════════════
+
+describe("isKnowledgeBaseResult", () => {
+  it("应识别标准 search_knowledge_base 返回结果", () => {
+    const kbResult = JSON.stringify({
+      found: true,
+      results: [{ content: "退换货政策：7天无理由退换", score: 0.95 }],
+    });
+    expect(isKnowledgeBaseResult(kbResult)).toBe(true);
+  });
+
+  it("应识别 found: false 的 KB 结果（无匹配也应识别为 KB 结果）", () => {
+    const kbResult = JSON.stringify({
+      found: false,
+      results: [],
+    });
+    expect(isKnowledgeBaseResult(kbResult)).toBe(true);
+  });
+
+  it("不应识别不含 results 键的普通 JSON", () => {
+    const plainJSON = JSON.stringify({ name: "test", value: 123 });
+    expect(isKnowledgeBaseResult(plainJSON)).toBe(false);
+  });
+
+  it("不应识别不含 found 键的 JSON", () => {
+    const partialJSON = JSON.stringify({ results: [{ content: "x" }] });
+    expect(isKnowledgeBaseResult(partialJSON)).toBe(false);
+  });
+
+  it("不应识别普通文本", () => {
+    expect(isKnowledgeBaseResult("这是一段普通的工具输出文本")).toBe(false);
+  });
+
+  it("不应识别空字符串", () => {
+    expect(isKnowledgeBaseResult("")).toBe(false);
+  });
+
+  it("不应识别 Markdown 中引用了 results/found 词汇的文本（不含 JSON 键的引号）", () => {
+    // results 和 found 作为普通词汇出现，但没有 JSON 键所需的双引号
+    const markdown = "The search results were found in the database.";
+    // "results" 有引号但 "found" 没有引号 → 不匹配
+    expect(isKnowledgeBaseResult(markdown)).toBe(false);
+  });
+});
+
+// ═══════════════════════════════════════════════════════
+// extractKBChunks —— KB chunk 文本提取
+// ═══════════════════════════════════════════════════════
+
+describe("extractKBChunks", () => {
+  it("应提取有效的 KB 搜索结果中的 content 字段", () => {
+    const kbResult = JSON.stringify({
+      found: true,
+      results: [
+        { content: "退换货政策：7天无理由退换", score: 0.95 },
+        { content: "退款流程：3-5个工作日到账", score: 0.87 },
+      ],
+    });
+    const chunks = extractKBChunks(kbResult);
+    expect(chunks).toEqual([
+      "退换货政策：7天无理由退换",
+      "退款流程：3-5个工作日到账",
+    ]);
+  });
+
+  it("found: false 时应返回空数组", () => {
+    const kbResult = JSON.stringify({
+      found: false,
+      results: [],
+    });
+    expect(extractKBChunks(kbResult)).toEqual([]);
+  });
+
+  it("应过滤掉 content 为空的条目", () => {
+    const kbResult = JSON.stringify({
+      found: true,
+      results: [
+        { content: "有效内容", score: 0.9 },
+        { content: "", score: 0.5 },
+        { content: "   ", score: 0.3 },
+      ],
+    });
+    // "   " 转 String 后不为空（三个空格），只有 "" 被过滤
+    const chunks = extractKBChunks(kbResult);
+    expect(chunks).toEqual(["有效内容", "   "]);
+  });
+
+  it("普通文本应返回空数组（不匹配 JSON 键特征）", () => {
+    expect(extractKBChunks("没有 results 和 found 键的普通文本")).toEqual([]);
+  });
+
+  it("畸形的 JSON 应返回空数组（安全降级）", () => {
+    expect(extractKBChunks('{"found": true, "results": [broken]}')).toEqual([]);
+  });
+
+  it("results 非数组时应返回空数组", () => {
+    const kbResult = JSON.stringify({
+      found: true,
+      results: "not an array",
+    });
+    expect(extractKBChunks(kbResult)).toEqual([]);
+  });
+
+  it("results 中包含非对象元素时应跳过", () => {
+    const kbResult = JSON.stringify({
+      found: true,
+      results: [
+        { content: "有效", score: 0.9 },
+        "plain string",
+        123,
+        null,
+        { content: "另一条有效", score: 0.8 },
+      ],
+    });
+    const chunks = extractKBChunks(kbResult);
+    expect(chunks).toEqual(["有效", "另一条有效"]);
+  });
+
+  it("空字符串应返回空数组", () => {
+    expect(extractKBChunks("")).toEqual([]);
   });
 });
 

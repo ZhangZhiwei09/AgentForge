@@ -9,7 +9,6 @@
 //
 // 以后任何新场景只需注册新工具到 ToolRegistry，无需新建 Agent 文件。
 
-import { randomUUID } from "crypto";
 import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
 import type { ExecutionScope } from "../../runtime/scope.js";
 import { prisma } from "../../db.js";
@@ -30,6 +29,7 @@ import { getTaskIntentClassifier } from "./task-intent.js";
 import { KnowledgeService } from "../knowledge.js";
 import { resolveModel, getProvider } from "../../providers/registry.js";
 import { settings } from "../../config.js";
+import { ErrorCode } from "./errors/codes.js";
 
 // ── 硬编码最终兜底文案 ──
 const HARDCODED_FALLBACK =
@@ -57,6 +57,20 @@ interface OutputState {
 interface ResponseEnvelope {
   finalContent?: string;
   fallbackContent?: string;
+}
+
+// ── 执行状态（execute() 内部可变状态，在 extracted methods 间传递）──
+interface ExecutionState {
+  finalAnswer: string;
+  suggestions: string[];
+  accumulatedContent: string;
+  collectedKBChunks: string[];
+  lastKBToolResult: string | null;
+  citationReport: CitationReport | null;
+  phase: AgentPhase;
+  outputState: OutputState;
+  envelope: ResponseEnvelope;
+  iterationCount: number;
 }
 
 // ═══════════════════════════════════════════════════════
@@ -102,24 +116,23 @@ export class AgentExecutor implements RouteAgent {
       "TaskIntentClassifier result",
     );
 
-    let finalAnswer = "";
-    let suggestions: string[] = [];
-    let accumulatedContent = "";
-    const collectedKBChunks: string[] = [];
-    let citationReport: CitationReport | null = null;
-
-    // KnowledgeContext 构建：从 search_knowledge_base 工具结果中提取结构化上下文
-    let lastKBToolResult: string | null = null;
-    const kbBuilder = new KnowledgeContextBuilder();
-
-    let phase: AgentPhase = "planning";
-    const outputState: OutputState = {
-      visibleChars: 0,
-      responseStarted: false,
-      responseCompleted: false,
+    // ── 初始化可变状态 ──
+    const state: ExecutionState = {
+      finalAnswer: "",
+      suggestions: [],
+      accumulatedContent: "",
+      collectedKBChunks: [],
+      lastKBToolResult: null,
+      citationReport: null,
+      phase: "planning",
+      outputState: {
+        visibleChars: 0,
+        responseStarted: false,
+        responseCompleted: false,
+      },
+      envelope: {},
+      iterationCount: 0,
     };
-    const envelope: ResponseEnvelope = {};
-    let iterationCount = 0;
 
     try {
       // ── simple_qa 快速路径：单次 KB 搜索 + LLM 回答，跳过 ReAct ──
@@ -127,287 +140,53 @@ export class AgentExecutor implements RouteAgent {
         yield* this.handleSimpleQA(
           context,
           scope,
-          outputState,
-          envelope,
-          collectedKBChunks,
+          state.outputState,
+          state.envelope,
+          state.collectedKBChunks,
         );
         // 从 envelope 提取结果
-        finalAnswer = envelope.finalContent || "";
-        if (outputState.responseCompleted) {
-          phase = "finished";
-          outputState.responseStarted = true;
+        state.finalAnswer = state.envelope.finalContent || "";
+        if (state.outputState.responseCompleted) {
+          state.phase = "finished";
+          state.outputState.responseStarted = true;
         }
       } else {
         // ── complex_task：完整 ReAct 循环 ──
-        const agentService = new AgentService();
-
-        // ── 构建任务描述 ──
-        const task = `用户询问：${userMessage}
-
-请使用可用工具帮助用户解决问题。回答要简洁、专业、友好。
-如果工具返回了数据，请直接用自然语言 + Markdown 表格或列表向用户解释结果。
-如果知识库有相关信息，请引用来源。`;
-
-        // ── 动态获取工具列表（从 ToolRegistry） ──
-        const enabledTools = this.getAvailableToolNames();
-
-        // 运行 Agent ReAct 循环
-        const events = agentService.run(conversationId, task, {
-          model: resolvedModel,
-          maxIterations: 5,
-          tools: enabledTools,
-          scope,
-          skipUserMessageSave: true,
-          skipAssistantMessageSave: true,
-          guardConfig: {
-            maxTokens: 2000,
-            maxCostCents: 5,
-          },
-        });
-
-        // 映射 agent 事件 → agent-runtime SSE 事件
-        for await (const event of events) {
-        if (scope?.controller.shouldStop) break;
-
-        switch (event.type) {
-          case "agent_token":
-            if ("content" in event) {
-              const token = event.content as string;
-              if (phase === "responding") {
-                accumulatedContent += token;
-                yield {
-                  type: "token",
-                  content: token,
-                  message_id: assistantMsgId,
-                };
-                outputState.visibleChars++;
-              } else {
-                accumulatedContent += token;
-              }
-            }
-            break;
-
-          case "agent_responding":
-            phase = "responding";
-            outputState.responseStarted = true;
-            break;
-
-          case "agent_clear_stream":
-            accumulatedContent = "";
-            yield {
-              type: "clear_stream",
-              message_id: assistantMsgId,
-            };
-            break;
-
-          case "agent_observe":
-            phase = "observing";
-            iterationCount++;
-            if ("tool" in event && event.tool) {
-              agentToolCallsTotal.inc({
-                tool_name: String(event.tool),
-                status: "success",
-                route: "TASK",
-              });
-            }
-            if ("result" in event && event.result) {
-              const resultStr = event.result as string;
-              const kbChunks = extractKBChunks(resultStr);
-              if (kbChunks.length > 0) {
-                collectedKBChunks.push(...kbChunks);
-                // 保存最近一次 search_knowledge_base 的原始输出供 KnowledgeContext 构建
-                if (isKnowledgeBaseResult(resultStr)) {
-                  lastKBToolResult = resultStr;
-                }
-              }
-            }
-            break;
-
-          case "agent_respond":
-            if ("content" in event) {
-              envelope.finalContent = event.content as string;
-              finalAnswer = envelope.finalContent;
-
-              if (!outputState.responseStarted) {
-                for (const char of envelope.finalContent) {
-                  yield {
-                    type: "token",
-                    content: char,
-                    message_id: assistantMsgId,
-                  };
-                  outputState.visibleChars++;
-                }
-                outputState.responseStarted = true;
-              }
-              outputState.responseCompleted = true;
-            }
-            break;
-
-          case "agent_error":
-            logger.warn(
-              { error: "error" in event ? event.error : "unknown" },
-              "AgentExecutor agent error",
-            );
-            if (!envelope.fallbackContent) {
-              envelope.fallbackContent = HARDCODED_FALLBACK;
-            }
-            break;
-
-          case "agent_done":
-            phase = "finished";
-            break;
-
-          // P0: agent_ask_user — Agent 需要向用户提问澄清。
-          // 将 question 文本转换为 RouteStreamEvent token 流，避免
-          // ReAct JSON 泄露到 fallback 路径。
-          case "agent_ask_user": {
-            const question = event.question;
-            if (!question) {
-              logger.warn(
-                { eventType: "agent_ask_user", conversationId },
-                "agent_ask_user event received with empty question, using fallback",
-              );
-            }
-            // 向下游发送 clear_stream 信号，确保前端也清除残留 token
-            yield {
-              type: "clear_stream",
-              message_id: assistantMsgId,
-            };
-            // 清除之前累积的 ReAct JSON token，确保 fallback 不使用脏数据
-            accumulatedContent = "";
-            phase = "responding";
-            outputState.responseStarted = true;
-            const displayText = question || ASK_USER_FALLBACK;
-            for (const char of displayText) {
-              yield {
-                type: "token",
-                content: char,
-                message_id: assistantMsgId,
-              };
-              outputState.visibleChars++;
-            }
-            envelope.finalContent = displayText;
-            outputState.responseCompleted = true;
-            break;
-          }
-
-          // ── 显式未处理事件（AgentService 内部事件，不映射到 RouteStreamEvent）──
-          // agent_think: Agent 推理步骤（observation/analysis/plan），开发调试用，
-          //   通过 AgentPanel REST API 加载 scratchpad 查看，不需要在聊天流中展示。
-          // agent_act: Agent 行动决策，仅用于 AgentPanel 展示 scratchpad。
-          // agent_meta: AgentService 元信息（session_id/model/provider/tools_enabled），
-          //   AgentExecutor 已在 L77-88 独立产出 meta 事件。
-          // agent_approval_required: 工具审批请求，通过独立 API（POST /api/agent/approve）
-          //   流程处理，不经过本路由的 SSE 流。
-          // agent_approval_result: 审批结果通知，通过审批 API 自身 SSE 返回。
-          // agent_degraded: LLM 降级通知，降级消息已注入 conversationMessages，
-          //   无需额外前端事件。
-          // agent_guard_block: 安全守卫拦截通知，阻塞消息已注入 conversationMessages。
-          case "agent_think":
-          case "agent_act":
-          case "agent_meta":
-          case "agent_approval_required":
-          case "agent_approval_result":
-          case "agent_degraded":
-          case "agent_guard_block":
-            break;
-
-          default:
-            // 未识别的 AgentStreamEvent 类型 — 记录警告以便发现未来新增事件的遗漏映射
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any -- exhaustive check makes event: never
-            logger.warn(
-              { eventType: (event as any).type },
-              "AgentExecutor received unrecognized AgentStreamEvent type",
-            );
-            break;
-        }
+        yield* this.handleComplexTask(context, scope, state);
       }
-
-      // ReAct 迭代指标
-      agentReActIterations.observe(
-        { agent_type: "agent_executor" },
-        iterationCount,
-      );
-      } // ── end complex_task ReAct 分支 ──
 
       // ── Interruption ──
       if (scope?.controller.shouldStop) {
-        // P0: Sanitize partial content before streaming.
-        // accumulatedContent may contain raw ReAct JSON tokens from the
-        // planning/executing phase that were never cleared by agent_clear_stream.
-        // Without sanitization, cancelling during planning leaks internal JSON to users.
-        const rawPartial = accumulatedContent || envelope.finalContent || "";
-        const sanitizedPartial = sanitizeReActJSON(rawPartial);
-        // sanitizeReActJSON returns null when content IS ReAct JSON but no
-        // extractable text found — must NOT fall back to rawPartial (that
-        // would leak internal JSON).  Only use rawPartial when the content
-        // doesn't look like ReAct JSON at all (sanitizeReActJSON returns
-        // the original string unchanged).
-        const partialContent = sanitizedPartial ?? HARDCODED_FALLBACK;
-        if (partialContent) {
-          // 持久化部分内容到 DB
-          try {
-            await prisma.message.create({
-              data: {
-                id: assistantMsgId,
-                conversationId,
-                role: "assistant",
-                content: partialContent,
-                model: resolvedModel,
-              },
-            });
-          } catch (err) {
-            logger.warn(
-              { error: err instanceof Error ? err.message : "Unknown error", conversationId },
-              "Failed to persist partial agent-executor content on interrupt",
-            );
-          }
-
-          // 仅在尚未流式输出时补偿输出（phase !== "responding" 时 token 仅缓存未发送）
-          if (!outputState.responseStarted) {
-            for (const char of partialContent) {
-              yield { type: "token", content: char, message_id: assistantMsgId };
-            }
-          }
-        }
-        yield {
-          type: "done",
-          message_id: assistantMsgId,
-          usage: {},
-          suggestions: undefined,
-          memory: { injected: 0, extracted: 0 },
-          validated: false,
-          fallback_used: !partialContent || undefined,
-          route: "TASK",
-        };
+        yield* this.handleInterruption(context, state);
         return;
       }
 
       // ── 安全网：检测并清除泄漏的 ReAct JSON ──
-      if (finalAnswer) {
-        const sanitized = sanitizeReActJSON(finalAnswer);
+      if (state.finalAnswer) {
+        const sanitized = sanitizeReActJSON(state.finalAnswer);
         if (sanitized === null) {
           logger.warn(
-            { finalAnswer: finalAnswer.slice(0, 200) },
+            { errorCode: ErrorCode.AE_REACT_JSON_LEAK, finalAnswer: state.finalAnswer.slice(0, 200) },
             "ReAct JSON leaked to final answer, using fallback",
           );
-          envelope.finalContent = undefined;
-          if (!envelope.fallbackContent) {
-            envelope.fallbackContent =
+          state.envelope.finalContent = undefined;
+          if (!state.envelope.fallbackContent) {
+            state.envelope.fallbackContent =
               "抱歉，查询未找到结果。请检查您提供的信息是否正确，或联系人工客服获取帮助。";
           }
-          suggestions = ["转接人工客服"];
+          state.suggestions = ["转接人工客服"];
         } else {
-          envelope.finalContent = sanitized;
-          finalAnswer = sanitized;
+          state.envelope.finalContent = sanitized;
+          state.finalAnswer = sanitized;
         }
       }
 
       // ── KnowledgeContext 构建：从 search_knowledge_base 工具结果提取结构化上下文 ──
       let knowledgeContext = null;
-      if (lastKBToolResult && finalAnswer) {
+      if (state.lastKBToolResult && state.finalAnswer) {
         try {
-          knowledgeContext = kbBuilder.build(lastKBToolResult, userMessage);
+          const kbBuilder = new KnowledgeContextBuilder();
+          knowledgeContext = kbBuilder.build(state.lastKBToolResult, userMessage);
           if (knowledgeContext) {
             logger.debug(
               { confidence: knowledgeContext.confidence, docs: knowledgeContext.docs.length },
@@ -415,51 +194,51 @@ export class AgentExecutor implements RouteAgent {
             );
           }
         } catch (e) {
-          logger.warn(e, "KnowledgeContext building skipped");
+          logger.warn({ errorCode: ErrorCode.AE_KB_CONTEXT_FAILED, err: e }, "KnowledgeContext building skipped");
         }
       }
 
       // ── Citation 引证校验 ──
-      if (finalAnswer && collectedKBChunks.length > 0) {
+      if (state.finalAnswer && state.collectedKBChunks.length > 0) {
         try {
           const verifier = getCitationVerifier();
-          citationReport = await verifier.verify(
-            finalAnswer,
-            collectedKBChunks,
+          state.citationReport = await verifier.verify(
+            state.finalAnswer,
+            state.collectedKBChunks,
           );
           agentCitationCoverage.observe(
-            { level: citationReport.level },
-            citationReport.coverageRate,
+            { level: state.citationReport.level },
+            state.citationReport.coverageRate,
           );
         } catch (e) {
-          logger.warn(e, "Citation verification skipped");
+          logger.warn({ errorCode: ErrorCode.AE_CITATION_FAILED, err: e }, "Citation verification skipped");
         }
       }
 
       // ── 业务回复校验 ──
-      if (finalAnswer) {
+      if (state.finalAnswer) {
         const validationResult = validateBusinessResponse(
-          finalAnswer,
-          collectedKBChunks,
-          citationReport ?? undefined,
+          state.finalAnswer,
+          state.collectedKBChunks,
+          state.citationReport ?? undefined,
         );
         if (!validationResult.valid) {
           logger.warn(
-            { errors: validationResult.errors, layer: validationResult.layer },
+            { errorCode: ErrorCode.AE_VALIDATION_FAILED, errors: validationResult.errors, layer: validationResult.layer },
             "Business response validation failed",
           );
           // Layer 3（禁止行为）/ Layer 5（疑似编造）→ 追加免责声明
           if (validationResult.layer === 3 || validationResult.layer === 5) {
-            finalAnswer +=
+            state.finalAnswer +=
               "\n\n⚠ *以上信息可能不准确，建议核实后参考。*";
-            envelope.finalContent = finalAnswer;
+            state.envelope.finalContent = state.finalAnswer;
           }
         }
       }
     } catch (e) {
-      logger.error(e, "AgentExecutor execution failed");
-      if (!envelope.fallbackContent) {
-        envelope.fallbackContent = HARDCODED_FALLBACK;
+      logger.error({ errorCode: ErrorCode.AE_EXECUTION_FAILED, err: e }, "AgentExecutor execution failed");
+      if (!state.envelope.fallbackContent) {
+        state.envelope.fallbackContent = HARDCODED_FALLBACK;
       }
     }
 
@@ -467,16 +246,16 @@ export class AgentExecutor implements RouteAgent {
     // 如果 agent_respond 未触发但 agent_responding 已流式输出了 token，
     // 且没有错误回退内容 → 标记为已完成，避免重复输出。
     // 如果有 fallbackContent（agent_error 触发），仍需补偿输出替换受损内容。
-    if (!outputState.responseCompleted && outputState.responseStarted && outputState.visibleChars > 0 && !envelope.fallbackContent) {
-      outputState.responseCompleted = true;
+    if (!state.outputState.responseCompleted && state.outputState.responseStarted && state.outputState.visibleChars > 0 && !state.envelope.fallbackContent) {
+      state.outputState.responseCompleted = true;
     }
 
     let fallbackUsed = false;
-    if (!outputState.responseCompleted) {
+    if (!state.outputState.responseCompleted) {
       const resolved =
-        envelope.finalContent ??
-        envelope.fallbackContent ??
-        sanitizeReActJSON(accumulatedContent);
+        state.envelope.finalContent ??
+        state.envelope.fallbackContent ??
+        sanitizeReActJSON(state.accumulatedContent);
       const content = resolved || HARDCODED_FALLBACK;
 
       fallbackUsed = content === HARDCODED_FALLBACK;
@@ -487,21 +266,21 @@ export class AgentExecutor implements RouteAgent {
           content: char,
           message_id: assistantMsgId,
         };
-        outputState.visibleChars++;
+        state.outputState.visibleChars++;
       }
-      outputState.responseCompleted = true;
+      state.outputState.responseCompleted = true;
     }
 
     // V3.0: 记录对话到分层记忆系统（异步，不阻塞响应）
-    if (finalAnswer && sessionId) {
+    if (state.finalAnswer && sessionId) {
       const recordMemory = async () => {
         try {
           const { getMemoryService } = await import("../memory-service.js");
           const memoryService = getMemoryService();
           const convId = conversationId || sessionId;
-          await memoryService.recordExchange(convId, userMessage, finalAnswer!);
+          await memoryService.recordExchange(convId, userMessage, state.finalAnswer!);
         } catch (e) {
-          logger.warn(e, "Memory recording failed (non-blocking)");
+          logger.warn({ errorCode: ErrorCode.AE_MEMORY_FAILED, err: e }, "Memory recording failed (non-blocking)");
         }
       };
       // Fire and forget — 不阻塞 done event
@@ -517,8 +296,8 @@ export class AgentExecutor implements RouteAgent {
       message_id: assistantMsgId,
       usage: {},
       suggestions:
-        suggestions.length > 0
-          ? suggestions
+        state.suggestions.length > 0
+          ? state.suggestions
           : fallbackUsed
             ? ["转接人工客服"]
             : undefined,
@@ -526,16 +305,280 @@ export class AgentExecutor implements RouteAgent {
       validated: true,
       fallback_used: fallbackUsed || undefined,
       route: "TASK",
-      citation: citationReport
+      citation: state.citationReport
         ? {
-            level: citationReport.level,
-            coverageRate: citationReport.coverageRate,
-            avgScore: citationReport.avgScore,
-            uncitedCount: citationReport.sentences.filter(
+            level: state.citationReport.level,
+            coverageRate: state.citationReport.coverageRate,
+            avgScore: state.citationReport.avgScore,
+            uncitedCount: state.citationReport.sentences.filter(
               (s) => s.isFactual && s.status === "uncited",
             ).length,
           }
         : undefined,
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // handleComplexTask —— 完整 ReAct 循环
+  // ═══════════════════════════════════════════════════════
+
+  private async *handleComplexTask(
+    context: RouteContext,
+    scope: ExecutionScope | undefined,
+    state: ExecutionState,
+  ): AsyncGenerator<RouteStreamEvent> {
+    const { conversationId, userMessage, assistantMsgId, resolvedModel } =
+      context;
+
+    const agentService = new AgentService();
+
+    // ── 构建任务描述 ──
+    const task = `用户询问：${userMessage}
+
+请使用可用工具帮助用户解决问题。回答要简洁、专业、友好。
+如果工具返回了数据，请直接用自然语言 + Markdown 表格或列表向用户解释结果。
+如果知识库有相关信息，请引用来源。`;
+
+    // ── 动态获取工具列表（从 ToolRegistry） ──
+    const enabledTools = this.getAvailableToolNames();
+
+    // 运行 Agent ReAct 循环
+    const events = agentService.run(conversationId, task, {
+      model: resolvedModel,
+      maxIterations: 5,
+      tools: enabledTools,
+      scope,
+      skipUserMessageSave: true,
+      skipAssistantMessageSave: true,
+      guardConfig: {
+        maxTokens: 2000,
+        maxCostCents: 5,
+      },
+    });
+
+    // 映射 agent 事件 → agent-runtime SSE 事件
+    for await (const event of events) {
+      if (scope?.controller.shouldStop) break;
+
+      switch (event.type) {
+        case "agent_token":
+          if ("content" in event) {
+            const token = event.content as string;
+            if (state.phase === "responding") {
+              state.accumulatedContent += token;
+              yield {
+                type: "token",
+                content: token,
+                message_id: assistantMsgId,
+              };
+              state.outputState.visibleChars++;
+            } else {
+              state.accumulatedContent += token;
+            }
+          }
+          break;
+
+        case "agent_responding":
+          state.phase = "responding";
+          state.outputState.responseStarted = true;
+          break;
+
+        case "agent_clear_stream":
+          state.accumulatedContent = "";
+          yield {
+            type: "clear_stream",
+            message_id: assistantMsgId,
+          };
+          break;
+
+        case "agent_observe":
+          state.phase = "observing";
+          state.iterationCount++;
+          if ("tool" in event && event.tool) {
+            agentToolCallsTotal.inc({
+              tool_name: String(event.tool),
+              status: "success",
+              route: "TASK",
+            });
+          }
+          if ("result" in event && event.result) {
+            const resultStr = event.result as string;
+            const kbChunks = extractKBChunks(resultStr);
+            if (kbChunks.length > 0) {
+              state.collectedKBChunks.push(...kbChunks);
+              // 保存最近一次 search_knowledge_base 的原始输出供 KnowledgeContext 构建
+              if (isKnowledgeBaseResult(resultStr)) {
+                state.lastKBToolResult = resultStr;
+              }
+            }
+          }
+          break;
+
+        case "agent_respond":
+          if ("content" in event) {
+            state.envelope.finalContent = event.content as string;
+            state.finalAnswer = state.envelope.finalContent;
+
+            if (!state.outputState.responseStarted) {
+              for (const char of state.envelope.finalContent) {
+                yield {
+                  type: "token",
+                  content: char,
+                  message_id: assistantMsgId,
+                };
+                state.outputState.visibleChars++;
+              }
+              state.outputState.responseStarted = true;
+            }
+            state.outputState.responseCompleted = true;
+          }
+          break;
+
+        case "agent_error":
+          logger.warn(
+            { errorCode: ErrorCode.AE_AGENT_ERROR, error: "error" in event ? event.error : "unknown" },
+            "AgentExecutor agent error",
+          );
+          if (!state.envelope.fallbackContent) {
+            state.envelope.fallbackContent = HARDCODED_FALLBACK;
+          }
+          break;
+
+        case "agent_done":
+          state.phase = "finished";
+          break;
+
+        // P0: agent_ask_user — Agent 需要向用户提问澄清。
+        // 将 question 文本转换为 RouteStreamEvent token 流，避免
+        // ReAct JSON 泄露到 fallback 路径。
+        case "agent_ask_user": {
+          const question = event.question;
+          if (!question) {
+            logger.warn(
+              { errorCode: ErrorCode.AE_ASK_USER_EMPTY, eventType: "agent_ask_user", conversationId },
+              "agent_ask_user event received with empty question, using fallback",
+            );
+          }
+          // 向下游发送 clear_stream 信号，确保前端也清除残留 token
+          yield {
+            type: "clear_stream",
+            message_id: assistantMsgId,
+          };
+          // 清除之前累积的 ReAct JSON token，确保 fallback 不使用脏数据
+          state.accumulatedContent = "";
+          state.phase = "responding";
+          state.outputState.responseStarted = true;
+          const displayText = question || ASK_USER_FALLBACK;
+          for (const char of displayText) {
+            yield {
+              type: "token",
+              content: char,
+              message_id: assistantMsgId,
+            };
+            state.outputState.visibleChars++;
+          }
+          state.envelope.finalContent = displayText;
+          state.outputState.responseCompleted = true;
+          break;
+        }
+
+        // ── 显式未处理事件（AgentService 内部事件，不映射到 RouteStreamEvent）──
+        // agent_think: Agent 推理步骤（observation/analysis/plan），开发调试用，
+        //   通过 AgentPanel REST API 加载 scratchpad 查看，不需要在聊天流中展示。
+        // agent_act: Agent 行动决策，仅用于 AgentPanel 展示 scratchpad。
+        // agent_meta: AgentService 元信息（session_id/model/provider/tools_enabled），
+        //   AgentExecutor 已在 L77-88 独立产出 meta 事件。
+        // agent_approval_required: 工具审批请求，通过独立 API（POST /api/agent/approve）
+        //   流程处理，不经过本路由的 SSE 流。
+        // agent_approval_result: 审批结果通知，通过审批 API 自身 SSE 返回。
+        // agent_degraded: LLM 降级通知，降级消息已注入 conversationMessages，
+        //   无需额外前端事件。
+        // agent_guard_block: 安全守卫拦截通知，阻塞消息已注入 conversationMessages。
+        case "agent_think":
+        case "agent_act":
+        case "agent_meta":
+        case "agent_approval_required":
+        case "agent_approval_result":
+        case "agent_degraded":
+        case "agent_guard_block":
+          break;
+
+        default:
+          // 未识别的 AgentStreamEvent 类型 — 记录警告以便发现未来新增事件的遗漏映射
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- exhaustive check makes event: never
+          logger.warn(
+            { errorCode: ErrorCode.AE_UNRECOGNIZED_EVENT, eventType: (event as any).type },
+            "AgentExecutor received unrecognized AgentStreamEvent type",
+          );
+          break;
+      }
+    }
+
+    // ReAct 迭代指标
+    agentReActIterations.observe(
+      { agent_type: "agent_executor" },
+      state.iterationCount,
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // handleInterruption —— 中断处理
+  // ═══════════════════════════════════════════════════════
+
+  private async *handleInterruption(
+    context: RouteContext,
+    state: ExecutionState,
+  ): AsyncGenerator<RouteStreamEvent> {
+    const { assistantMsgId, conversationId, resolvedModel } = context;
+
+    // P0: Sanitize partial content before streaming.
+    // accumulatedContent may contain raw ReAct JSON tokens from the
+    // planning/executing phase that were never cleared by agent_clear_stream.
+    // Without sanitization, cancelling during planning leaks internal JSON to users.
+    const rawPartial =
+      state.accumulatedContent || state.envelope.finalContent || "";
+    const sanitizedPartial = sanitizeReActJSON(rawPartial);
+    // sanitizeReActJSON returns null when content IS ReAct JSON but no
+    // extractable text found — must NOT fall back to rawPartial (that
+    // would leak internal JSON).  Only use rawPartial when the content
+    // doesn't look like ReAct JSON at all (sanitizeReActJSON returns
+    // the original string unchanged).
+    const partialContent = sanitizedPartial ?? HARDCODED_FALLBACK;
+    if (partialContent) {
+      // 持久化部分内容到 DB
+      try {
+        await prisma.message.create({
+          data: {
+            id: assistantMsgId,
+            conversationId,
+            role: "assistant",
+            content: partialContent,
+            model: resolvedModel,
+          },
+        });
+      } catch (err) {
+        logger.warn(
+          { errorCode: ErrorCode.AE_INTERRUPT_PERSIST_FAILED, error: err instanceof Error ? err.message : "Unknown error", conversationId },
+          "Failed to persist partial agent-executor content on interrupt",
+        );
+      }
+
+      // 仅在尚未流式输出时补偿输出（phase !== "responding" 时 token 仅缓存未发送）
+      if (!state.outputState.responseStarted) {
+        for (const char of partialContent) {
+          yield { type: "token", content: char, message_id: assistantMsgId };
+        }
+      }
+    }
+    yield {
+      type: "done",
+      message_id: assistantMsgId,
+      usage: {},
+      suggestions: undefined,
+      memory: { injected: 0, extracted: 0 },
+      validated: false,
+      fallback_used: !partialContent || undefined,
+      route: "TASK",
     };
   }
 
@@ -566,7 +609,7 @@ export class AgentExecutor implements RouteAgent {
         collectedKBChunks.push(...kbResults);
       }
     } catch (e) {
-      logger.warn(e, "simple_qa: KB search failed, proceeding without KB context");
+      logger.warn({ errorCode: ErrorCode.AE_SIMPLE_QA_KB_FAILED, err: e }, "simple_qa: KB search failed, proceeding without KB context");
     }
 
     // 2. 构建简洁的 QA prompt（无 ReAct 结构）
@@ -637,12 +680,12 @@ ${kbContext}
           },
         });
       } catch (e) {
-        logger.warn(e, "simple_qa: Failed to persist assistant message");
+        logger.warn({ errorCode: ErrorCode.AE_SIMPLE_QA_PERSIST_FAILED, err: e }, "simple_qa: Failed to persist assistant message");
       }
 
       // 记忆记录由 execute() 尾部共享代码统一处理
     } catch (e) {
-      logger.error(e, "simple_qa: LLM call failed");
+      logger.error({ errorCode: ErrorCode.AE_SIMPLE_QA_LLM_FAILED, err: e }, "simple_qa: LLM call failed");
       envelope.fallbackContent = HARDCODED_FALLBACK;
     }
   }
@@ -666,14 +709,14 @@ ${kbContext}
 /**
  * 检测工具输出是否为 search_knowledge_base 的返回结果。
  */
-function isKnowledgeBaseResult(toolResult: string): boolean {
+export function isKnowledgeBaseResult(toolResult: string): boolean {
   return toolResult.includes('"results"') && toolResult.includes('"found"');
 }
 
 /**
  * 从 search_knowledge_base 工具返回的 JSON 中提取 KB chunk 文本。
  */
-function extractKBChunks(toolResult: string): string[] {
+export function extractKBChunks(toolResult: string): string[] {
   if (!toolResult.includes('"results"') || !toolResult.includes('"found"')) {
     return [];
   }

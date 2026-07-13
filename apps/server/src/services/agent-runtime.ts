@@ -14,6 +14,7 @@ import { prisma } from "../db.js";
 import { resolveModel } from "../providers/registry.js";
 import type { ChatMessage } from "../providers/types.js";
 import { logger } from "@agentforge/logger";
+import { ErrorCode } from "./agent-runtime/errors/codes.js";
 import {
   agentRouteClassificationTotal,
   agentRouteConfidence,
@@ -231,6 +232,7 @@ export class AgentRuntimeService {
         AgentRuntimeService.sessionLocks.delete(firstKey);
         logger.warn(
           {
+            errorCode: ErrorCode.AR_SESSION_LOCK_OVERFLOW,
             evictedKey: firstKey,
             mapSize: AgentRuntimeService.sessionLocks.size,
           },
@@ -258,6 +260,7 @@ export class AgentRuntimeService {
       // 当前请求的 currentLock 已写入 Map，后续请求将等待 currentLock（健康锁）
       logger.warn(
         {
+          errorCode: ErrorCode.AR_SESSION_LOCK_TIMEOUT,
           lockKey,
           timeoutMs: AgentRuntimeService.SESSION_LOCK_TIMEOUT_MS,
         },
@@ -522,7 +525,7 @@ export class AgentRuntimeService {
         } catch (e) {
           // 唯一约束冲突=Agent 已保存，忽略；其他错误记录日志
           if (!(e instanceof Error && e.message.includes("Unique constraint"))) {
-            logger.warn(e, "Failed to persist assistant message in orchestrator");
+            logger.warn({ errorCode: ErrorCode.AR_MSG_PERSIST_FAILED, err: e }, "Failed to persist assistant message in orchestrator");
           }
         }
       }

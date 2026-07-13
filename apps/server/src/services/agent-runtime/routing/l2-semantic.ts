@@ -20,6 +20,7 @@ import { prisma } from "../../../db.js";
 import { getDefaultEmbeddingProvider } from "../../embeddings.js";
 import type { EmbeddingProvider } from "../../embeddings.js";
 import { logger } from "@agentforge/logger";
+import { ErrorCode } from "../errors/codes.js";
 
 // ── Zod Schema ──
 
@@ -134,7 +135,7 @@ export class SemanticClassifier {
         matches: matches.slice(0, 5), // 只保留 Top-5 供 L3 使用
       };
     } catch (err) {
-      logger.warn(err, "SemanticClassifier: classification failed, falling back to LLM Router");
+      logger.warn({ errorCode: ErrorCode.RT_L2_CLASSIFY_FAILED, err }, "SemanticClassifier: classification failed, falling back to LLM Router");
       return null;
     }
   }
@@ -174,7 +175,7 @@ export class SemanticClassifier {
       if (parsed.success) {
         matches.push(parsed.data);
       } else {
-        logger.warn({ row, error: parsed.error }, "SemanticClassifier: invalid match row");
+        logger.warn({ errorCode: ErrorCode.RT_L2_INVALID_MATCH, row, error: parsed.error }, "SemanticClassifier: invalid match row");
       }
     }
 
