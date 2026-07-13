@@ -1,11 +1,7 @@
-// AgentService — Facade for Agent Runner
-//
-// Phase 1: Delegates entirely to LegacyAgentRunner.
-// Phase 2: RunnerSelector picks between LegacyAgentRunner and LangGraphAgentRunner
-//          based on session engine stickiness and per-caller rollout config.
+// AgentService — Facade for Agent Runner.
 //
 // All callers (AgentExecutor, routes/agent.ts, workflows, teams) use this
-// class exclusively — never the runner implementations directly.
+// class exclusively — never the runner implementation directly.
 
 import { LegacyAgentRunner } from "./runner/legacy-agent-runner.js";
 import type { AgentStreamEvent, AgentStep } from "@agentforge/shared-types";

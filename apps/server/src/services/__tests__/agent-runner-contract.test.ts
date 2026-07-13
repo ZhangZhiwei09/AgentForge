@@ -1,11 +1,8 @@
 /**
- * Agent Runner Contract Test — Phase 0 Baseline
+ * Agent Runner Contract Test — Baseline
  *
- * Captures legacy AgentService's behavior as a contract snapshot.
- * These tests define "what must not change" when langgraph runner is introduced.
- *
- * @see docs/design/langchain-langgraph-refactor-plan.md §14
- * @see docs/design/parity-test-design.md
+ * Captures AgentService's behavior as a contract snapshot.
+ * These tests define the expected Agent Runner contract.
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";

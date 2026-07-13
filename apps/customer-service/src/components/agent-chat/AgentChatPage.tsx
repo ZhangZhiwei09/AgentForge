@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { useAgentChatStream } from "@/hooks/useAgentChatStream";
 import type { AgentMessage } from "@/hooks/useAgentChatStream";
-import { RichMessageRenderer, DiagnosisCard } from "@agentforge/cui";
+import { RichMessageRenderer, DiagnosisCard, ClarificationCard } from "@agentforge/cui";
 import { SessionList } from "./SessionList";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { QuickReplies } from "@/components/customer-chat/QuickReplies";
@@ -128,6 +128,10 @@ export function AgentChatPage() {
                             : "bg-white border border-[hsl(var(--cs-border))] text-[hsl(var(--foreground))] rounded-bl-md"
                         }`}
                       >
+                        {/* 诊断信息采集卡片（信息不足时提示用户补充） */}
+                        {msg.role === "assistant" && msg.clarification && (
+                          <ClarificationCard clarification={msg.clarification} />
+                        )}
                         {/* 诊断进度卡片 */}
                         {msg.role === "assistant" && msg.diagnosis && (
                           <DiagnosisCard diagnosis={msg.diagnosis} />

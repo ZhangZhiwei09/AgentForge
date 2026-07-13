@@ -161,6 +161,7 @@ export type {
 export type {
   AgentMessage,
   AgentStreamMeta,
+  ClarificationRequest,
   DiagnosisProgress,
   DiagnosisPhase,
 } from "./agent-chat";

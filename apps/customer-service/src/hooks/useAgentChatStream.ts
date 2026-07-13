@@ -8,6 +8,7 @@ import type {
   AgentMessage,
   DiagnosisProgress,
   DiagnosisPhase,
+  ClarificationRequest,
 } from "@agentforge/shared-types";
 
 // Re-export for backward compatibility
@@ -160,6 +161,7 @@ export function useAgentChatStream() {
         const contentBlocks: ContentBlock[] = [];
         let meta: StreamMeta | null = null;
         let diagnosisProgress: DiagnosisProgress | undefined;
+        let clarificationData: ClarificationRequest | undefined;
 
         // Helper: update the stream message with current diagnosis progress
         function updateStreamWithDiagnosis(dp: DiagnosisProgress | undefined) {
@@ -302,6 +304,37 @@ export function useAgentChatStream() {
                 continue;
               }
 
+              // ── 诊断信息采集事件 ──
+
+              if (chunk.type === "clarification_needed") {
+                clarificationData = {
+                  intent: chunk.intent as string,
+                  missingFields: chunk.missing_fields as string[],
+                  promptMessage: chunk.prompt_message as string,
+                  hints: chunk.hints as string[],
+                };
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  if (last?.id === "__stream__") {
+                    return [
+                      ...prev.slice(0, -1),
+                      { ...last, clarification: clarificationData },
+                    ];
+                  }
+                  return [
+                    ...prev,
+                    {
+                      id: "__stream__",
+                      role: "assistant" as const,
+                      content: "",
+                      timestamp: Date.now(),
+                      clarification: clarificationData,
+                    },
+                  ];
+                });
+                continue;
+              }
+
               if (chunk.type === "token" && chunk.content) {
                 streamContent += chunk.content;
                 setMessages((prev) => {
@@ -309,7 +342,7 @@ export function useAgentChatStream() {
                   if (last?.id === "__stream__") {
                     return [
                       ...prev.slice(0, -1),
-                      { ...last, content: streamContent, diagnosis: diagnosisProgress },
+                      { ...last, content: streamContent, diagnosis: diagnosisProgress, clarification: clarificationData },
                     ];
                   }
                   return [
@@ -321,6 +354,7 @@ export function useAgentChatStream() {
                       timestamp: Date.now(),
                       knowledge: knowledgeResults,
                       diagnosis: diagnosisProgress,
+                      clarification: clarificationData,
                     },
                   ];
                 });
@@ -353,6 +387,7 @@ export function useAgentChatStream() {
                           contentBlocks:
                             allBlocks.length > 0 ? allBlocks : undefined,
                           diagnosis: diagnosisProgress ?? last.diagnosis,
+                          clarification: clarificationData ?? last.clarification,
                         },
                       ];
                     }

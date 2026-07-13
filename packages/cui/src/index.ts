@@ -45,6 +45,7 @@ export {
   StatusCard,
   TableCard,
   DiagnosisCard,
+  ClarificationCard,
 } from "./cards";
 
 // ── Utils ──

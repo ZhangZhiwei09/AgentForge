@@ -143,6 +143,14 @@ export type RouteStreamEvent =
       message_id: string;
     }
   | {
+      type: "clarification_needed";
+      message_id: string;
+      intent: string;
+      missing_fields: string[];
+      prompt_message: string;
+      hints: string[];
+    }
+  | {
       type: "error";
       content: string;
     };
