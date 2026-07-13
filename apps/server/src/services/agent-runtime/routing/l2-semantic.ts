@@ -124,6 +124,9 @@ export class SemanticClassifier {
         "SemanticClassifier: L2 classification complete",
       );
 
+      // 异步更新样本使用计数（非阻塞，失败静默忽略）
+      this.recordUsage(matches.map((m) => m.sampleId)).catch(() => {});
+
       return {
         route: voteResult.route,
         confidence: voteResult.confidence,

@@ -376,6 +376,7 @@ export class AgentRuntimeService {
       }
 
       // ── 3. QueryRouter 分类 ──
+      const classifyStart = Date.now();
       const decision = await this.router.classify(
         userMessage,
         historyMessages,
@@ -408,6 +409,23 @@ export class AgentRuntimeService {
         { route: decision.route },
         decision.confidence,
       );
+
+      // ── 路由分类审计日志（非阻塞，失败静默忽略）──
+      const classifyLatencyMs = Date.now() - (classifyStart ?? Date.now());
+      prisma.routeClassificationLog.create({
+        data: {
+          id: randomUUID(),
+          sessionId: conversation.sessionId,
+          conversationId: conversation.id,
+          userMessage: userMessage.slice(0, 2000),
+          route: decision.route,
+          confidence: decision.confidence,
+          source,
+          latencyMs: classifyLatencyMs,
+        },
+      }).catch(() => {
+        // 非关键路径，不影响路由流程
+      });
 
       // ── 4. 构建 RouteContext ──
       let context: RouteContext = {
