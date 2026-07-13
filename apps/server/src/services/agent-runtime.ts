@@ -278,7 +278,7 @@ export class AgentRuntimeService {
     try {
       // ── 1. Session 层 ──
       const conversation = await this.getOrCreateConversation(sessionId);
-      const [providerName, resolvedModel] = resolveModel(this.modelId);
+      const { providerName, modelId: resolvedModel } = resolveModel(this.modelId);
       const withinHours = this.isWithinServiceHours();
 
       const { intent } = intentDetector.detect(userMessage);

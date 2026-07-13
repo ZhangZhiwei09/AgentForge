@@ -86,7 +86,7 @@ export class LegacyAgentRunner {
     scope?.controller.start();
 
     // 1. Resolve model/provider
-    const [providerName, resolvedModel] = resolveModel(options.model);
+    const { providerName, modelId: resolvedModel } = resolveModel(options.model);
     const provider = getProvider(providerName);
 
     // 1b. Initialize Agent Guard
@@ -987,7 +987,7 @@ export class LegacyAgentRunner {
         conversationId,
         role: "user",
         content: userResponse,
-        model: resolveModel()[1],
+        model: resolveModel().modelId,
       },
     });
 
@@ -1260,7 +1260,7 @@ export class LegacyAgentRunner {
     startIteration: number,
     scope?: ExecutionScope,
   ): AsyncGenerator<AgentStreamEvent> {
-    const [providerName, resolvedModel] = resolveModel();
+    const { providerName, modelId: resolvedModel } = resolveModel();
     const provider = getProvider(providerName);
     const signal = scope?.context.signal;
 

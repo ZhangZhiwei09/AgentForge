@@ -65,7 +65,7 @@ AgentForge/
 | 层 | 技术 |
 |----|------|
 | **前端** | React 19 · Vite 6 · TypeScript 5.7 · Tailwind CSS 3 · Zustand 5 · React Router 7 · TanStack Query 5 |
-| **后端** | Node.js 20+ · Hono 4 · TypeScript 5.7 · Zod 3 · LangChain/LangGraph |
+| **后端** | Node.js 20+ · Hono 4 · TypeScript 5.7 · Zod 3 · OpenAI SDK · DeepSeek SDK |
 | **数据** | Prisma 6 · PostgreSQL 16 (pgvector) · Redis 7 · MinIO |
 | **向量检索** | PGVector · Milvus 2.4 · Elasticsearch 8 · Neo4j 5 (知识图谱) |
 | **可观测性** | Langfuse · OpenTelemetry · Jaeger · Prometheus · pino |

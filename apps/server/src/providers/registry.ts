@@ -115,9 +115,15 @@ export function firstProvider(): string {
   return Object.keys(providers)[0];
 }
 
+/** resolveModel 返回的结构化类型，替代 `[providerName, modelId]` 元组 */
+export interface ResolvedModel {
+  providerName: string;
+  modelId: string;
+}
+
 // 模型解析逻辑：给定一个 modelId，找到它属于哪个 Provider
 // 如果没传 modelId，用 defaultModel；如果找不到匹配，回退到第一个 Provider 的第一个模型
-export function resolveModel(modelId?: string | null): [string, string] {
+export function resolveModel(modelId?: string | null): ResolvedModel {
   initProviders();
 
   const targetModel = modelId || settings.defaultModel;
@@ -126,7 +132,7 @@ export function resolveModel(modelId?: string | null): [string, string] {
   for (const [name, p] of Object.entries(providers)) {
     for (const m of p.listModels()) {
       if (m.id === targetModel) {
-        return [name, targetModel]; // 返回 [provider名称, 模型ID]
+        return { providerName: name, modelId: targetModel };
       }
     }
   }
@@ -134,5 +140,5 @@ export function resolveModel(modelId?: string | null): [string, string] {
   // 模型未找到 —— 兜底：用第一个 Provider 的第一个模型
   const first = firstProvider();
   const firstModel = providers[first]?.listModels()[0]?.id || targetModel;
-  return [first, firstModel];
+  return { providerName: first, modelId: firstModel };
 }

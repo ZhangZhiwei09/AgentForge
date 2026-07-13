@@ -132,7 +132,7 @@ export async function fewShotClassify(
   modelId: string | null,
   trace?: ObservabilityTrace,
 ): Promise<RouterDecision | null> {
-  const [providerName, model] = resolveModel(modelId);
+  const { providerName, modelId: model } = resolveModel(modelId);
 
   try {
     const contextMessages: ChatMessage[] = [
@@ -211,7 +211,7 @@ export async function llmClassify(
   modelId: string | null,
   trace?: ObservabilityTrace,
 ): Promise<RouterDecision | null> {
-  const [providerName, model] = resolveModel(modelId);
+  const { providerName, modelId: model } = resolveModel(modelId);
 
   try {
     const contextMessages: ChatMessage[] = [

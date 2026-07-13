@@ -148,17 +148,15 @@ export class SemanticClassifier {
     queryVec: number[],
     k: number,
   ): Promise<SemanticMatch[]> {
-    const vecLiteral = `[${queryVec.join(",")}]`;
+    const vecStr = `[${queryVec.join(",")}]`;
 
-    const rows = await prisma.$queryRawUnsafe<RawMatchRow[]>(
-      `SELECT id, route, text, 1 - (embedding <=> $1::vector) AS similarity
+    const rows = await prisma.$queryRaw<RawMatchRow[]>`
+      SELECT id, route, text, 1 - (embedding <=> ${vecStr}::vector) AS similarity
        FROM intent_samples
        WHERE active = true AND embedding IS NOT NULL
-       ORDER BY embedding <=> $1::vector
-       LIMIT $2`,
-      vecLiteral,
-      k,
-    );
+       ORDER BY embedding <=> ${vecStr}::vector
+       LIMIT ${k}
+    `;
 
     // 校验外部数据
     const matches: SemanticMatch[] = [];

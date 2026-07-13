@@ -633,7 +633,7 @@ ${kbContext}
 - 回答控制在 300 字以内`;
 
     // 3. 单次 LLM 调用（可配置更廉价模型）
-    const [providerName, model] = resolveModel(
+    const { providerName, modelId: model } = resolveModel(
       settings.simpleQaModel || context.resolvedModel,
     );
 

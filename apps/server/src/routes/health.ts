@@ -20,7 +20,7 @@ export const healthRoutes = new Hono().get("/api/ready", async (c) => {
 
   // 2. LLM Provider (check primary model resolvable)
   try {
-    const [providerName] = resolveModel(null);
+    const { providerName } = resolveModel(null);
     if (providerName) {
       checks.llm = "ok";
     } else {
