@@ -1,5 +1,4 @@
-// AgentRunner interface — Phase 1 runner contract
-// All runner implementations (legacy, langgraph) must satisfy this interface.
+// AgentRunner interface — The contract all agent runner implementations must satisfy.
 
 import type { AgentStreamEvent } from "@agentforge/shared-types";
 import type { ExecutionScope } from "../../../runtime/scope.js";
@@ -72,7 +71,4 @@ export interface AgentRunner {
   } | null>;
 }
 
-// ── Engine Type ─────────────────────────────────────────
 
-/** Agent engine type — persisted per-session for stickiness. */
-export type AgentEngine = "legacy" | "langgraph";

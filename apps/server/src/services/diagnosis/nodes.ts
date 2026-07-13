@@ -302,13 +302,7 @@ export function selfCheckNode(state: DiagnosisState): Partial<DiagnosisState> {
   return { warnings };
 }
 
-export function routeAfterRequiredFields(state: DiagnosisState): "ask_clarification" | "retrieve_knowledge" {
-  return state.missingFields.length > 0 ? "ask_clarification" : "retrieve_knowledge";
-}
 
-export function routeAfterToolDecision(state: DiagnosisState): "query_monitoring" | "merge_evidence" {
-  return state.toolPlan.length > 0 ? "query_monitoring" : "merge_evidence";
-}
 
 function buildKnowledgeQuery(state: DiagnosisState): string {
   const parts = [
