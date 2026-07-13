@@ -18,6 +18,7 @@ import {
   extractEntitiesFromQuery,
   getMissingFields,
 } from "../diagnosis/nodes.js";
+import { agentRouteInvocations } from "../../observability/metrics.js";
 
 const AGENT_USER_ID = "00000000-0000-0000-0000-000000000002";
 const DIAGNOSIS_TEMPLATE_ID = "identity-diagnosis";
@@ -239,6 +240,7 @@ export class DiagnosisRouteAgent implements RouteAgent {
         memory: { injected: context.injectedMemories.length, extracted: 0 },
         route: "DIAGNOSIS",
       };
+      agentRouteInvocations.inc({ route: "DIAGNOSIS", status: "success" });
       return;
     }
 
@@ -261,6 +263,7 @@ export class DiagnosisRouteAgent implements RouteAgent {
         { error: err, sessionId: context.sessionId },
         "DiagnosisRouteAgent: failed to create team from template",
       );
+      agentRouteInvocations.inc({ route: "DIAGNOSIS", status: "error" });
       yield {
         type: "error",
         content: "诊断服务暂时不可用，已切换为普通模式处理您的问题。",
@@ -316,6 +319,7 @@ export class DiagnosisRouteAgent implements RouteAgent {
         { error: err, teamId: team.id },
         "DiagnosisRouteAgent: team execution failed",
       );
+      agentRouteInvocations.inc({ route: "DIAGNOSIS", status: "error" });
       yield {
         type: "error",
         content: "诊断过程出现异常，请稍后重试或联系人工客服。",
@@ -334,6 +338,7 @@ export class DiagnosisRouteAgent implements RouteAgent {
     }
 
     // 6. 发送 done 事件
+    agentRouteInvocations.inc({ route: "DIAGNOSIS", status: "success" });
     yield {
       type: "done",
       message_id: messageId,

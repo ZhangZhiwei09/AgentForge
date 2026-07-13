@@ -20,6 +20,7 @@ import { prisma } from "../../../db.js";
 import { getDefaultEmbeddingProvider } from "../../embeddings.js";
 import type { EmbeddingProvider } from "../../embeddings.js";
 import { logger } from "@agentforge/logger";
+import { ErrorCode } from "../errors/codes.js";
 
 // ── Zod Schema ──
 
@@ -124,6 +125,9 @@ export class SemanticClassifier {
         "SemanticClassifier: L2 classification complete",
       );
 
+      // 异步更新样本使用计数（非阻塞，失败静默忽略）
+      this.recordUsage(matches.map((m) => m.sampleId)).catch(() => {});
+
       return {
         route: voteResult.route,
         confidence: voteResult.confidence,
@@ -131,7 +135,7 @@ export class SemanticClassifier {
         matches: matches.slice(0, 5), // 只保留 Top-5 供 L3 使用
       };
     } catch (err) {
-      logger.warn(err, "SemanticClassifier: classification failed, falling back to LLM Router");
+      logger.warn({ errorCode: ErrorCode.RT_L2_CLASSIFY_FAILED, err }, "SemanticClassifier: classification failed, falling back to LLM Router");
       return null;
     }
   }
@@ -144,17 +148,15 @@ export class SemanticClassifier {
     queryVec: number[],
     k: number,
   ): Promise<SemanticMatch[]> {
-    const vecLiteral = `[${queryVec.join(",")}]`;
+    const vecStr = `[${queryVec.join(",")}]`;
 
-    const rows = await prisma.$queryRawUnsafe<RawMatchRow[]>(
-      `SELECT id, route, text, 1 - (embedding <=> $1::vector) AS similarity
+    const rows = await prisma.$queryRaw<RawMatchRow[]>`
+      SELECT id, route, text, 1 - (embedding <=> ${vecStr}::vector) AS similarity
        FROM intent_samples
        WHERE active = true AND embedding IS NOT NULL
-       ORDER BY embedding <=> $1::vector
-       LIMIT $2`,
-      vecLiteral,
-      k,
-    );
+       ORDER BY embedding <=> ${vecStr}::vector
+       LIMIT ${k}
+    `;
 
     // 校验外部数据
     const matches: SemanticMatch[] = [];
@@ -171,7 +173,7 @@ export class SemanticClassifier {
       if (parsed.success) {
         matches.push(parsed.data);
       } else {
-        logger.warn({ row, error: parsed.error }, "SemanticClassifier: invalid match row");
+        logger.warn({ errorCode: ErrorCode.RT_L2_INVALID_MATCH, row, error: parsed.error }, "SemanticClassifier: invalid match row");
       }
     }
 

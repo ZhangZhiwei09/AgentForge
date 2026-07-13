@@ -39,7 +39,7 @@ export class CodeGenService {
     const runId = run.id;
 
     // 2. Resolve model/provider
-    const [, resolvedModel] = resolveModel(options.model);
+    const { modelId: resolvedModel } = resolveModel(options.model);
 
     // 3. Send meta event
     yield {

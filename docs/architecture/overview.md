@@ -10,7 +10,9 @@ V1 ChatGPT Clone → V2 Memory → V3 RAG → V4 Tool Calling → P0 Platform Fo
 
 | Package | Runtime | Purpose |
 |---|---|---|
-| `apps/web` | React 19 / Vite 6 / TypeScript | Chat UI on port 5173 |
+| `apps/customer-service` | React 19 / Vite 6 / TypeScript | 智能客服界面 (port 5173) |
+| `apps/app-creator` | React 19 / Vite 6 / TypeScript | Agent 构建器 (port 8080) |
+| `apps/data-admin` | React 19 / Vite 6 / TypeScript | 数据管理后台 (port 5200) |
 | `apps/server` | Node.js 20+ / Hono 4 / TypeScript | Backend API on port 8000 |
 | `packages/database` | Prisma 6 | Shared Prisma schema + client singleton (`@agentforge/database`) |
 | `packages/shared-types` | TypeScript (type-only) | Shared type definitions — no runtime code |

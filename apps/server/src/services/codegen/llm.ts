@@ -28,7 +28,7 @@ export async function callLLM(
   maxTokens: number,
   signal?: AbortSignal,
 ): Promise<string> {
-  const [providerName, resolvedModel] = resolveModel(model);
+  const { providerName, modelId: resolvedModel } = resolveModel(model);
   const provider = getProvider(providerName);
 
   const stream = provider.streamChat(

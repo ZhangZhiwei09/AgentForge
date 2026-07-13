@@ -9,7 +9,8 @@ import { z } from "zod";
 import { getProvider, resolveModel } from "../../../providers/registry.js";
 import type { ChatMessage } from "../../../providers/types.js";
 import { logger } from "@agentforge/logger";
-import type { RouteName, RouterDecision } from "../types.js";
+import { ErrorCode } from "../errors/codes.js";
+import type { RouterDecision } from "../types.js";
 import type { ObservabilityTrace } from "../../../observability/provider.js";
 import type { SemanticMatch } from "./l2-semantic.js";
 
@@ -113,7 +114,7 @@ export function parseRouterDecision(raw: string): RouterDecision | null {
       escalationReason: result.data.escalation_reason || undefined,
     };
   } catch (err: unknown) {
-    logger.warn({ raw: raw.slice(0, 200), err }, "Failed to parse router decision");
+    logger.warn({ errorCode: ErrorCode.RT_PARSE_FAILED, raw: raw.slice(0, 200), err }, "Failed to parse router decision");
     return null;
   }
 }
@@ -131,7 +132,7 @@ export async function fewShotClassify(
   modelId: string | null,
   trace?: ObservabilityTrace,
 ): Promise<RouterDecision | null> {
-  const [providerName, model] = resolveModel(modelId);
+  const { providerName, modelId: model } = resolveModel(modelId);
 
   try {
     const contextMessages: ChatMessage[] = [
@@ -188,12 +189,12 @@ export async function fewShotClassify(
     }
 
     logger.warn(
-      { confidence: parsed?.confidence, route: parsed?.route },
+      { errorCode: ErrorCode.RT_L3_LOW_CONFIDENCE, confidence: parsed?.confidence, route: parsed?.route },
       "Router L3: low confidence or parse failure, falling through to L4",
     );
     return null;
   } catch (e) {
-    logger.warn(e, "Router L3: LLM call failed, falling through to L4");
+    logger.warn({ errorCode: ErrorCode.RT_L3_LLM_FAILED, err: e }, "Router L3: LLM call failed, falling through to L4");
     return null;
   }
 }
@@ -210,7 +211,7 @@ export async function llmClassify(
   modelId: string | null,
   trace?: ObservabilityTrace,
 ): Promise<RouterDecision | null> {
-  const [providerName, model] = resolveModel(modelId);
+  const { providerName, modelId: model } = resolveModel(modelId);
 
   try {
     const contextMessages: ChatMessage[] = [
@@ -263,11 +264,11 @@ export async function llmClassify(
     }
 
     logger.warn(
-      { confidence: parsed?.confidence, route: parsed?.route },
+      { errorCode: ErrorCode.RT_L4_LOW_CONFIDENCE, confidence: parsed?.confidence, route: parsed?.route },
       "Router L4: low confidence, falling back to IntentDetector",
     );
   } catch (e) {
-    logger.warn(e, "Router L4: LLM call failed, falling back to IntentDetector");
+    logger.warn({ errorCode: ErrorCode.RT_L4_LLM_FAILED, err: e }, "Router L4: LLM call failed, falling back to IntentDetector");
   }
 
   return null;

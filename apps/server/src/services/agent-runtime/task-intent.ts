@@ -155,7 +155,7 @@ export class TaskIntentClassifier {
 
     // ── 2. LLM 分类 ──
     try {
-      const [providerName, model] = resolveModel(
+      const { providerName, modelId: model } = resolveModel(
         settings.taskIntentModel || settings.defaultModel,
       );
 

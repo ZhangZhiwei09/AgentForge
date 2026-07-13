@@ -7,6 +7,8 @@ import type { ExecutionScope } from "../../runtime/scope.js";
 import { streamTokens } from "./types.js";
 import { logger } from "@agentforge/logger";
 import { prisma } from "../../db.js";
+import { ErrorCode } from "./errors/codes.js";
+import { agentRouteInvocations } from "../../observability/metrics.js";
 
 // ── 转接话术 ──
 
@@ -52,7 +54,8 @@ export class HumanAgent implements RouteAgent {
         data: { status: "escalated" },
       });
     } catch (e) {
-      logger.warn(e, "Failed to update conversation status to escalated");
+      logger.warn({ errorCode: ErrorCode.HM_ESCALATE_FAILED, err: e }, "Failed to update conversation status to escalated");
+      agentRouteInvocations.inc({ route: "HUMAN", status: "error" });
     }
 
     // 日志记录升级事件
@@ -85,6 +88,7 @@ export class HumanAgent implements RouteAgent {
     yield* streamTokens(message, assistantMsgId);
 
     // 发送 done
+    agentRouteInvocations.inc({ route: "HUMAN", status: "success" });
     yield {
       type: "done",
       message_id: assistantMsgId,

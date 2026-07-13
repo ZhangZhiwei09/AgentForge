@@ -11,7 +11,8 @@ export function looksLikeReActJSON(text: string): boolean {
     trimmed.startsWith("{") &&
     /"observation"\s*:/.test(trimmed) &&
     /"analysis"\s*:/.test(trimmed) &&
-    /"plan"\s*:/.test(trimmed)
+    /"plan"\s*:/.test(trimmed) &&
+    /"decision"\s*:/.test(trimmed) // 五键检测：decision 是 ReAct 独有特征，避免误判正常 JSON
   );
 }
 

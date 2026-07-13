@@ -16,6 +16,7 @@ import { agentRoutes } from "./routes/agent.js";
 import { workflowRoutes } from "./routes/workflows.js";
 import { teamRoutes } from "./routes/teams.js";
 import { debugDiagnosisRoutes } from "./routes/debug-diagnosis.js";
+import { healthRoutes } from "./routes/health.js";
 import { registerMetricsEndpoint } from "./observability/metrics.js";
 import { appCreationModule } from "./modules/app-creation/index.js";
 import { dataManagementModule } from "./modules/data-management/index.js";
@@ -48,6 +49,9 @@ export async function createApp() {
 
   // 健康检查端点
   app.get("/api/health", (c) => c.json({ status: "ok" }));
+
+  // Readiness 端点（DB + Redis + Provider 连通性）
+  app.route("/", healthRoutes);
 
   // Prometheus 指标端点 — 注册在 auth 中间件应用的同一层级
   // （metricsMiddleware 本身捕捉了所有请求，但 /api/metrics 自身需要显式路由）
