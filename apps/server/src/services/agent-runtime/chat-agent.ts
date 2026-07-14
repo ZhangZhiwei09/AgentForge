@@ -10,6 +10,7 @@ import { logger } from "@agentforge/logger";
 import { extractJSONFromLLMResponse } from "../../lib/json-utils.js";
 import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
 import type { ExecutionScope } from "../../runtime/scope.js";
+import type { ObservabilityTrace } from "../../observability/provider.js";
 import { streamTokens } from "./types.js";
 import {
   AGENTFORGE_PERSONA,
@@ -40,7 +41,7 @@ export class ChatAgent implements RouteAgent {
 
   async *execute(
     context: RouteContext,
-    _scope?: ExecutionScope,
+    scope?: ExecutionScope,
   ): AsyncGenerator<RouteStreamEvent> {
     const {
       resolvedModel,
@@ -70,6 +71,15 @@ export class ChatAgent implements RouteAgent {
     let suggestions: string[] = [];
     let fallbackUsed = false;
 
+    // ── Observability: LLM Generation ──
+    const trace: ObservabilityTrace | undefined = scope?.trace;
+    let lfGen = trace?.generation({
+      name: "chat-agent-response",
+      model: resolvedModel,
+      input: { userMessage, historyLength: (history ?? []).length },
+      metadata: { provider: providerName },
+    });
+
     try {
       const provider = getProvider(providerName);
 
@@ -92,14 +102,41 @@ export class ChatAgent implements RouteAgent {
       if (parsed) {
         answer = parsed.answer;
         suggestions = parsed.suggestions;
+        lfGen?.end({
+          output: { answer: answer.slice(0, 500) },
+          usage: result.usage
+            ? {
+                promptTokens: result.usage.prompt_tokens,
+                completionTokens: result.usage.completion_tokens,
+                totalTokens:
+                  result.usage.prompt_tokens +
+                  result.usage.completion_tokens,
+              }
+            : undefined,
+        });
       } else {
         // JSON 解析失败 → 使用原始文本
         answer = result.content.trim() || "你好，有什么可以帮助你的？";
         fallbackUsed = answer === "你好，有什么可以帮助你的？"; // 空内容兜底
+        lfGen?.end({
+          output: { answer: answer.slice(0, 500), parseFailed: true },
+          usage: result.usage
+            ? {
+                promptTokens: result.usage.prompt_tokens,
+                completionTokens: result.usage.completion_tokens,
+                totalTokens:
+                  result.usage.prompt_tokens +
+                  result.usage.completion_tokens,
+              }
+            : undefined,
+        });
       }
     } catch (e) {
       logger.warn(e, "ChatAgent LLM call failed, using fallback");
       agentRouteInvocations.inc({ route: "CHAT", status: "error" });
+      lfGen?.end({
+        output: { error: "LLM call failed", reason: e instanceof Error ? e.message : "Unknown error" },
+      });
       answer = "我是 AgentForge 智能助手，我能查询知识库、诊断系统故障。请告诉我你需要什么帮助？";
       fallbackUsed = true;
     }

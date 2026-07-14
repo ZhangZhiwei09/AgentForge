@@ -16,6 +16,7 @@
 import { getProvider, resolveModel } from "../../providers/registry.js";
 import { logger } from "@agentforge/logger";
 import { settings } from "../../config.js";
+import type { ObservabilityTrace } from "../../observability/provider.js";
 
 // ── 类型 ──────────────────────────────────────────────────
 
@@ -146,7 +147,7 @@ export class TaskIntentClassifier {
    * 2. 不确定 → LLM 分类（廉价模型，~30 token 输出）
    * 3. LLM 失败 → 默认 simple_qa（安全侧：宁可简答不破坏体验）
    */
-  async classify(message: string): Promise<TaskIntentResult> {
+  async classify(message: string, trace?: ObservabilityTrace): Promise<TaskIntentResult> {
     // ── 1. Regex 快速扫描 ──
     const quickResult = quickTaskScan(message);
     if (quickResult) {
@@ -160,6 +161,15 @@ export class TaskIntentClassifier {
       );
 
       const provider = getProvider(providerName);
+
+      // ── Observability: LLM Generation ──
+      const lfGen = trace?.generation({
+        name: "task-intent-classifier",
+        model,
+        input: { message },
+        metadata: { provider: providerName },
+      });
+
       const result = await provider.chatSync(
         [{ role: "user", content: message }],
         model,
@@ -171,6 +181,22 @@ export class TaskIntentClassifier {
 
       // 解析 JSON
       const parsed = this.parseResult(result.content);
+
+      lfGen?.end({
+        output: {
+          subclass: parsed?.subclass ?? "unknown",
+          confidence: parsed?.confidence ?? 0,
+        },
+        usage: result.usage
+          ? {
+              promptTokens: result.usage.prompt_tokens,
+              completionTokens: result.usage.completion_tokens,
+              totalTokens:
+                result.usage.prompt_tokens + result.usage.completion_tokens,
+            }
+          : undefined,
+      });
+
       if (parsed && parsed.confidence >= 0.5) {
         return parsed;
       }
