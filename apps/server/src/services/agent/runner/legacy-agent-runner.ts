@@ -335,6 +335,14 @@ export class LegacyAgentRunner {
                   );
                   args = {};
                 }
+                // ── Observability: Tool Generation ──
+                const toolStartMs = Date.now();
+                const toolGen = trace?.generation({
+                  name: `tool-${tc.name}`,
+                  model: resolvedModel,
+                  input: args,
+                  metadata: { stepNumber: totalSteps, callType: "native" },
+                });
                 const toolResult = await executeToolWithRetry(
                   tc.name,
                   args,
@@ -343,6 +351,14 @@ export class LegacyAgentRunner {
                   totalSteps,
                   scope?.context,
                 );
+                const nativeToolContent = executionResultToContent(toolResult);
+                toolGen?.end({
+                  output: {
+                    content: nativeToolContent.slice(0, 1000),
+                    status: toolResult.status,
+                    durationMs: Date.now() - toolStartMs,
+                  },
+                });
                 nativeToolCalls.push({
                   name: tc.name,
                   args,
@@ -351,7 +367,7 @@ export class LegacyAgentRunner {
                 yield {
                   type: "agent_observe",
                   step: totalSteps,
-                  result: executionResultToContent(toolResult),
+                  result: nativeToolContent,
                 };
               }
             }
@@ -850,6 +866,14 @@ export class LegacyAgentRunner {
         }
 
         // Execute with retry
+        // ── Observability: Tool Generation ──
+        const toolStartMs = Date.now();
+        const toolGen = trace?.generation({
+          name: `tool-${decision.tool}`,
+          model: resolvedModel,
+          input: decision.args,
+          metadata: { stepNumber: totalSteps, callType: "react" },
+        });
         const toolResult = await executeToolWithRetry(
           decision.tool,
           decision.args,
@@ -862,6 +886,14 @@ export class LegacyAgentRunner {
         // Check if the result is degraded
         const isDegraded = isDegradedResult(toolResult);
         const toolResultContent = executionResultToContent(toolResult);
+        toolGen?.end({
+          output: {
+            content: toolResultContent.slice(0, 1000),
+            status: toolResult.status,
+            isDegraded,
+            durationMs: Date.now() - toolStartMs,
+          },
+        });
         if (isDegraded) {
           step.error = {
             category: "degradable",
@@ -1135,6 +1167,14 @@ export class LegacyAgentRunner {
       const conversationMessages = truncateHistory(rawMessages, 6000);
 
       // Execute the tool with retry
+      // ── Observability: Tool Generation ──
+      const approvalToolStartMs = Date.now();
+      const approvalToolGen = scope?.trace?.generation({
+        name: `tool-${approval.toolName}`,
+        model: resolveModel().modelId,
+        input: args,
+        metadata: { stepNumber: approval.stepNumber, callType: "approval" },
+      });
       const toolResult = await executeToolWithRetry(
         approval.toolName,
         args,
@@ -1146,6 +1186,13 @@ export class LegacyAgentRunner {
 
       // Record result
       const approvalResultContent = executionResultToContent(toolResult);
+      approvalToolGen?.end({
+        output: {
+          content: approvalResultContent.slice(0, 1000),
+          status: toolResult.status,
+          durationMs: Date.now() - approvalToolStartMs,
+        },
+      });
       step.result = approvalResultContent;
       conversationMessages.push({
         role: "assistant",
@@ -1460,6 +1507,14 @@ export class LegacyAgentRunner {
                   );
                   tcArgs = {};
                 }
+                // ── Observability: Tool Generation ──
+                const toolStartMsC = Date.now();
+                const toolGenC = trace?.generation({
+                  name: `tool-${tc.name}`,
+                  model: resolvedModel,
+                  input: tcArgs,
+                  metadata: { stepNumber: totalSteps, callType: "native", phase: "continue" },
+                });
                 const result = await executeToolWithRetry(
                   tc.name,
                   tcArgs,
@@ -1468,6 +1523,14 @@ export class LegacyAgentRunner {
                   totalSteps,
                   scope?.context, // Propagate parent context for cancellation
                 );
+                const continueToolContent = executionResultToContent(result);
+                toolGenC?.end({
+                  output: {
+                    content: continueToolContent.slice(0, 1000),
+                    status: result.status,
+                    durationMs: Date.now() - toolStartMsC,
+                  },
+                });
                 yield {
                   type: "agent_observe",
                   step: totalSteps,
@@ -1829,6 +1892,14 @@ export class LegacyAgentRunner {
           continue; // Skip to next ReAct iteration
         }
 
+        // ── Observability: Tool Generation ──
+        const toolStartMsC2 = Date.now();
+        const toolGenC2 = trace?.generation({
+          name: `tool-${decision.tool}`,
+          model: resolvedModel,
+          input: decision.args,
+          metadata: { stepNumber: totalSteps, callType: "react", phase: "continue" },
+        });
         const toolResult = await executeToolWithRetry(
           decision.tool,
           decision.args,
@@ -1840,6 +1911,14 @@ export class LegacyAgentRunner {
         // Check if the result is degraded
         const isDegradedC = isDegradedResult(toolResult);
         const toolResultContentC = executionResultToContent(toolResult);
+        toolGenC2?.end({
+          output: {
+            content: toolResultContentC.slice(0, 1000),
+            status: toolResult.status,
+            isDegraded: isDegradedC,
+            durationMs: Date.now() - toolStartMsC2,
+          },
+        });
         if (isDegradedC) {
           step.error = {
             category: "degradable",

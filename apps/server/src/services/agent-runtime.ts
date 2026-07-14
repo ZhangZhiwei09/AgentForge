@@ -269,10 +269,12 @@ export class AgentRuntimeService {
     }
 
     // ── Observability Trace（提前声明，try/finally 均可访问）──
+    const runId = randomUUID();
     const provider = getObservabilityProvider();
     let lfTrace = provider.createTrace({
       name: "agent-chat",
       input: { message: userMessage },
+      metadata: { runId },
     });
 
     try {
@@ -334,6 +336,7 @@ export class AgentRuntimeService {
       const scope = createExecutionScope({
         signal: signal ?? new AbortController().signal,
         trace: lfTrace,
+        runId,
       });
       scope.controller.start();
 

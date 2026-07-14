@@ -13,6 +13,7 @@ import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
 import type { ExecutionScope } from "../../runtime/scope.js";
 import { prisma } from "../../db.js";
 import { logger } from "@agentforge/logger";
+import type { ObservabilityTrace } from "../../observability/provider.js";
 import {
   agentReActIterations,
   agentToolCallsTotal,
@@ -111,7 +112,7 @@ export class AgentExecutor implements RouteAgent {
     };
 
     // ── TASK 内部意图分类：simple_qa vs complex_task ──
-    const taskIntent = await getTaskIntentClassifier().classify(userMessage);
+    const taskIntent = await getTaskIntentClassifier().classify(userMessage, scope?.trace);
     logger.debug(
       { subclass: taskIntent.subclass, confidence: taskIntent.confidence },
       "TaskIntentClassifier result",
@@ -637,6 +638,15 @@ ${kbContext}
       settings.simpleQaModel || context.resolvedModel,
     );
 
+    // ── Observability: LLM Generation ──
+    const trace: ObservabilityTrace | undefined = scope?.trace;
+    let lfGen = trace?.generation({
+      name: "simple-qa-response",
+      model,
+      input: { userMessage, kbResultCount: kbResults.length },
+      metadata: { provider: providerName },
+    });
+
     try {
       const provider = getProvider(providerName);
 
@@ -658,6 +668,19 @@ ${kbContext}
       );
 
       const content = result.content || "";
+
+      lfGen?.end({
+        output: { answer: content.slice(0, 500) },
+        usage: result.usage
+          ? {
+              promptTokens: result.usage.prompt_tokens,
+              completionTokens: result.usage.completion_tokens,
+              totalTokens:
+                result.usage.prompt_tokens + result.usage.completion_tokens,
+            }
+          : undefined,
+      });
+
       for (const char of content) {
         yield {
           type: "token",
@@ -688,6 +711,9 @@ ${kbContext}
       // 记忆记录由 execute() 尾部共享代码统一处理
     } catch (e) {
       logger.error({ errorCode: ErrorCode.AE_SIMPLE_QA_LLM_FAILED, err: e }, "simple_qa: LLM call failed");
+      lfGen?.end({
+        output: { error: "LLM call failed", reason: e instanceof Error ? e.message : "Unknown error" },
+      });
       envelope.fallbackContent = HARDCODED_FALLBACK;
     }
   }
