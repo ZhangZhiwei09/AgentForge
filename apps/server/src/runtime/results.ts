@@ -92,32 +92,32 @@ export type ExecutionResult =
 export function successResult(
   output: string,
   metadata?: Record<string, unknown>,
-): ExecutionResult {
-  return { status: "success", output, ...(metadata ? { metadata } : {}) };
+) {
+  return { status: "success" as const, output, ...(metadata ? { metadata } : {}) };
 }
 
 export function partialResult(
   output: string,
   reason: string,
   metadata?: Record<string, unknown>,
-): ExecutionResult {
-  return { status: "partial", output, reason, ...(metadata ? { metadata } : {}) };
+) {
+  return { status: "partial" as const, output, reason, ...(metadata ? { metadata } : {}) };
 }
 
 export function failedResult(
   code: ExecutionErrorCode,
   message: string,
   retryable = false,
-): ExecutionResult {
-  return { status: "failed", error: { code, message, retryable } };
+) {
+  return { status: "failed" as const, error: { code, message, retryable } };
 }
 
-export function cancelledResult(reason: string): ExecutionResult {
-  return { status: "cancelled", reason };
+export function cancelledResult(reason: string) {
+  return { status: "cancelled" as const, reason };
 }
 
-export function timeoutResult(afterMs: number): ExecutionResult {
-  return { status: "timeout", afterMs };
+export function timeoutResult(afterMs: number) {
+  return { status: "timeout" as const, afterMs };
 }
 
 // ═══════════════════════════════════════════════════════
