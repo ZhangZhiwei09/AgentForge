@@ -1,8 +1,17 @@
 from fastapi import FastAPI
 
-app = FastAPI(title="AgentForge", version="0.0.1")
+from src.api.v1.health import router as health_router
 
 
-@app.get("/api/health")
-async def health():
-    return {"status": "ok"}
+def create_app() -> FastAPI:
+    app = FastAPI(title="AgentForge", version="0.0.1")
+    app.include_router(health_router)
+    return app
+
+
+app = create_app()
+
+if __name__ == "__main__":
+    import uvicorn
+
+    uvicorn.run("src.main:app", host="0.0.0.0", port=8000, reload=True)
