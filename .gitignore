@@ -29,5 +29,8 @@ apps/server/data/
 .claude/agent-memory/
 .claude/worktrees/
 
+# Test coverage reports
+apps/server/coverage/
+
 # Build artifacts
 *.tar.gz

@@ -14,6 +14,7 @@ COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.js
 COPY packages/shared-types ./packages/shared-types
 COPY packages/sdk ./packages/sdk
 COPY packages/ui ./packages/ui
+COPY packages/cui ./packages/cui
 COPY apps/customer-service ./apps/customer-service
 
 RUN pnpm install --frozen-lockfile
