@@ -22,7 +22,7 @@ SAFETY_KEYWORDS: list[re.Pattern] = [
     re.compile(r"忽略.*(指令|规则|限制|之前)"),
     re.compile(r"扮演.*(角色|黑客|坏人)"),
     re.compile(r"(DAN|jailbreak|system\s*prompt)", re.IGNORECASE),
-    re.compile(r"(ignore|forget).*\b(instruction|rule|prompt)\b", re.IGNORECASE),
+    re.compile(r"(ignore|forget).*(instruction|rule|prompt|everything|all)", re.IGNORECASE),
     re.compile(r"<\|im_start\|>", re.IGNORECASE),
     re.compile(r"<\|system\|>", re.IGNORECASE),
     re.compile(r"\[INST\].*/?INST\]", re.IGNORECASE),
