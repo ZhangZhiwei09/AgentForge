@@ -342,7 +342,7 @@ Step 7  Runtime 基础    █████████████  ✅
 Step 8  Runtime 执行    █████████████  ✅
 Step 9  Runtime 编排    █████████████  ✅
 Step 10 Agent + ReAct   █████████████  ✅
-Step 11 RAG + 后续      █████████████  待定 ← 下一步
+Step 11 RAG + 后续      █████████████  ✅
                         剩余 ≈ 19h+
 ```
 
@@ -376,6 +376,46 @@ Step 11 RAG + 后续      █████████████  待定 ← �
   - `src/agent/executor.py` — ReAct AgentExecutor（think → act → observe → respond）
   - `src/providers/` 更新 — stream_chat + tools 参数支持
   - `src/api/v1/chat.py` — Router 分类 → AgentExecutor 分发
-- ⏳ Step 11 待做：RAG + 高级模块
+- ✅ Step 11 已完成：RAG 基础 + 可观测性抽象 + 全量测试
+  - `src/rag/types.py` — KnowledgeSearchResult + KnowledgeService Protocol
+  - `src/observability/provider.py` — ObservabilityProvider Protocol + Noop 实现
+  - `tests/` — 57 个测试覆盖 config / auth / runtime / agent / tools
+  - pytest + pytest-asyncio 配置
 
-**里程碑 D 达成：完整 Agent 链路——Router → ReAct → Tool → SSE。**
+---
+
+**🎉 迁移完成！11 个 Step，4 个里程碑，全部达成。**
+
+```
+Milestone A "能跑的空壳"          Step 0 → 1 → 2   ✅
+Milestone B "有数据库+JWT验证"     Step 3 → 4 → 5   ✅
+Milestone C "能调 LLM+聊天"        Step 6           ✅
+Milestone D "Agent Runtime"        Step 7 → 8 → 9 → 10  ✅
+Milestone E "RAG 基础+测试"        Step 11          ✅
+```
+
+**最终项目结构：**
+
+```
+apps/server-py/src/
+├── agent/           # Agent 模块（Router + ReAct + Tools）
+│   ├── executor.py
+│   ├── router/pipeline.py
+│   ├── tools/base.py, registry.py, builtins/
+│   └── types.py
+├── api/v1/          # API 路由
+│   ├── chat.py      # POST /api/v1/chat（SSE 流式）
+│   └── health.py
+├── lib/auth.py      # JWT 验证
+├── models/          # SQLAlchemy ORM
+├── observability/   # 可观测性抽象
+├── providers/       # LLM Provider（OpenAI + Protocol）
+├── rag/             # RAG 类型 + 服务抽象
+├── runtime/         # Runtime 引擎（Context + Node + State + Events + Controller）
+├── schemas/         # Pydantic 请求/响应模型
+├── config.py        # pydantic-settings 配置
+├── db.py            # SQLAlchemy async engine
+└── main.py          # FastAPI 应用入口
+
+tests/               # 57 个测试
+```
