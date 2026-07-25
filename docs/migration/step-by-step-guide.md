@@ -338,8 +338,8 @@ Step 3  DB 连接         █████░░░░░░░  ✅
 Step 4  User 模型+建表  ███████░░░░░░  ✅
 Step 5  JWT 验证        █████████░░░░  ✅
 Step 6  LLM + 聊天      ██████████░░░  ✅
-Step 7  Runtime 基础    ████████████░  ⏳ ← 下一步
-Step 8  Runtime 执行    █████████████  4h
+Step 7  Runtime 基础    █████████████  ✅
+Step 8  Runtime 执行    █████████████  4h ← 下一步
 Step 9  Runtime 编排    █████████████  2h
 Step 10 Agent + ReAct   █████████████  10h
 Step 11 RAG + 后续      █████████████  待定
@@ -357,4 +357,8 @@ Step 11 RAG + 后续      █████████████  待定
   - `src/providers/registry.py` — Provider 注册中心（惰性初始化 + resolveModel）
   - `src/schemas/chat.py` — ChatMessage、StreamChunk、ChatSyncResult、ChatRequest
   - `src/api/v1/chat.py` — POST /api/v1/chat（SSE StreamingResponse）
-- ⏳ Step 7 待做：Runtime 基础（RunContext + RunState + StateMachine）
+- ✅ Step 7 已完成：Runtime 基础
+  - `src/runtime/context.py` — RunContext（frozen dataclass）+ 工厂函数
+  - `src/runtime/state.py` — ExecutionState（StrEnum）+ 状态转换表 + 校验
+  - `src/runtime/__init__.py` — 统一导出
+- ⏳ Step 8 待做：Runtime 执行（ExecutionNode + ExecutionTree + EventBus）
