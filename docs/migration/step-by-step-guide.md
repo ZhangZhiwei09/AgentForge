@@ -339,8 +339,8 @@ Step 4  User 模型+建表  ███████░░░░░░  ✅
 Step 5  JWT 验证        █████████░░░░  ✅
 Step 6  LLM + 聊天      ██████████░░░  ✅
 Step 7  Runtime 基础    █████████████  ✅
-Step 8  Runtime 执行    █████████████  4h ← 下一步
-Step 9  Runtime 编排    █████████████  2h
+Step 8  Runtime 执行    █████████████  ✅
+Step 9  Runtime 编排    █████████████  2h ← 下一步
 Step 10 Agent + ReAct   █████████████  10h
 Step 11 RAG + 后续      █████████████  待定
                         剩余 ≈ 19h+
@@ -361,4 +361,9 @@ Step 11 RAG + 后续      █████████████  待定
   - `src/runtime/context.py` — RunContext（frozen dataclass）+ 工厂函数
   - `src/runtime/state.py` — ExecutionState（StrEnum）+ 状态转换表 + 校验
   - `src/runtime/__init__.py` — 统一导出
-- ⏳ Step 8 待做：Runtime 执行（ExecutionNode + ExecutionTree + EventBus）
+- ✅ Step 8 已完成：Runtime 执行
+  - `src/runtime/buffer.py` — OutputBuffer（输出缓冲）
+  - `src/runtime/node.py` — ExecutionNode（状态机 + 树结构 + 生命周期）
+  - `src/runtime/events.py` — EventBus（asyncio.Queue pub/sub）
+  - `src/runtime/tree.py` — 树工具（flatten, find, walk, duration_tree）
+- ⏳ Step 9 待做：Runtime 编排（ExecutionController）
