@@ -1,11 +1,13 @@
 from fastapi import FastAPI
 
+from src.api.v1.chat import router as chat_router
 from src.api.v1.health import router as health_router
 
 
 def create_app() -> FastAPI:
     app = FastAPI(title="AgentForge", version="0.0.1")
     app.include_router(health_router)
+    app.include_router(chat_router)
     return app
 
 

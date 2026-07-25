@@ -336,24 +336,25 @@ Step 1  配置系统        ███░░░░░░░░░  ✅
 Step 2  FastAPI 壳      ████░░░░░░░░  ✅
 Step 3  DB 连接         █████░░░░░░░  ✅
 Step 4  User 模型+建表  ███████░░░░░░  ✅
-Step 5  JWT 验证        █████████░░░░  ⏳ ← 当前
-Step 6  LLM + 聊天      ██████████░░░  3h
-Step 7  Runtime 基础    ████████████░  3h
+Step 5  JWT 验证        █████████░░░░  ✅
+Step 6  LLM + 聊天      ██████████░░░  ✅
+Step 7  Runtime 基础    ████████████░  ⏳ ← 下一步
 Step 8  Runtime 执行    █████████████  4h
 Step 9  Runtime 编排    █████████████  2h
 Step 10 Agent + ReAct   █████████████  10h
 Step 11 RAG + 后续      █████████████  待定
-                        剩余 ≈ 22h+
+                        剩余 ≈ 19h+
 ```
 
 ---
 
 ## 当前状态
 
-- ✅ Step 0-4 已完成并提交
-- ✅ Step 5.1 依赖安装完成（passlib、python-jose、email-validator）
-- ✅ Step 5.2 Pydantic Schema 完成（schemas/common.py、user.py）
-- ⏳ Step 5.3 待做：JWT 验证工具函数（lib/auth.py）
-- ⏳ Step 5.4 待做：依赖注入（api/deps.py）
-- ⏳ Step 5.5 待做：config.py 加 jwt_secret
-- ⏳ Step 6 待做：LLM Provider + 流式聊天
+- ✅ Step 0-5 已完成并提交（里程碑 A + B 达成）
+- ✅ Step 6 已完成：LLM Provider + 流式聊天 API
+  - `src/providers/base.py` — LLMProvider Protocol
+  - `src/providers/openai_provider.py` — OpenAI 实现（AsyncGenerator 流式）
+  - `src/providers/registry.py` — Provider 注册中心（惰性初始化 + resolveModel）
+  - `src/schemas/chat.py` — ChatMessage、StreamChunk、ChatSyncResult、ChatRequest
+  - `src/api/v1/chat.py` — POST /api/v1/chat（SSE StreamingResponse）
+- ⏳ Step 7 待做：Runtime 基础（RunContext + RunState + StateMachine）

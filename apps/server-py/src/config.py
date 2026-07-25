@@ -25,6 +25,8 @@ class Settings(BaseSettings):
 
     # ── LLM ─────────────────────────────────────────────
     openai_api_key: str = Field(default="")
+    openai_base_url: str = Field(default="https://api.openai.com/v1")
+    default_model: str = Field(default="gpt-4o-mini")
 
     # ── Server ──────────────────────────────────────────
     port: int = Field(default=8000)
