@@ -8,6 +8,8 @@
 - ExecutionNode: 执行节点（状态机 + 树结构）
 - OutputBuffer: 输出缓冲
 - EventBus: 事件总线
+- ExecutionController: 编排 Node + State + Events 的异步执行
+- ExecutionScope: 运行域（context + node + buffer）
 - tree 工具函数: flatten_tree, find_node, walk_tree 等
 """
 
@@ -16,6 +18,13 @@ from src.runtime.context import (
     RunContext,
     create_child_context,
     create_run_context,
+)
+from src.runtime.controller import (
+    ControllerResult,
+    CreateScopeOptions,
+    ExecutionController,
+    ExecutionScope,
+    create_execution_scope,
 )
 from src.runtime.events import EventBus, RuntimeEvent, RuntimeEventType
 from src.runtime.node import (
@@ -66,6 +75,12 @@ __all__ = [
     "ExecutionNode",
     "RunTermination",
     "RunResult",
+    # controller + scope
+    "ExecutionController",
+    "ControllerResult",
+    "ExecutionScope",
+    "CreateScopeOptions",
+    "create_execution_scope",
     # events
     "EventBus",
     "RuntimeEvent",
