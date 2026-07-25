@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # ── Redis ───────────────────────────────────────────
     redis_url: str = Field(default="redis://localhost:6379")
 
+    # ── Auth ────────────────────────────────────────────
+    # 与 TS 端共享同一个 JWT_SECRET，用于验证 TS 签发的 Token
+    jwt_secret: str = Field(default="agentforge-dev-secret-change-in-production")
+
     # ── LLM ─────────────────────────────────────────────
     openai_api_key: str = Field(default="")
 
