@@ -341,8 +341,8 @@ Step 6  LLM + 聊天      ██████████░░░  ✅
 Step 7  Runtime 基础    █████████████  ✅
 Step 8  Runtime 执行    █████████████  ✅
 Step 9  Runtime 编排    █████████████  ✅
-Step 10 Agent + ReAct   █████████████  10h ← 下一步
-Step 11 RAG + 后续      █████████████  待定
+Step 10 Agent + ReAct   █████████████  ✅
+Step 11 RAG + 后续      █████████████  待定 ← 下一步
                         剩余 ≈ 19h+
 ```
 
@@ -367,9 +367,15 @@ Step 11 RAG + 后续      █████████████  待定
   - `src/runtime/events.py` — EventBus（asyncio.Queue pub/sub）
   - `src/runtime/tree.py` — 树工具（flatten, find, walk, duration_tree）
 - ✅ Step 9 已完成：Runtime 编排
-  - `src/runtime/controller.py` — ExecutionScope + ExecutionController
-  - asyncio.wait_for 超时、CancelledError 传播、shield 保护清理
-  - 事件自动发布（start/complete/fail/cancel/timeout）
-- ⏳ Step 10 待做：Agent Router + ReAct Executor + Tool + SSE
+- ✅ Step 10 已完成：Agent Router + ReAct Executor + Tool + SSE
+  - `src/agent/types.py` — RouteName, RouterDecision, RouteAgent Protocol, SSE 事件
+  - `src/agent/router/pipeline.py` — L1 关键词路由（SAFETY/HUMAN/TASK fallback）
+  - `src/agent/tools/base.py` — Tool 协议 + RiskLevel + ToolDefinition
+  - `src/agent/tools/registry.py` — ToolRegistry 单例（asyncio.wait_for 超时）
+  - `src/agent/tools/builtins/search_knowledge.py` — 占位 KB 搜索工具
+  - `src/agent/executor.py` — ReAct AgentExecutor（think → act → observe → respond）
+  - `src/providers/` 更新 — stream_chat + tools 参数支持
+  - `src/api/v1/chat.py` — Router 分类 → AgentExecutor 分发
+- ⏳ Step 11 待做：RAG + 高级模块
 
-**里程碑 D-1 达成：完整执行运行时——上下文、状态机、节点树、事件总线、编排控制器。**
+**里程碑 D 达成：完整 Agent 链路——Router → ReAct → Tool → SSE。**
