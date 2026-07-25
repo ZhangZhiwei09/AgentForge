@@ -11,8 +11,9 @@ class Settings(BaseSettings):
 
     # ── 数据库 ──────────────────────────────────────────
     # 端口 5434 与 TS 项目保持一致，避免冲突
+    # 使用 +asyncpg 指定异步驱动（sync 连接用 psycopg2，async 用 asyncpg）
     database_url: str = Field(
-        default="postgresql://postgres:postgres@localhost:5434/agentforge"
+        default="postgresql+asyncpg://postgres:postgres@localhost:5434/agentforge_py"
     )
 
     # ── Redis ───────────────────────────────────────────
