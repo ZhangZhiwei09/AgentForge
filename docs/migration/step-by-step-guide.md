@@ -340,8 +340,8 @@ Step 5  JWT 验证        █████████░░░░  ✅
 Step 6  LLM + 聊天      ██████████░░░  ✅
 Step 7  Runtime 基础    █████████████  ✅
 Step 8  Runtime 执行    █████████████  ✅
-Step 9  Runtime 编排    █████████████  2h ← 下一步
-Step 10 Agent + ReAct   █████████████  10h
+Step 9  Runtime 编排    █████████████  ✅
+Step 10 Agent + ReAct   █████████████  10h ← 下一步
 Step 11 RAG + 后续      █████████████  待定
                         剩余 ≈ 19h+
 ```
@@ -366,4 +366,10 @@ Step 11 RAG + 后续      █████████████  待定
   - `src/runtime/node.py` — ExecutionNode（状态机 + 树结构 + 生命周期）
   - `src/runtime/events.py` — EventBus（asyncio.Queue pub/sub）
   - `src/runtime/tree.py` — 树工具（flatten, find, walk, duration_tree）
-- ⏳ Step 9 待做：Runtime 编排（ExecutionController）
+- ✅ Step 9 已完成：Runtime 编排
+  - `src/runtime/controller.py` — ExecutionScope + ExecutionController
+  - asyncio.wait_for 超时、CancelledError 传播、shield 保护清理
+  - 事件自动发布（start/complete/fail/cancel/timeout）
+- ⏳ Step 10 待做：Agent Router + ReAct Executor + Tool + SSE
+
+**里程碑 D-1 达成：完整执行运行时——上下文、状态机、节点树、事件总线、编排控制器。**
