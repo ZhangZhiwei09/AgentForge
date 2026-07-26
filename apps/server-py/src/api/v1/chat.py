@@ -25,11 +25,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agent.executor import AgentExecutor
 from src.agent.router.pipeline import QueryRouter
+from src.agent.diagnosis.route_agent import DiagnosisRouteAgent
+from src.agent.tools.registry import tool_registry
 from src.agent.types import (
+    ClarificationNeeded,
+    DiagnosisCompleted,
+    DiagnosisPhase,
+    DiagnosisPhaseDone,
+    DiagnosisStarted,
     RouteContext,
     RouteName,
     StreamDone,
     StreamError,
+    StreamMeta,
     StreamToken,
 )
 from src.api.deps import get_current_user, get_db
@@ -56,6 +64,16 @@ def _get_executor() -> AgentExecutor:
     if _executor is None:
         _executor = AgentExecutor()
     return _executor
+
+
+_diagnosis_agent: DiagnosisRouteAgent | None = None
+
+
+def _get_diagnosis_agent() -> DiagnosisRouteAgent:
+    global _diagnosis_agent
+    if _diagnosis_agent is None:
+        _diagnosis_agent = DiagnosisRouteAgent()
+    return _diagnosis_agent
 
 
 # ── SAMessage SSE ──
@@ -87,15 +105,80 @@ async def _to_sse(events: AsyncIterator) -> AsyncIterator[str]:
                 {"type": "error", "content": event.content},
                 ensure_ascii=False,
             )
-        else:
-            # StreamMeta → 也转成 meta 事件
+        elif isinstance(event, DiagnosisStarted):
+            payload = json.dumps(
+                {
+                    "type": "diagnosis_started",
+                    "message_id": event.message_id,
+                    "agents": event.agents,
+                },
+                ensure_ascii=False,
+            )
+        elif isinstance(event, DiagnosisPhase):
+            payload = json.dumps(
+                {
+                    "type": "diagnosis_phase",
+                    "message_id": event.message_id,
+                    "phase": event.phase,
+                    "agent": event.agent,
+                    "label": event.label,
+                },
+                ensure_ascii=False,
+            )
+        elif isinstance(event, DiagnosisPhaseDone):
+            payload = json.dumps(
+                {
+                    "type": "diagnosis_phase_done",
+                    "message_id": event.message_id,
+                    "phase": event.phase,
+                    "agent": event.agent,
+                    "label": event.label,
+                    "summary": event.summary,
+                },
+                ensure_ascii=False,
+            )
+        elif isinstance(event, DiagnosisCompleted):
+            payload = json.dumps(
+                {
+                    "type": "diagnosis_completed",
+                    "message_id": event.message_id,
+                    "output": event.output,
+                },
+                ensure_ascii=False,
+            )
+        elif isinstance(event, ClarificationNeeded):
+            payload = json.dumps(
+                {
+                    "type": "clarification_needed",
+                    "message_id": event.message_id,
+                    "intent": event.intent,
+                    "missing_fields": event.missing_fields,
+                    "prompt_message": event.prompt_message,
+                    "hints": event.hints,
+                },
+                ensure_ascii=False,
+            )
+        elif isinstance(event, StreamMeta):
             payload = json.dumps(
                 {
                     "type": event.type,
+                    "message_id": event.message_id,
+                    "session_id": event.session_id,
+                    "model": event.model,
+                    "provider": event.provider,
+                    "route": event.route,
+                    "intent": getattr(event, "intent", ""),
+                    "within_service_hours": getattr(event, "within_service_hours", None),
+                    "memory_count": getattr(event, "memory_count", 0),
+                },
+                ensure_ascii=False,
+            )
+        else:
+            # 未知事件类型 → 通用序列化
+            payload = json.dumps(
+                {
+                    "type": getattr(event, "type", "unknown"),
                     "message_id": getattr(event, "message_id", ""),
-                    "model": getattr(event, "model", ""),
-                    "provider": getattr(event, "provider", ""),
-                    "route": getattr(event, "route", ""),
                 },
                 ensure_ascii=False,
             )
@@ -149,6 +232,17 @@ async def _handle_chat(message: str, model: str | None) -> StreamingResponse:
         events = _stream_safety(assistant_msg_id)
     elif decision.route == RouteName.HUMAN:
         events = _stream_human(assistant_msg_id)
+    elif decision.route == RouteName.DIAGNOSIS:
+        diagnosis_ctx = RouteContext(
+            conversation_id=str(uuid.uuid4()),
+            user_message=message,
+            resolved_model=resolved["model_id"],
+            provider_name=resolved["provider_name"],
+            assistant_msg_id=assistant_msg_id,
+            intent="diagnosis",
+        )
+        agent = _get_diagnosis_agent()
+        events = agent.execute(diagnosis_ctx, tool_registry)
     else:
         context = RouteContext(
             user_message=message,
@@ -233,3 +327,40 @@ async def agent_delete_conversation(conv_id: str, user: User = Depends(get_curre
 async def agent_faq_categories():
     """FAQ 分类列表。无需认证，返回空数组。"""
     return {"categories": []}
+
+
+# ═══════════════════════════════════════════════════════════
+# /api/conversations —— 前端侧边栏会话列表（便捷别名）
+# ═══════════════════════════════════════════════════════════
+
+# 前端部分组件可能直接调用 /api/conversations 而非完整路径
+# /api/agent/chat/conversations，此路由提供向后兼容。
+
+conversations_router = APIRouter(prefix="/api", tags=["conversations"])
+
+
+@conversations_router.get("/conversations")
+async def list_conversations(session_id: str = ""):
+    """会话列表 —— GET /api/conversations。
+
+    当前版本返回空列表，后续接入 DB 后可返回真实数据。
+    """
+    return {"conversations": []}
+
+
+@conversations_router.get("/conversations/{conv_id}/messages")
+async def get_conversation_messages(conv_id: str):
+    """获取会话消息列表 —— GET /api/conversations/:id/messages。
+
+    当前版本返回空列表，后续接入 DB 后可返回真实消息。
+    """
+    return {"conversation_id": conv_id, "messages": []}
+
+
+@conversations_router.delete("/conversations/{conv_id}")
+async def delete_conversation(
+    conv_id: str,
+    user: User = Depends(get_current_user),
+):
+    """删除会话 —— DELETE /api/conversations/:id。"""
+    return {"ok": True}

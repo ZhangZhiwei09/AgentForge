@@ -40,6 +40,27 @@ HUMAN_KEYWORDS: list[re.Pattern] = [
     re.compile(r"叫.*(经理|领导|负责人)"),
 ]
 
+DIAGNOSIS_KEYWORDS: list[re.Pattern] = [
+    # 强信号：错误码 + traceId
+    re.compile(r"traceId\s*[:：]\s*\w+", re.IGNORECASE),
+    re.compile(r"error[_ ]?code\s*[:：]\s*\w+", re.IGNORECASE),
+    # 故障关键词
+    re.compile(r"(报错|失败|超时|打不开|连不上|崩溃|闪退|白屏|卡死)"),
+    re.compile(
+        r"(排查|诊断|定位|帮我看下|帮我查下|帮我查|帮我看看|帮我看|帮我分析)"
+        r".*(问题|原因|怎么回事|什么情况|什么原因)"
+    ),
+    # 摄像头/活体/人脸 故障
+    re.compile(
+        r"(摄像头|麦克风|活体|刷脸|人脸|认证|识别)"
+        r".*(失败|打不开|不能用|没反应|超时|异常)"
+    ),
+    # 网络/WebSocket 故障
+    re.compile(r"(WebSocket|网络|连接).*(断开|超时|失败)"),
+    # 通过率/成功率 异常
+    re.compile(r"(成功率|通过率).*(下跌|下降|降低|异常|掉|低)"),
+]
+
 
 # ═══════════════════════════════════════════════════════════
 # quickRouteScan —— L1 关键词快速扫描
@@ -74,6 +95,15 @@ def quick_route_scan(message: str) -> RouterDecision | None:
                 route=RouteName.HUMAN,
                 confidence=0.95,
                 reasoning="转人工关键词命中",
+            )
+
+    # DIAGNOSIS —— 故障排查/诊断类问题
+    for pattern in DIAGNOSIS_KEYWORDS:
+        if pattern.search(message):
+            return RouterDecision(
+                route=RouteName.DIAGNOSIS,
+                confidence=0.85,
+                reasoning="诊断关键词命中",
             )
 
     return None  # → 默认走 TASK
