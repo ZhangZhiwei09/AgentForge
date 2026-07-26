@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AgentForge Python 后端测试</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #c9d1d9; --text-dim: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --orange: #d2991d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 12px 20px; display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: 16px; font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .dot.off { background: var(--red); }
+  main { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .config { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px 16px; }
+  .config label { font-size: 12px; color: var(--text-dim); display: block; margin-bottom: 4px; }
+  .config input { width: 100%; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 8px 12px; color: var(--text); font-size: 13px; font-family: monospace; }
+  .config-row { display: flex; gap: 8px; align-items: end; }
+  .config-row > div:first-child { flex: 1; }
+  .btn { background: var(--accent); color: #fff; border: none; border-radius: 6px;
+    padding: 8px 16px; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .btn:hover { opacity: 0.85; }
+  .btn-sm { padding: 4px 10px; font-size: 12px; }
+  #messages { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 85%; padding: 10px 14px; border-radius: 12px; line-height: 1.5; font-size: 14px; }
+  .msg.user { align-self: flex-end; background: var(--accent); color: #fff; }
+  .msg.assistant { align-self: flex-start; background: var(--surface); border: 1px solid var(--border); }
+  .msg.meta { align-self: center; font-size: 11px; color: var(--text-dim); background: transparent; padding: 4px; }
+  .msg.error { align-self: flex-start; background: #3a1111; border: 1px solid var(--red); color: var(--red); }
+  .input-area { background: var(--surface); border-top: 1px solid var(--border); padding: 12px 20px; display: flex; gap: 8px; }
+  .input-area input { flex: 1; background: var(--bg); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 14px; color: var(--text); font-size: 14px; }
+  .input-area input::placeholder { color: var(--text-dim); }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--text-dim);
+    border-top-color: var(--accent); border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</head>
+<body>
+<header>
+  <div class="dot" id="status-dot"></div>
+  <h1>AgentForge Python 后端测试</h1>
+  <span style="font-size:12px;color:var(--text-dim)" id="status-text">未连接</span>
+</header>
+<main>
+  <div class="config">
+    <div class="config-row">
+      <div style="flex:1">
+        <label>JWT Token（运行 <code>uv run python scripts/gen_test_token.py</code> 生成）</label>
+        <input id="token" placeholder="粘贴 JWT Token..." />
+      </div>
+      <div>
+        <button class="btn btn-sm" onclick="fetchToken()">自动获取</button>
+      </div>
+    </div>
+    <div class="config-row" style="margin-top:8px">
+      <div style="flex:1">
+        <label>API 地址</label>
+        <input id="api-url" value="http://localhost:8002/api/v1/chat" />
+      </div>
+      <div style="flex:1">
+        <label>模型（可选，留空用默认）</label>
+        <input id="model" placeholder="gpt-4o-mini（留空=默认）" />
+      </div>
+    </div>
+  </div>
+  <div id="messages"></div>
+</main>
+<div class="input-area">
+  <input id="query" placeholder="输入消息..." onkeydown="if(event.key==='Enter')send()" />
+  <button class="btn" onclick="send()" id="send-btn">发送</button>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const API = () => $('api-url').value;
+const TOKEN = () => $('token').value;
+const MODEL = () => $('model').value || null;
+
+async function fetchToken() {
+  try {
+    const res = await fetch('http://localhost:8002/api/dev/token');
+    if (res.ok) {
+      const data = await res.json();
+      $('token').value = data.token;
+      addMsg('meta', 'Token 已自动获取');
+      checkHealth();
+    } else {
+      addMsg('error', '自动获取失败，请用命令生成: uv run python scripts/gen_test_token.py');
+    }
+  } catch(e) {
+    addMsg('error', '服务器未响应。请确认 Python 服务已启动: uv run uvicorn src.main:app --port 8000');
+  }
+}
+
+function addMsg(role, content) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + role;
+  div.textContent = content;
+  $('messages').appendChild(div);
+  $('messages').scrollTop = $('messages').scrollHeight;
+}
+
+function addStreamingMsg() {
+  const div = document.createElement('div');
+  div.className = 'msg assistant';
+  div.id = 'streaming-msg';
+  $('messages').appendChild(div);
+  return div;
+}
+
+async function send() {
+  const query = $('query').value.trim();
+  if (!query) return;
+  const token = TOKEN();
+  if (!token) { addMsg('error', '请先填入 JWT Token'); return; }
+
+  $('query').value = '';
+  $('send-btn').disabled = true;
+  addMsg('user', query);
+
+  const streamDiv = addStreamingMsg();
+  let fullText = '';
+  let metaReceived = false;
+
+  try {
+    const body = { message: query };
+    if (MODEL()) body.model = MODEL();
+
+    const res = await fetch(API(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`,
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const err = await res.text();
+      streamDiv.className = 'msg error';
+      streamDiv.textContent = `HTTP ${res.status}: ${err}`;
+      return;
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const jsonStr = line.slice(6);
+        try {
+          const event = JSON.parse(jsonStr);
+          if (event.type === 'meta') {
+            metaReceived = true;
+            addMsg('meta', `路由: ${event.route || '-'} | 模型: ${event.model || '-'} | 提供商: ${event.provider || '-'}`);
+          } else if (event.type === 'token') {
+            fullText += event.content || '';
+            streamDiv.textContent = fullText;
+            $('messages').scrollTop = $('messages').scrollHeight;
+          } else if (event.type === 'done') {
+            if (event.fallback_used) {
+              addMsg('meta', '⚠ 使用了 fallback 回复');
+            }
+          } else if (event.type === 'error') {
+            streamDiv.className = 'msg error';
+            streamDiv.textContent = event.content;
+          }
+        } catch(e) {
+          // skip non-JSON lines
+        }
+      }
+    }
+
+    streamDiv.id = '';
+    if (!fullText) {
+      streamDiv.className = 'msg error';
+      streamDiv.textContent = '(空响应)';
+    }
+
+  } catch(e) {
+    streamDiv.className = 'msg error';
+    streamDiv.textContent = '连接失败: ' + e.message;
+  } finally {
+    $('send-btn').disabled = false;
+  }
+}
+
+async function checkHealth() {
+  try {
+    const res = await fetch('http://localhost:8002/api/health');
+    if (res.ok) {
+      $('status-dot').classList.remove('off');
+      $('status-text').textContent = '已连接';
+    }
+  } catch(e) {
+    $('status-dot').classList.add('off');
+    $('status-text').textContent = '未连接';
+  }
+}
+
+// Init
+checkHealth();
+setInterval(checkHealth, 5000);
+</script>
+</body>
+</html>
