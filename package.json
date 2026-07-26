@@ -7,7 +7,7 @@
     "pnpm": ">=9.0.0"
   },
   "scripts": {
-    "dev": "turbo dev --filter=@agentforge/server --filter=@agentforge/customer-service --filter=@agentforge/app-creator --filter=@agentforge/data-admin",
+    "dev": "turbo dev --filter=@agentforge/server --filter=@agentforge/customer-service --filter=@agentforge/app-creator --filter=@agentforge/data-admin --filter=@agentforge/server-py",
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
@@ -20,6 +20,8 @@
     "server:dev": "pnpm --filter @agentforge/server dev",
     "server:worker": "pnpm --filter @agentforge/server worker",
     "cs:dev": "pnpm --filter @agentforge/customer-service dev",
+    "py:dev": "pnpm --filter @agentforge/server-py dev",
+    "py:test": "pnpm --filter @agentforge/server-py test",
     "creator:dev": "pnpm --filter @agentforge/app-creator dev",
     "admin:dev": "pnpm --filter @agentforge/data-admin dev",
     "db:migrate": "pnpm --filter @agentforge/database db:migrate",

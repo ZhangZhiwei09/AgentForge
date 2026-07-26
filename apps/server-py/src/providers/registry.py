@@ -107,7 +107,7 @@ def resolve_model(model_id: str | None = None) -> dict:
             if m["id"] == target_model:
                 return {"provider_name": name, "model_id": target_model}
 
-    # 兜底：第一个 Provider 的第一个模型
+    # 兜底：使用请求的模型名 + 第一个可用 Provider
+    #（不强制限制为 known models，兼容 DeepSeek 等 OpenAI 兼容 API）
     first = first_provider()
-    first_model = _providers[first].list_models()[0]["id"]
-    return {"provider_name": first, "model_id": first_model}
+    return {"provider_name": first, "model_id": target_model}

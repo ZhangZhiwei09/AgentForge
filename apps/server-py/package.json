@@ -1,0 +1,10 @@
+{
+  "name": "@agentforge/server-py",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "uv run uvicorn src.main:app --host 0.0.0.0 --port 8004 --reload",
+    "test": "uv run pytest",
+    "lint": "uv run ruff check src/ tests/"
+  }
+}

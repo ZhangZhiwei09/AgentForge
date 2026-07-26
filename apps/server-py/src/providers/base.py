@@ -29,12 +29,15 @@ class LLMProvider(Protocol):
         system_prompt: str = "",
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        tools: list[dict] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式聊天，逐个 yield token/tool_call/done 片段。
 
         返回 AsyncIterator 而非 AsyncGenerator：
         Protocol 不关心是 async def yield 还是手动实现 __aiter__/__anext__，
         只要返回一个异步迭代器即可。
+
+        tools: 可选，OpenAI function calling 格式的工具列表。
         """
         ...
 
@@ -46,10 +49,13 @@ class LLMProvider(Protocol):
         temperature: float = 0.7,
         max_tokens: int = 4096,
         json_mode: bool = False,
+        tools: list[dict] | None = None,
     ) -> ChatSyncResult:
         """非流式聊天，返回完整结果。
 
         用于记忆提取、Rerank、结构化 JSON 输出等需要完整响应的场景。
+
+        tools: 可选，OpenAI function calling 格式的工具列表。
         """
         ...
 

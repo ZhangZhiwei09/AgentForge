@@ -339,10 +339,10 @@ Step 4  User 模型+建表  ███████░░░░░░  ✅
 Step 5  JWT 验证        █████████░░░░  ✅
 Step 6  LLM + 聊天      ██████████░░░  ✅
 Step 7  Runtime 基础    █████████████  ✅
-Step 8  Runtime 执行    █████████████  4h ← 下一步
-Step 9  Runtime 编排    █████████████  2h
-Step 10 Agent + ReAct   █████████████  10h
-Step 11 RAG + 后续      █████████████  待定
+Step 8  Runtime 执行    █████████████  ✅
+Step 9  Runtime 编排    █████████████  ✅
+Step 10 Agent + ReAct   █████████████  ✅
+Step 11 RAG + 后续      █████████████  ✅
                         剩余 ≈ 19h+
 ```
 
@@ -361,4 +361,61 @@ Step 11 RAG + 后续      █████████████  待定
   - `src/runtime/context.py` — RunContext（frozen dataclass）+ 工厂函数
   - `src/runtime/state.py` — ExecutionState（StrEnum）+ 状态转换表 + 校验
   - `src/runtime/__init__.py` — 统一导出
-- ⏳ Step 8 待做：Runtime 执行（ExecutionNode + ExecutionTree + EventBus）
+- ✅ Step 8 已完成：Runtime 执行
+  - `src/runtime/buffer.py` — OutputBuffer（输出缓冲）
+  - `src/runtime/node.py` — ExecutionNode（状态机 + 树结构 + 生命周期）
+  - `src/runtime/events.py` — EventBus（asyncio.Queue pub/sub）
+  - `src/runtime/tree.py` — 树工具（flatten, find, walk, duration_tree）
+- ✅ Step 9 已完成：Runtime 编排
+- ✅ Step 10 已完成：Agent Router + ReAct Executor + Tool + SSE
+  - `src/agent/types.py` — RouteName, RouterDecision, RouteAgent Protocol, SSE 事件
+  - `src/agent/router/pipeline.py` — L1 关键词路由（SAFETY/HUMAN/TASK fallback）
+  - `src/agent/tools/base.py` — Tool 协议 + RiskLevel + ToolDefinition
+  - `src/agent/tools/registry.py` — ToolRegistry 单例（asyncio.wait_for 超时）
+  - `src/agent/tools/builtins/search_knowledge.py` — 占位 KB 搜索工具
+  - `src/agent/executor.py` — ReAct AgentExecutor（think → act → observe → respond）
+  - `src/providers/` 更新 — stream_chat + tools 参数支持
+  - `src/api/v1/chat.py` — Router 分类 → AgentExecutor 分发
+- ✅ Step 11 已完成：RAG 基础 + 可观测性抽象 + 全量测试
+  - `src/rag/types.py` — KnowledgeSearchResult + KnowledgeService Protocol
+  - `src/observability/provider.py` — ObservabilityProvider Protocol + Noop 实现
+  - `tests/` — 57 个测试覆盖 config / auth / runtime / agent / tools
+  - pytest + pytest-asyncio 配置
+
+---
+
+**🎉 迁移完成！11 个 Step，4 个里程碑，全部达成。**
+
+```
+Milestone A "能跑的空壳"          Step 0 → 1 → 2   ✅
+Milestone B "有数据库+JWT验证"     Step 3 → 4 → 5   ✅
+Milestone C "能调 LLM+聊天"        Step 6           ✅
+Milestone D "Agent Runtime"        Step 7 → 8 → 9 → 10  ✅
+Milestone E "RAG 基础+测试"        Step 11          ✅
+```
+
+**最终项目结构：**
+
+```
+apps/server-py/src/
+├── agent/           # Agent 模块（Router + ReAct + Tools）
+│   ├── executor.py
+│   ├── router/pipeline.py
+│   ├── tools/base.py, registry.py, builtins/
+│   └── types.py
+├── api/v1/          # API 路由
+│   ├── chat.py      # POST /api/v1/chat（SSE 流式）
+│   └── health.py
+├── lib/auth.py      # JWT 验证
+├── models/          # SQLAlchemy ORM
+├── observability/   # 可观测性抽象
+├── providers/       # LLM Provider（OpenAI + Protocol）
+├── rag/             # RAG 类型 + 服务抽象
+├── runtime/         # Runtime 引擎（Context + Node + State + Events + Controller）
+├── schemas/         # Pydantic 请求/响应模型
+├── config.py        # pydantic-settings 配置
+├── db.py            # SQLAlchemy async engine
+└── main.py          # FastAPI 应用入口
+
+tests/               # 57 个测试
+```

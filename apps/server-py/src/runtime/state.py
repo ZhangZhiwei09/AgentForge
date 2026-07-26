@@ -54,6 +54,7 @@ TERMINAL_STATES: frozenset[ExecutionState] = frozenset({
 VALID_TRANSITIONS: dict[ExecutionState, frozenset[ExecutionState]] = {
     ExecutionState.CREATED: frozenset({
         ExecutionState.RUNNING,
+        ExecutionState.CANCELLED,  # 允许未启动就取消（父节点 complete/fail 时清理）
     }),
     ExecutionState.RUNNING: frozenset({
         ExecutionState.COMPLETED,

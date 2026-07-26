@@ -27,11 +27,14 @@ class OpenAIProvider:
 
     # ---- 模型列表 ----
     def list_models(self) -> list[dict]:
-        """返回 OpenAI 目前支持的模型列表。"""
+        """返回支持的模型列表。兼容 OpenAI + DeepSeek + 其他 OpenAI 兼容 API。"""
         return [
             {"id": "gpt-4o", "name": "GPT-4o", "provider": "openai", "max_tokens": 128000},
             {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "provider": "openai", "max_tokens": 128000},
             {"id": "gpt-4-turbo", "name": "GPT-4 Turbo", "provider": "openai", "max_tokens": 128000},
+            {"id": "deepseek-chat", "name": "DeepSeek Chat", "provider": "deepseek", "max_tokens": 128000},
+            {"id": "deepseek-v4-pro", "name": "DeepSeek V4 Pro", "provider": "deepseek", "max_tokens": 128000},
+            {"id": "deepseek-v4-flash", "name": "DeepSeek V4 Flash", "provider": "deepseek", "max_tokens": 128000},
         ]
 
     # ---- 非流式聊天 ----
@@ -43,6 +46,7 @@ class OpenAIProvider:
         temperature: float = 0.7,
         max_tokens: int = 4096,
         json_mode: bool = False,
+        tools: list[dict] | None = None,
     ) -> ChatSyncResult:
         """非流式聊天 —— 用于记忆提取、结构化 JSON 输出等场景。
 
@@ -63,6 +67,8 @@ class OpenAIProvider:
         }
         if json_mode:
             params["response_format"] = {"type": "json_object"}
+        if tools:
+            params["tools"] = tools
 
         response = await self.client.chat.completions.create(**params)  # type: ignore[arg-type]
 
@@ -82,6 +88,7 @@ class OpenAIProvider:
         system_prompt: str = "",
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        tools: list[dict] | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """流式聊天 —— async generator，逐个 yield StreamChunk。
 
@@ -112,6 +119,8 @@ class OpenAIProvider:
             "stream": True,
             "stream_options": {"include_usage": True},  # 让最后一个 chunk 带 usage
         }
+        if tools:
+            params["tools"] = tools
 
         stream = await self.client.chat.completions.create(**params)  # type: ignore[arg-type]
 
