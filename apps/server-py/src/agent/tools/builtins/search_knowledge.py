@@ -8,6 +8,7 @@ Step 11+ 将升级为 Embedding + pgvector 向量检索。
 
 import json
 import logging
+import re
 from typing import Any
 
 import asyncpg
@@ -21,6 +22,76 @@ from src.agent.tools.base import (
 from src.config import settings
 
 logger = logging.getLogger(__name__)
+
+# CJK 字符范围（Unicode block）
+_CJK_RE = re.compile(r"[一-鿿㐀-䶿豈-﫿]")
+
+
+def _tokenize(query: str, max_keywords: int = 5) -> list[str]:
+    """将查询拆分为搜索关键词，支持中英文混合。
+
+    策略：
+    1. 先按空白字符切分
+    2. 对每个 token，分离 ASCII 和 CJK 段落
+    3. CJK 段落生成 bigram 子串（2-gram 滑动窗口）
+    4. ASCII 段落保留原样
+    5. 去重，截断到 max_keywords
+    """
+    raw_tokens = query.split()
+    keywords: list[str] = []
+
+    for token in raw_tokens:
+        token = token.strip()
+        if not token:
+            continue
+
+        # 如果整个 token 不含 CJK，直接作为关键词（如 "SDK", "API"）
+        if not _CJK_RE.search(token):
+            keywords.append(token)
+            continue
+
+        # 含 CJK：分离 ASCII/CJK 段落
+        segments: list[str] = []
+        current = ""
+        current_is_cjk: bool | None = None
+
+        for ch in token:
+            ch_is_cjk = bool(_CJK_RE.match(ch))
+            if current_is_cjk is None or ch_is_cjk == current_is_cjk:
+                current += ch
+                current_is_cjk = ch_is_cjk
+            else:
+                segments.append(current)
+                current = ch
+                current_is_cjk = ch_is_cjk
+        if current:
+            segments.append(current)
+
+        for seg in segments:
+            if _CJK_RE.search(seg):
+                # CJK 段落 → bigram
+                chars = list(seg)
+                for i in range(len(chars) - 1):
+                    keywords.append("".join(chars[i : i + 2]))
+                # 短段落也保留原样
+                if len(seg) <= 4:
+                    keywords.append(seg)
+            else:
+                # ASCII 段落保留原样
+                if seg:
+                    keywords.append(seg)
+
+    # 去重 + 截断
+    seen: set[str] = set()
+    unique: list[str] = []
+    for kw in keywords:
+        if kw not in seen:
+            seen.add(kw)
+            unique.append(kw)
+            if len(unique) >= max_keywords:
+                break
+
+    return unique
 
 
 async def _get_conn() -> asyncpg.Connection:
@@ -52,8 +123,8 @@ async def search_knowledge_execute(args: dict[str, Any], run_id: str) -> dict[st
     try:
         conn = await _get_conn()
 
-        # 分词：取前 3 个关键词做 ILIKE 匹配
-        keywords = query.split()[:3]
+        # 分词：中英文混合 tokenize，取前 5 个关键词做 ILIKE 匹配
+        keywords = _tokenize(query, max_keywords=5)
         if not keywords:
             return {"status": "success", "output": json.dumps({"found": False, "results": [], "total": 0}, ensure_ascii=False)}
 
