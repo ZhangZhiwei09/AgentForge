@@ -83,8 +83,14 @@ class AgentExecutor:
     async def execute(
         self,
         context: RouteContext,
+        system_prompt: str | None = None,
     ) -> AsyncIterator[RouteStreamEvent]:
-        """执行 ReAct Agent 流程。"""
+        """执行 ReAct Agent 流程。
+
+        Args:
+            context: RouteContext with user_message, conversation_id, etc.
+            system_prompt: Optional custom system prompt. Defaults to REACT_SYSTEM_PROMPT.
+        """
         assistant_msg_id = context.assistant_msg_id
         resolved_model = context.resolved_model
 
@@ -108,8 +114,11 @@ class AgentExecutor:
             tool_defs = self._to_openai_tools(self._registry.get_definitions())
 
             # ── 构建消息列表 ──
+            effective_system_prompt = (
+                system_prompt if system_prompt else REACT_SYSTEM_PROMPT
+            )
             messages: list[dict] = [
-                {"role": "system", "content": REACT_SYSTEM_PROMPT},
+                {"role": "system", "content": effective_system_prompt},
                 {"role": "user", "content": context.user_message},
             ]
 

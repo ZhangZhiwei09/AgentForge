@@ -40,8 +40,13 @@ class ToolRegistry:
         if self._initialized:
             return
 
+        # Lazy import to avoid circular dependency:
+        # executor → registry → diagnosis/tools → diagnosis/__init__ → mode → executor
+        from src.agent.diagnosis.tools import DIAGNOSIS_TOOLS  # noqa: PLC0415
+
         all_tools = [
             search_knowledge_tool,
+            *DIAGNOSIS_TOOLS,
         ]
         for tool in all_tools:
             self.register(tool)
@@ -117,6 +122,20 @@ class ToolRegistry:
                 "status": "failed",
                 "error": f"Tool '{name}' execution error: {exc}",
             }
+
+    def filter(self, tool_names: list[str]) -> "ToolRegistry":
+        """创建仅包含指定工具的过滤副本。
+
+        用于多 Agent 场景下按角色限制可用工具集。
+        对应 TS: AgentService.run() 的 tools 参数。
+        """
+        filtered = ToolRegistry()
+        self.init()
+        for name in tool_names:
+            if name in self._tools:
+                filtered._tools[name] = self._tools[name]
+        filtered._initialized = True
+        return filtered
 
     def list_names(self) -> list[str]:
         """列出所有已注册工具名称。"""
