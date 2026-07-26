@@ -4,8 +4,8 @@ import { client } from "@agentforge/ui";
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("default@agentforge.local");
-  const [password, setPassword] = useState("agentforge");
+  const [email, setEmail] = useState("demo@agentforge.local");
+  const [password, setPassword] = useState("demo123");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -73,7 +73,7 @@ export function LoginPage() {
         </form>
 
         <p className="mt-4 text-xs text-gray-500 text-center">
-          Default: default@agentforge.local / agentforge
+          Default: demo@agentforge.local / demo123
         </p>
       </div>
     </div>

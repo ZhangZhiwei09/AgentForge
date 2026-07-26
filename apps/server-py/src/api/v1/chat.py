@@ -131,54 +131,27 @@ async def _stream_human(assistant_msg_id: str) -> AsyncIterator:
 
 
 # ═══════════════════════════════════════════════════════════
-# POST /api/v1/chat
+# 共享聊天处理逻辑
 # ═══════════════════════════════════════════════════════════
 
 
-@router.post("/chat")
-async def chat(
-    body: ChatRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-):
-    """流式聊天端点 —— POST /api/v1/chat。
-
-    流程:
-    1. JWT 验证
-    2. Router 分类（L1 关键词正则）
-    3. 按路由分发:
-       - SAFETY → 安全拦截回复
-       - HUMAN  → 转人工提示
-       - CHAT/TASK → ReAct AgentExecutor（LLM + Tool Calling）
-    4. SSE StreamingResponse 返回
-
-    示例:
-        curl -N -X POST http://localhost:8000/api/v1/chat \\
-          -H "Content-Type: application/json" \\
-          -H "Authorization: Bearer <token>" \\
-          -d '{"message": "你好"}'
-    """
+async def _handle_chat(message: str, model: str | None) -> StreamingResponse:
+    """共享聊天处理：Router → AgentExecutor → SSE。"""
     import uuid
 
-    # 解析模型
-    resolved = resolve_model(body.model)
+    resolved = resolve_model(model)
     assistant_msg_id = str(uuid.uuid4())
 
-    # ── Router 分类 ──
     router = _get_router()
-    decision = router.classify(body.message)
+    decision = router.classify(message)
 
-    # ── 按路由分发 ──
     if decision.route == RouteName.SAFETY:
         events = _stream_safety(assistant_msg_id)
-
     elif decision.route == RouteName.HUMAN:
         events = _stream_human(assistant_msg_id)
-
     else:
-        # CHAT / TASK → ReAct AgentExecutor
         context = RouteContext(
-            user_message=body.message,
+            user_message=message,
             resolved_model=resolved["model_id"],
             provider_name=resolved["provider_name"],
             assistant_msg_id=assistant_msg_id,
@@ -196,3 +169,67 @@ async def chat(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ═══════════════════════════════════════════════════════════
+# POST /api/v1/chat —— V1 兼容端点
+# ═══════════════════════════════════════════════════════════
+
+
+@router.post("/chat")
+async def chat(
+    body: ChatRequest,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    """流式聊天端点 —— POST /api/v1/chat。"""
+    return await _handle_chat(body.message, body.model)
+
+
+# ═══════════════════════════════════════════════════════════
+# POST /api/agent/chat —— 智能客服前端端点
+# ═══════════════════════════════════════════════════════════
+
+from pydantic import BaseModel, Field as PydField
+
+
+class AgentChatRequest(BaseModel):
+    message: str = PydField(min_length=1)
+    session_id: str | None = None
+
+agent_router = APIRouter(prefix="/api/agent", tags=["agent-chat"])
+
+
+@agent_router.post("/chat")
+async def agent_chat(body: AgentChatRequest):
+    """Agent 聊天端点。无需认证（开发模式）。"""
+    return await _handle_chat(body.message, None)
+
+
+# ═══════════════════════════════════════════════════════════
+# 会话历史 / 列表 / 删除 —— 供前端侧边栏使用
+# ═══════════════════════════════════════════════════════════
+
+
+@agent_router.get("/chat/history")
+async def agent_chat_history(session_id: str):
+    """会话消息历史。当前版本返回空列表（后续可接入 DB）。"""
+    return {"conversation_id": session_id, "session_id": session_id, "messages": []}
+
+
+@agent_router.get("/chat/conversations")
+async def agent_conversations(session_id: str = ""):
+    """会话列表。当前版本返回空列表（后续可接入 DB）。"""
+    return {"conversations": []}
+
+
+@agent_router.delete("/chat/conversations/{conv_id}")
+async def agent_delete_conversation(conv_id: str, user: User = Depends(get_current_user)):
+    """删除会话。当前版本返回 ok。"""
+    return {"ok": True}
+
+
+@agent_router.get("/chat/faq/categories")
+async def agent_faq_categories():
+    """FAQ 分类列表。无需认证，返回空数组。"""
+    return {"categories": []}
