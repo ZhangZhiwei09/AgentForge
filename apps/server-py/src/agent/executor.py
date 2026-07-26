@@ -9,7 +9,7 @@ ReAct 循环:
     1. think: LLM 分析用户意图 + 决定是否调工具
     2. act: 执行工具（如果 LLM 返回 tool_calls）
     3. observe: 将工具结果注入对话
-    4. respond: 流式输出最终回复
+    4. respond: 流式输出最终回复（实时流式，非缓冲后输出）
 
 V1 简化版：
 - 不支持 simple_qa 快速路径
@@ -20,8 +20,10 @@ Python 新概念：
 - AsyncGenerator[yield]: 流式产出事件的异步生成器
 - OpenAI tool_calls 累积: 跨 chunk 累积 tool call 片段
 - ReAct 循环控制: max_iterations + timeout 保护
+- 实时流式: token 从 Provider 到达后立即 yield 到 SSE，不做缓冲等待
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -115,7 +117,7 @@ class AgentExecutor:
             final_answer = ""
 
             for _iteration in range(MAX_ITERATIONS):
-                # 调 LLM 流式，收集完整响应
+                # 调 LLM 流式 —— 实时产出 token 到 SSE
                 content_parts: list[str] = []
                 tool_calls_acc: dict[int, dict] = {}
 
@@ -132,8 +134,17 @@ class AgentExecutor:
 
                     elif chunk.type == "token" and chunk.content:
                         content_parts.append(chunk.content)
+                        # 实时流式输出：OpenAI tool_calls 总是在 text 之前到达，
+                        # 所以此时未见到 tool_call 就是最终文本回复，直接 yield。
+                        if not tool_calls_acc:
+                            yield StreamToken(
+                                content=chunk.content,
+                                message_id=assistant_msg_id,
+                            )
+                            # 让出事件循环，确保 SSE 数据刷新到网络层
+                            await asyncio.sleep(0)
 
-                    # done chunk: 跳过（只在流结束处理）
+                    # done chunk: 跳过（provider 层已 yield done）
 
                 content_text = "".join(content_parts)
 
@@ -178,14 +189,8 @@ class AgentExecutor:
 
                     continue  # 继续 ReAct 循环
 
-                # ── 无 tool_calls → 最终回复 ──
+                # ── 无 tool_calls → 最终回复（token 已在上面实时 yield）──
                 final_answer = content_text
-                if final_answer:
-                    for char in final_answer:
-                        yield StreamToken(
-                            content=char,
-                            message_id=assistant_msg_id,
-                        )
                 break  # 退出循环
 
             # ── Fallback ──
