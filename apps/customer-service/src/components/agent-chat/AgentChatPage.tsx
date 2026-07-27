@@ -8,7 +8,9 @@ import {
   ChevronUp,
 } from "lucide-react";
 import { useAgentChatStream } from "@/hooks/useAgentChatStream";
+import type { AgentMessage } from "@/hooks/useAgentChatStream";
 import { RichMessageRenderer, DiagnosisCard, ClarificationCard } from "@agentforge/cui";
+import { SessionList } from "./SessionList";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { QuickReplies } from "@/components/customer-chat/QuickReplies";
 import { SatisfactionRating } from "@/components/customer-chat/SatisfactionRating";
@@ -24,6 +26,8 @@ export function AgentChatPage() {
     currentMeta,
     sendMessage,
     loadHistory,
+    newChat,
+    switchSession,
     abort,
   } = useAgentChatStream();
   const [input, setInput] = useState("");
@@ -88,6 +92,13 @@ export function AgentChatPage() {
       className="flex flex-1 overflow-hidden"
       style={{ height: "calc(100dvh - 48px)" }}
     >
+      {/* 左侧会话列表（ChatGPT 风格） */}
+      <SessionList
+        activeSessionId={sessionId}
+        onSelectSession={switchSession}
+        onNewChat={newChat}
+      />
+
       {/* 中间聊天区域 */}
       <main className="flex flex-1 flex-col bg-[hsl(var(--cs-bg))]">
         <div className="flex-1 overflow-y-auto">
