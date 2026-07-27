@@ -28,6 +28,22 @@ class Settings(BaseSettings):
     openai_base_url: str = Field(default="https://api.openai.com/v1")
     default_model: str = Field(default="gpt-4o-mini")
 
+    # ── Embedding ───────────────────────────────────────
+    embedding_model: str = Field(default="text-embedding-3-small")
+    embedding_base_url: str = Field(default="https://api.openai.com/v1")
+    embedding_api_key: str = Field(default="")  # 空则 fallback 到 openai_api_key
+    chunk_size_tokens: int = Field(default=512)
+    chunk_overlap_tokens: int = Field(default=64)
+
+    # ── PgVector ────────────────────────────────────────
+    pgvector_enabled: bool = Field(default=False)
+
+    # ── Langfuse ────────────────────────────────────────
+    langfuse_enabled: bool = Field(default=False)
+    langfuse_public_key: str = Field(default="")
+    langfuse_secret_key: str = Field(default="")
+    langfuse_base_url: str = Field(default="https://cloud.langfuse.com")
+
     # ── Server ──────────────────────────────────────────
     port: int = Field(default=8000)
     debug: bool = Field(default=False)

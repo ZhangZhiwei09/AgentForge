@@ -79,6 +79,8 @@ class ToolRegistry:
     ) -> dict[str, Any]:
         """执行工具。
 
+        Phase C: 每次工具执行包裹在 Langfuse Tool Span 中。
+
         Args:
             name: 工具名称
             args: LLM 传入的参数
@@ -96,6 +98,15 @@ class ToolRegistry:
                 "error": f"Unknown tool '{name}'. Available: {self.list_names()}",
             }
 
+        # Phase C: 创建工具执行 Span
+        from src.observability import get_observability  # noqa: PLC0415
+
+        obs = get_observability()
+        tool_span = obs.create_tool_span(
+            name=f"tool-{name}",
+            input=args,
+        )
+
         timeout = tool.timeout or RISK_TIMEOUTS.get(tool.risk_level, 30000)
 
         try:
@@ -110,18 +121,27 @@ class ToolRegistry:
             if "duration_ms" not in result:
                 result["duration_ms"] = round(elapsed, 2)
 
+            tool_span.end(
+                output=result,
+                metadata={"duration_ms": round(elapsed, 2)},
+            )
+
             return result
 
         except asyncio.TimeoutError:
-            return {
+            result = {
                 "status": "timeout",
                 "error": f"Tool '{name}' timed out after {timeout}ms",
             }
+            tool_span.end(output=result)
+            return result
         except Exception as exc:
-            return {
+            result = {
                 "status": "failed",
                 "error": f"Tool '{name}' execution error: {exc}",
             }
+            tool_span.end(output=result)
+            return result
 
     def filter(self, tool_names: list[str]) -> "ToolRegistry":
         """创建仅包含指定工具的过滤副本。

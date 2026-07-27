@@ -1,33 +1,34 @@
-"""AgentExecutor —— 统一的 TASK 路由 ReAct 执行器。
+"""AgentExecutor —— 统一的 TASK 路由 ReAct 执行器（LangGraph 版）。
 
 对应 TS: apps/server/src/services/agent-runtime/agent-executor.ts
 
-核心流程：
-    用户消息 → ReAct Loop → Tool 调用 → SSE Stream
+Phase A 升级：手写 while 循环 → LangGraph StateGraph + astream_events()。
 
-ReAct 循环:
-    1. think: LLM 分析用户意图 + 决定是否调工具
-    2. act: 执行工具（如果 LLM 返回 tool_calls）
-    3. observe: 将工具结果注入对话
-    4. respond: 流式输出最终回复（实时流式，非缓冲后输出）
+Graph 结构:
+    START → agent_node → (有 tool_calls?) → tools_node → agent_node
+                           → (无 tool_calls?) → END
 
-V1 简化版：
-- 不支持 simple_qa 快速路径
-- 不支持 Citation 引证校验
-- 不做业务回复校验
+流式策略（astream_events v2）:
+    - on_chat_model_stream → yield StreamToken（实时流式）
+    - on_chat_model_end → 捕获最终回答（含 tool_calls 检查）
+    - on_tool_end → 日志记录
 
-Python 新概念：
-- AsyncGenerator[yield]: 流式产出事件的异步生成器
-- OpenAI tool_calls 累积: 跨 chunk 累积 tool call 片段
-- ReAct 循环控制: max_iterations + timeout 保护
-- 实时流式: token 从 Provider 到达后立即 yield 到 SSE，不做缓冲等待
+不变项（关键约束）:
+    - chat.py 的 _to_sse() 和路由分发逻辑 不修改
+    - types.py 的 RouteStreamEvent 和 RouteAgent Protocol 不修改
+    - StreamMeta → StreamToken* → StreamDone 事件序列 不变
+    - 现有 tests/test_agent.py 必须通过
 """
 
 import asyncio
-import json
+import json as _json
 import logging
 from collections.abc import AsyncIterator
 
+from langgraph.graph import END, StateGraph
+
+from src.agent.langchain_adapter import ProviderChatModel, _coerce_to_str
+from src.agent.state import AgentState
 from src.agent.tools.registry import ToolRegistry, tool_registry
 from src.agent.types import (
     RouteContext,
@@ -39,7 +40,6 @@ from src.agent.types import (
     StreamToken,
 )
 from src.providers.registry import get_provider, resolve_model
-from src.schemas.chat import ChatMessage
 
 logger = logging.getLogger(__name__)
 
@@ -85,11 +85,11 @@ class AgentExecutor:
         context: RouteContext,
         system_prompt: str | None = None,
     ) -> AsyncIterator[RouteStreamEvent]:
-        """执行 ReAct Agent 流程。
+        """执行 ReAct Agent 流程（LangGraph StateGraph 驱动）。
 
         Args:
             context: RouteContext with user_message, conversation_id, etc.
-            system_prompt: Optional custom system prompt. Defaults to REACT_SYSTEM_PROMPT.
+            system_prompt: Optional custom system prompt.
         """
         assistant_msg_id = context.assistant_msg_id
         resolved_model = context.resolved_model
@@ -108,111 +108,94 @@ class AgentExecutor:
             # ── 解析 Provider + Model ──
             resolved = resolve_model(resolved_model)
             provider = get_provider(resolved["provider_name"])
-            model = resolved["model_id"]
+            model_id = resolved["model_id"]
 
             # ── 获取工具定义 ──
+            # 注册中心在此 init（幂等），确保工具就绪
+            self._registry.init()
             tool_defs = self._to_openai_tools(self._registry.get_definitions())
 
-            # ── 构建消息列表 ──
+            # ── 构建 LangChain 模型适配器 ──
+            model = ProviderChatModel(
+                provider=provider,
+                model_name=model_id,
+                temperature=0.7,
+                max_tokens=4096,
+            )
+
             effective_system_prompt = (
                 system_prompt if system_prompt else REACT_SYSTEM_PROMPT
             )
-            messages: list[dict] = [
-                {"role": "system", "content": effective_system_prompt},
-                {"role": "user", "content": context.user_message},
-            ]
 
-            # ── ReAct 循环 ──
+            # ── 构建 LangGraph StateGraph ──
+            graph = self._build_graph(
+                model=model,
+                tool_defs=tool_defs,
+                conversation_id=context.conversation_id,
+                system_prompt=effective_system_prompt,
+            )
+
+            # ── 初始状态 ──
+            from langchain_core.messages import HumanMessage, SystemMessage
+
+            initial_state: AgentState = {
+                "messages": [
+                    SystemMessage(content=effective_system_prompt),
+                    HumanMessage(content=context.user_message),
+                ],
+                "iteration_count": 0,
+            }
+
+            # ── 流式执行 ──
             final_answer = ""
+            final_answer_collected = False
 
-            for _iteration in range(MAX_ITERATIONS):
-                # 调 LLM 流式 —— 实时产出 token 到 SSE
-                content_parts: list[str] = []
-                tool_calls_acc: dict[int, dict] = {}
+            async for event in graph.astream_events(initial_state, version="v2"):
+                kind = event["event"]
 
-                async for chunk in provider.stream_chat(
-                    messages=self._dicts_to_chat_messages(messages),
-                    model=model,
-                    temperature=0.7,
-                    max_tokens=4096,
-                    tools=tool_defs,
-                ):
-                    if chunk.type == "tool_call" and chunk.tool_call:
-                        idx = len(tool_calls_acc)  # 按到达顺序分配 index
-                        tool_calls_acc[idx] = chunk.tool_call
-
-                    elif chunk.type == "token" and chunk.content:
-                        content_parts.append(chunk.content)
-                        # 实时流式输出：OpenAI tool_calls 总是在 text 之前到达，
-                        # 所以此时未见到 tool_call 就是最终文本回复，直接 yield。
-                        if not tool_calls_acc:
+                if kind == "on_chat_model_stream":
+                    chunk = event["data"]["chunk"]
+                    content = getattr(chunk, "content", None)
+                    if content:
+                        text = _coerce_to_str(content)
+                        if text:
                             yield StreamToken(
-                                content=chunk.content,
+                                content=text,
                                 message_id=assistant_msg_id,
                             )
                             # 让出事件循环，确保 SSE 数据刷新到网络层
                             await asyncio.sleep(0)
 
-                    # done chunk: 跳过（provider 层已 yield done）
+                elif kind == "on_chat_model_end":
+                    output = event["data"]["output"]
+                    # output 是聚合后的 AIMessage
+                    if hasattr(output, "content") and output.content:
+                        content_text = _coerce_to_str(output.content)
+                        if content_text:
+                            final_answer = content_text
+                            final_answer_collected = True
 
-                content_text = "".join(content_parts)
-
-                # ── 有 tool_calls → 执行工具 ──
-                if tool_calls_acc:
-                    tool_calls_list = list(tool_calls_acc.values())
-
-                    # 记录 assistant 消息（含 tool_calls）
-                    messages.append({
-                        "role": "assistant",
-                        "content": content_text or None,
-                        "tool_calls": [
-                            {
-                                "id": tc["id"],
-                                "type": "function",
-                                "function": {
-                                    "name": tc["name"],
-                                    "arguments": tc.get("arguments", "{}"),
-                                },
-                            }
-                            for tc in tool_calls_list
-                        ],
-                    })
-
-                    # 执行每个工具
-                    for tc in tool_calls_list:
-                        tool_name = tc.get("name", "")
-                        try:
-                            tool_args = json.loads(tc.get("arguments", "{}"))
-                        except json.JSONDecodeError:
-                            tool_args = {}
-
-                        result = await self._registry.execute(
-                            tool_name, tool_args, context.conversation_id
-                        )
-
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc.get("id", ""),
-                            "content": json.dumps(result, ensure_ascii=False),
-                        })
-
-                    continue  # 继续 ReAct 循环
-
-                # ── 无 tool_calls → 最终回复（token 已在上面实时 yield）──
-                final_answer = content_text
-                break  # 退出循环
+                elif kind == "on_tool_end":
+                    tool_name = event.get("name", "unknown")
+                    tool_output = event["data"].get("output", "")
+                    logger.info(
+                        "Tool executed: %s, output preview: %.100s",
+                        tool_name,
+                        str(tool_output),
+                    )
 
             # ── Fallback ──
-            if not final_answer:
+            if not final_answer_collected or not final_answer:
                 for char in HARDCODED_FALLBACK:
                     yield StreamToken(content=char, message_id=assistant_msg_id)
+                    await asyncio.sleep(0)
 
             # ── Done ──
             yield StreamDone(
                 message_id=assistant_msg_id,
                 usage={},
                 route=self.route.value,
-                fallback_used=not bool(final_answer),
+                fallback_used=not final_answer_collected or not bool(final_answer),
             )
 
         except Exception as exc:
@@ -220,6 +203,7 @@ class AgentExecutor:
             yield StreamError(content=str(exc))
             for char in HARDCODED_FALLBACK:
                 yield StreamToken(content=char, message_id=assistant_msg_id)
+                await asyncio.sleep(0)
             yield StreamDone(
                 message_id=assistant_msg_id,
                 usage={},
@@ -227,21 +211,149 @@ class AgentExecutor:
                 fallback_used=True,
             )
 
-    # ── 工具方法 ──────────────────────────────────────────
+    # ── Graph 构建 ─────────────────────────────────────────
 
-    @staticmethod
-    def _dicts_to_chat_messages(messages: list[dict]) -> list[ChatMessage]:
-        """将原始 dict 消息列表转为 ChatMessage 列表。"""
-        result: list[ChatMessage] = []
-        for m in messages:
-            result.append(ChatMessage(
-                role=m["role"],
-                content=m.get("content"),
-                tool_calls=m.get("tool_calls"),
-                tool_call_id=m.get("tool_call_id"),
-                name=m.get("name"),
-            ))
-        return result
+    def _build_graph(
+        self,
+        model: ProviderChatModel,
+        tool_defs: list[dict],
+        conversation_id: str,
+        system_prompt: str,
+    ) -> StateGraph:
+        """构建 LangGraph StateGraph。
+
+        Graph 结构:
+            START → agent → (has tool_calls?) → tools → agent
+                            → (no tool_calls?) → END
+        """
+        registry = self._registry
+
+        # ── 节点定义 ──
+
+        async def call_model(state: AgentState) -> dict:
+            """Agent 节点：调用 LLM 模型（带工具定义）。
+
+            使用 astream() 确保 on_chat_model_stream 事件被触发，
+            实现实时 token 流式输出到前端。
+
+            Phase C: 每次 LLM 调用包裹在 Langfuse Generation 中。
+            """
+            from langchain_core.messages import AIMessage as LCAIMessage
+
+            from src.observability import get_observability
+
+            iteration = state.get("iteration_count", 0)
+            gen_name = f"agent-reAct-{iteration + 1}"
+
+            content_parts: list[str] = []
+            tool_calls: list[dict] = []
+
+            obs = get_observability()
+            gen_span = obs.create_generation(
+                name=gen_name,
+                model=model.model_name,
+                input={"messages": str(state["messages"][-2:])},
+            )
+
+            try:
+                async for chunk in model.astream(
+                    state["messages"],
+                    tools=tool_defs,
+                ):
+                    if chunk.content:
+                        content_parts.append(_coerce_to_str(chunk.content))
+                    if chunk.tool_calls:
+                        tool_calls = list(chunk.tool_calls)
+
+                final_content = "".join(content_parts)
+
+                gen_span.end(
+                    output=final_content if not tool_calls else None,
+                    metadata={
+                        "tool_calls": [tc.get("name", "") for tc in tool_calls],
+                    } if tool_calls else None,
+                )
+            except Exception:
+                gen_span.end(output=None)
+                raise
+
+            response = LCAIMessage(
+                content=final_content,
+                tool_calls=tool_calls if tool_calls else None,
+            )
+
+            return {
+                "messages": [response],
+                "iteration_count": iteration + 1,
+            }
+
+        async def call_tools(state: AgentState) -> dict:
+            """工具节点：执行 AIMessage 中的 tool_calls，委托给 ToolRegistry。"""
+            from langchain_core.messages import ToolMessage
+
+            messages = state["messages"]
+            if not messages:
+                return {"messages": []}
+
+            last_message = messages[-1]
+            tc_list = getattr(last_message, "tool_calls", None) or []
+            if not tc_list:
+                return {"messages": []}
+
+            tool_messages: list[ToolMessage] = []
+            for tc in tc_list:
+                tc_name = tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
+                tc_args = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {})
+                tc_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
+
+                try:
+                    result = await registry.execute(
+                        tc_name, tc_args, conversation_id
+                    )
+                except Exception as exc:
+                    logger.error("Tool %s execution error: %s", tc_name, exc)
+                    result = {"status": "failed", "error": str(exc)}
+
+                tool_messages.append(ToolMessage(
+                    content=_json.dumps(result, ensure_ascii=False),
+                    tool_call_id=tc_id,
+                    name=tc_name,
+                ))
+
+            return {"messages": tool_messages}
+
+        # ── 条件边 ──
+
+        def should_continue(state: AgentState) -> str:
+            """条件边：判断是否继续到工具节点。"""
+            messages = state["messages"]
+            if not messages:
+                return END
+
+            last_message = messages[-1]
+            tc_list = getattr(last_message, "tool_calls", None) or []
+            iteration = state.get("iteration_count", 0)
+
+            if tc_list and iteration < MAX_ITERATIONS:
+                return "tools"
+            return END
+
+        # ── 组装 Graph ──
+
+        workflow = StateGraph(AgentState)
+        workflow.add_node("agent", call_model)
+        workflow.add_node("tools", call_tools)
+        workflow.set_entry_point("agent")
+        workflow.add_conditional_edges(
+            "agent",
+            should_continue,
+            {"tools": "tools", END: END},
+        )
+        workflow.add_edge("tools", "agent")
+
+        return workflow.compile()
+
+    # ── 工具方法 ──────────────────────────────────────────
 
     @staticmethod
     def _to_openai_tools(definitions) -> list[dict]:
