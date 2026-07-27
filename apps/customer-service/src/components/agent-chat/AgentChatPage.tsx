@@ -14,11 +14,8 @@ import { SessionList } from "./SessionList";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { QuickReplies } from "@/components/customer-chat/QuickReplies";
 import { SatisfactionRating } from "@/components/customer-chat/SatisfactionRating";
-import { DebugPanel } from "@/components/debug/DebugPanel";
-import { useChatStore } from "@/stores/chat";
 
 export function AgentChatPage() {
-  const isDebugOpen = useChatStore((s) => s.isDebugOpen);
   const {
     messages,
     isStreaming,
@@ -291,8 +288,6 @@ export function AgentChatPage() {
         </div>
       </main>
 
-      {/* 右侧调试面板 */}
-      {isDebugOpen && <DebugPanel />}
     </div>
   );
 }
