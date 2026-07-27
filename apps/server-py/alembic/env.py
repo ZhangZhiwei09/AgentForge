@@ -13,6 +13,7 @@ from src.models.base import Base
 # 加载所有模型，确保 Base.metadata 包含了全部表定义
 # 每新增一个模型文件，在这里加一行 import
 import src.models.user  # noqa: F401
+import src.models.knowledge  # noqa: F401
 
 # Alembic Config 对象，从 alembic.ini 读取配置
 config = context.config

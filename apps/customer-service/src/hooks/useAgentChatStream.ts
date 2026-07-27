@@ -77,46 +77,6 @@ export function useAgentChatStream() {
     }
   }, [sessionId]);
 
-  const newChat = useCallback(() => {
-    const newId = generateUUID();
-    setSessionId(newId);
-    localStorage.setItem("agent_chat_session_id", newId);
-    setMessages([
-      {
-        id: "welcome",
-        role: "assistant",
-        content:
-          "您好！欢迎来到 AgentForge 智能助手，有什么可以帮助您的吗？",
-        timestamp: Date.now(),
-      },
-    ]);
-    setCurrentMeta(null);
-  }, []);
-
-  const switchSession = useCallback(
-    (newSessionId: string) => {
-      // 终止当前进行中的流
-      abortRef.current?.abort();
-      streamingRef.current = false;
-      setIsStreaming(false);
-
-      setSessionId(newSessionId);
-      localStorage.setItem("agent_chat_session_id", newSessionId);
-      setMessages([
-        {
-          id: "welcome",
-          role: "assistant",
-          content:
-            "您好！欢迎来到 AgentForge 智能助手，有什么可以帮助您的吗？",
-          timestamp: Date.now(),
-        },
-      ]);
-      setCurrentMeta(null);
-      // loadHistory 通过 useEffect 监听 sessionId 自动触发
-    },
-    [],
-  );
-
   const sendMessage = useCallback(
     async (input: string) => {
       const trimmed = input.trim();
@@ -443,8 +403,6 @@ export function useAgentChatStream() {
     currentMeta,
     sendMessage,
     loadHistory,
-    newChat,
-    switchSession,
     abort,
   };
 }

@@ -219,8 +219,13 @@ async def _stream_human(assistant_msg_id: str) -> AsyncIterator:
 
 
 async def _handle_chat(message: str, model: str | None) -> StreamingResponse:
-    """共享聊天处理：Router → AgentExecutor → SSE。"""
+    """共享聊天处理：Router → AgentExecutor → SSE。
+
+    Phase C: 整个请求包裹在 Langfuse Trace 中。
+    """
     import uuid
+
+    from src.observability import get_observability
 
     resolved = resolve_model(model)
     assistant_msg_id = str(uuid.uuid4())
@@ -254,8 +259,20 @@ async def _handle_chat(message: str, model: str | None) -> StreamingResponse:
         executor = _get_executor()
         events = executor.execute(context)
 
+    # Phase C: 包裹在 Langfuse Trace 中
+    obs = get_observability()
+
+    async def _traced_events():
+        async with obs.create_trace(
+            "chat-request",
+            input=message,
+            metadata={"route": decision.route.value, "model": resolved["model_id"]},
+        ):
+            async for event in events:
+                yield event
+
     return StreamingResponse(
-        _to_sse(events),
+        _to_sse(_traced_events()),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
