@@ -26,7 +26,7 @@ export function useCustomerChatStream() {
     {
       id: "welcome",
       role: "assistant",
-      content: "您好！欢迎来到 AgentForge 智能客服中心，有什么可以帮助您的吗？",
+      content: "您好！欢迎来到核身排障助手，请描述您遇到的核身问题",
       timestamp: Date.now(),
     },
   ]);
@@ -77,7 +77,7 @@ export function useCustomerChatStream() {
             id: "welcome",
             role: "assistant",
             content:
-              "您好！欢迎回到 AgentForge 智能客服中心，有什么可以帮助您的吗？",
+              "您好！欢迎回到核身排障助手，请继续描述您遇到的核身问题",
             timestamp: Date.now(),
           },
           ...historyMsgs,
@@ -98,7 +98,7 @@ export function useCustomerChatStream() {
         id: "welcome",
         role: "assistant",
         content:
-          "您好！欢迎来到 AgentForge 智能客服中心，有什么可以帮助您的吗？",
+          "您好！欢迎来到核身排障助手，请描述您遇到的核身问题",
         timestamp: Date.now(),
       },
     ]);

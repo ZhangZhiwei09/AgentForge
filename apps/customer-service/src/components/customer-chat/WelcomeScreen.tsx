@@ -1,10 +1,10 @@
 import {
   MessageCircle,
-  ShoppingBag,
-  Truck,
-  Headphones,
-  UserCheck,
-  CreditCard,
+  AlertTriangle,
+  Code,
+  Settings,
+  TrendingUp,
+  Shield,
 } from "lucide-react";
 
 interface FAQTopic {
@@ -16,34 +16,54 @@ interface FAQTopic {
 
 const FAQ_TOPICS: FAQTopic[] = [
   {
-    icon: <ShoppingBag className="h-5 w-5" />,
-    title: "退换货政策",
-    questions: ["如何申请退货？", "退货需要多长时间？", "什么情况不能退货？"],
+    icon: <AlertTriangle className="h-5 w-5" />,
+    title: "错误码排查",
+    questions: [
+      "FACE_TIMEOUT 怎么排查？",
+      "LIVENESS_FAIL 是什么原因？",
+      "CAMERA_PERMISSION_DENIED 如何解决？",
+    ],
+    color: "bg-red-50 text-red-600 border-red-200",
+  },
+  {
+    icon: <Code className="h-5 w-5" />,
+    title: "SDK 集成",
+    questions: [
+      "H5 接入 SDK 需要注意什么？",
+      "小程序 SDK 如何配置权限？",
+      "SDK 版本过旧如何处理？",
+    ],
     color: "bg-blue-50 text-blue-600 border-blue-200",
   },
   {
-    icon: <Truck className="h-5 w-5" />,
-    title: "物流配送",
-    questions: ["几天能收到货？", "如何查询物流？", "全国都包邮吗？"],
-    color: "bg-green-50 text-green-600 border-green-200",
-  },
-  {
-    icon: <Headphones className="h-5 w-5" />,
-    title: "售后服务",
-    questions: ["客服工作时间？", "如何投诉建议？", "售后流程是什么？"],
+    icon: <Settings className="h-5 w-5" />,
+    title: "接入配置",
+    questions: [
+      "商户核身如何接入？",
+      "安全等级怎么选择？",
+      "回调地址如何配置？",
+    ],
     color: "bg-purple-50 text-purple-600 border-purple-200",
   },
   {
-    icon: <UserCheck className="h-5 w-5" />,
-    title: "会员权益",
-    questions: ["会员等级有哪些？", "积分怎么使用？", "如何升级会员？"],
-    color: "bg-amber-50 text-amber-600 border-amber-200",
+    icon: <TrendingUp className="h-5 w-5" />,
+    title: "通过率优化",
+    questions: [
+      "通过率下降了怎么办？",
+      "如何校准活体通过率基线？",
+      "如何提升核身通过率？",
+    ],
+    color: "bg-green-50 text-green-600 border-green-200",
   },
   {
-    icon: <CreditCard className="h-5 w-5" />,
-    title: "支付方式",
-    questions: ["支持哪些支付方式？", "可以分期付款吗？", "支付失败怎么办？"],
-    color: "bg-red-50 text-red-600 border-red-200",
+    icon: <Shield className="h-5 w-5" />,
+    title: "应急响应",
+    questions: [
+      "批量失败如何应急处理？",
+      "网络超时怎么排查？",
+      "如何查看监控告警？",
+    ],
+    color: "bg-amber-50 text-amber-600 border-amber-200",
   },
 ];
 
@@ -59,10 +79,10 @@ export function WelcomeScreen({ onSend }: WelcomeScreenProps) {
         <MessageCircle className="h-6 w-6 sm:h-8 sm:w-8 text-white" />
       </div>
       <h2 className="text-lg sm:text-xl font-bold text-[hsl(var(--foreground))] mb-1 text-center">
-        您好，欢迎来到智能客服中心
+        您好，欢迎来到核身排障助手
       </h2>
       <p className="text-xs sm:text-sm text-[hsl(var(--muted-foreground))] mb-4 sm:mb-8 text-center">
-        请选择您想咨询的问题类型，或直接输入您的问题
+        请选择您想咨询的核身问题类型，或直接输入您的问题
       </p>
 
       {/* FAQ 话题卡片 */}
@@ -92,7 +112,7 @@ export function WelcomeScreen({ onSend }: WelcomeScreenProps) {
       </div>
 
       <p className="mt-8 text-xs text-[hsl(var(--muted-foreground))]">
-        客服工作时间：工作日 9:00 - 18:00
+        基于核身知识库提供诊断建议，重要问题请联系技术支持
       </p>
     </div>
   );

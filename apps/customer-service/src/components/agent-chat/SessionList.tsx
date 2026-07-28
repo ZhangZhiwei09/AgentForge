@@ -11,14 +11,14 @@ interface ConversationSummary {
 }
 
 interface SessionListProps {
-  activeSessionId: string;
-  onSelectSession: (sessionId: string) => void;
+  activeConversationId: string;
+  onSelectConversation: (conversationId: string) => void;
   onNewChat: () => void;
 }
 
 export function SessionList({
-  activeSessionId,
-  onSelectSession,
+  activeConversationId,
+  onSelectConversation,
   onNewChat,
 }: SessionListProps) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -35,17 +35,7 @@ export function SessionList({
         headers["Authorization"] = `Bearer ${token}`;
       }
 
-      const params = new URLSearchParams();
-      // 匿名用户通过 session_id 查找
-      if (!token) {
-        params.set("session_id", activeSessionId);
-      }
-
-      const url = `/api/agent/chat/conversations${
-        params.toString() ? `?${params.toString()}` : ""
-      }`;
-
-      const res = await fetch(url, { headers });
+      const res = await fetch("/api/agent/chat/conversations", { headers });
       if (!res.ok) return;
 
       const data = await res.json();
@@ -57,9 +47,9 @@ export function SessionList({
     } finally {
       setLoading(false);
     }
-  }, [activeSessionId]);
+  }, []);
 
-  // 初始加载 & activeSessionId 变更时刷新
+  // 初始加载
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
@@ -67,7 +57,6 @@ export function SessionList({
   // 新建对话后刷新列表
   function handleNewChat() {
     onNewChat();
-    // 延迟刷新，等后端创建新会话记录
     setTimeout(() => fetchConversations(), 500);
   }
 
@@ -86,8 +75,7 @@ export function SessionList({
       setConversations((prev) => prev.filter((c) => c.id !== convId));
 
       // 如果删除的是当前活跃会话，开启新对话
-      const deleted = conversations.find((c) => c.id === convId);
-      if (deleted && deleted.session_id === activeSessionId) {
+      if (convId === activeConversationId) {
         onNewChat();
       }
     } catch {
@@ -112,7 +100,7 @@ export function SessionList({
   }
 
   function getDisplayTitle(conv: ConversationSummary): string {
-    if (conv.title && conv.title !== "智能助手会话") return conv.title;
+    if (conv.title && conv.title !== "智能助手会话" && conv.title !== "新对话") return conv.title;
     if (conv.first_message) {
       return conv.first_message.length > 30
         ? conv.first_message.slice(0, 30) + "..."
@@ -120,8 +108,6 @@ export function SessionList({
     }
     return "新对话";
   }
-
-  const token = localStorage.getItem("accessToken");
 
   return (
     <>
@@ -168,7 +154,7 @@ export function SessionList({
               </div>
             ) : (
               conversations.map((conv) => {
-                const isActive = conv.session_id === activeSessionId;
+                const isActive = conv.id === activeConversationId;
                 return (
                   <div
                     key={conv.id}
@@ -177,7 +163,7 @@ export function SessionList({
                     onMouseLeave={() => setHoveredId(null)}
                   >
                     <button
-                      onClick={() => onSelectSession(conv.session_id)}
+                      onClick={() => onSelectConversation(conv.id)}
                       className={`w-full text-left px-3 py-2.5 transition-colors ${
                         isActive
                           ? "bg-[hsl(var(--cs-primary))]/10 border-r-2 border-[hsl(var(--cs-primary))]"
@@ -209,8 +195,8 @@ export function SessionList({
                       </div>
                     </button>
 
-                    {/* 删除按钮（hover 时显示，仅认证用户可见） */}
-                    {token && hoveredId === conv.id && (
+                    {/* 删除按钮（hover 时显示） */}
+                    {hoveredId === conv.id && (
                       <button
                         onClick={(e) => {
                           e.stopPropagation();

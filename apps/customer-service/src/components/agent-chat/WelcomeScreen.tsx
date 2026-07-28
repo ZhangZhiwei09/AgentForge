@@ -1,4 +1,3 @@
-import { useState, useEffect } from "react";
 import { MessageCircle, Sparkles, ArrowRight } from "lucide-react";
 
 interface FAQTopic {
@@ -11,28 +10,6 @@ interface WelcomeScreenProps {
 }
 
 export function WelcomeScreen({ onSend }: WelcomeScreenProps) {
-  const [topics, setTopics] = useState<FAQTopic[]>([]);
-
-  useEffect(() => {
-    // 尝试从后端加载热门话题
-    fetch("/api/agent/chat/faq/categories")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.categories && data.categories.length > 0) {
-          const questions: FAQTopic[] = data.categories
-            .filter((c: { name: string }) => c.name !== "其他咨询")
-            .map((c: { name: string }) => ({
-              question: `请介绍一下${c.name}相关的信息`,
-              category: c.name,
-            }));
-          setTopics(questions.slice(0, 6));
-        }
-      })
-      .catch(() => {
-        // 加载失败则使用默认话题
-        setTopics(DEFAULT_TOPICS);
-      });
-  }, []);
 
   return (
     <div className="flex items-center justify-center min-h-full px-4 py-12">
@@ -43,10 +20,10 @@ export function WelcomeScreen({ onSend }: WelcomeScreenProps) {
             <MessageCircle className="h-8 w-8 text-white" />
           </div>
           <h1 className="text-2xl font-bold text-[hsl(var(--foreground))] mb-2">
-            AgentForge 智能助手
+            核身排障智能助手
           </h1>
           <p className="text-sm text-[hsl(var(--muted-foreground))]">
-            AI 驱动的知识助手，随时为您解答问题
+            基于知识库为您提供核身错误码排查、SDK 集成诊断与通过率优化建议
           </p>
         </div>
 
@@ -57,7 +34,7 @@ export function WelcomeScreen({ onSend }: WelcomeScreenProps) {
             试试这些话题
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            {(topics.length > 0 ? topics : DEFAULT_TOPICS).map((topic, i) => (
+            {DEFAULT_TOPICS.map((topic, i) => (
               <button
                 key={i}
                 onClick={() => onSend(topic.question)}
@@ -72,7 +49,7 @@ export function WelcomeScreen({ onSend }: WelcomeScreenProps) {
 
         {/* Footer */}
         <p className="text-[11px] text-[hsl(var(--muted-foreground))]">
-          支持知识库查询、任务执行、工具调用等能力
+          支持核身错误码排查、SDK 集成诊断、通过率分析等能力
         </p>
       </div>
     </div>
@@ -80,8 +57,10 @@ export function WelcomeScreen({ onSend }: WelcomeScreenProps) {
 }
 
 const DEFAULT_TOPICS: FAQTopic[] = [
-  { question: "你能做什么？", category: "能力介绍" },
-  { question: "如何搜索知识库？", category: "使用指南" },
-  { question: "如何联系人工客服？", category: "支持" },
-  { question: "支持哪些工具？", category: "工具" },
+  { question: "FACE_TIMEOUT 错误怎么排查？", category: "错误码排查" },
+  { question: "活体检测失败是什么原因？", category: "错误码排查" },
+  { question: "SDK 版本过旧如何处理？", category: "SDK 集成" },
+  { question: "摄像头权限被拒绝怎么解决？", category: "错误码排查" },
+  { question: "如何提升核身通过率？", category: "通过率优化" },
+  { question: "H5 接入核身 SDK 需要注意什么？", category: "SDK 集成" },
 ];

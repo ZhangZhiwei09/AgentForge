@@ -16,6 +16,7 @@ export type { KnowledgeResult, ContentBlock, AgentMessage, DiagnosisProgress, Di
 
 interface StreamMeta {
   messageId: string;
+  conversationId: string;
   sessionId: string;
   model: string;
   provider: string;
@@ -23,38 +24,70 @@ interface StreamMeta {
   suggestions?: string[];
 }
 
+interface Cursor {
+  before_time: string;
+  before_id: string;
+}
+
+interface HistoryResponse {
+  conversation_id: string;
+  messages: {
+    id: string;
+    role: string;
+    type?: string;
+    content: string;
+    timestamp: string;
+  }[];
+  has_more: boolean;
+  next_cursor: Cursor | null;
+}
+
 export function useAgentChatStream() {
   const [messages, setMessages] = useState<AgentMessage[]>([
     {
       id: "welcome",
       role: "assistant",
-      content: "您好！欢迎来到 AgentForge 智能助手，有什么可以帮助您的吗？",
+      content: "您好！欢迎来到核身排障智能助手，请描述您遇到的问题",
       timestamp: Date.now(),
     },
   ]);
   const [isStreaming, setIsStreaming] = useState(false);
   const streamingRef = useRef(false);
   const [currentMeta, setCurrentMeta] = useState<StreamMeta | null>(null);
-  const [sessionId, setSessionId] = useState<string>(() => {
-    return localStorage.getItem("agent_chat_session_id") || generateUUID();
+  const [conversationId, setConversationId] = useState<string>(() => {
+    return localStorage.getItem("agent_chat_conversation_id") || "";
   });
   const abortRef = useRef<AbortController | null>(null);
 
+  // 分页状态
+  const [hasMore, setHasMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<Cursor | null>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+
+  // ── 历史加载（分页）──
+
   const loadHistory = useCallback(async () => {
+    if (!conversationId) return;
     try {
+      const params = new URLSearchParams({
+        conversation_id: conversationId,
+        limit: "5",
+      });
+
+      const token = localStorage.getItem("accessToken");
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
       const res = await fetch(
-        `/api/agent/chat/history?session_id=${sessionId}`,
+        `/api/agent/chat/history?${params.toString()}`,
+        { headers },
       );
       if (!res.ok) return;
-      const data = await res.json();
+
+      const data: HistoryResponse = await res.json();
       if (data.messages && data.messages.length > 0) {
         const historyMsgs: AgentMessage[] = data.messages.map(
-          (m: {
-            id: string;
-            role: string;
-            content: string;
-            timestamp: string;
-          }) => ({
+          (m) => ({
             id: m.id,
             role: m.role as "user" | "assistant",
             content: m.content,
@@ -66,56 +99,117 @@ export function useAgentChatStream() {
             id: "welcome",
             role: "assistant",
             content:
-              "您好！欢迎回到 AgentForge 智能助手，有什么可以帮助您的吗？",
+              "您好！欢迎回到核身排障智能助手，请继续描述您遇到的问题",
             timestamp: Date.now(),
           },
           ...historyMsgs,
         ]);
       }
+      setHasMore(data.has_more);
+      setNextCursor(data.next_cursor);
     } catch {
       // 加载失败则使用默认欢迎消息
     }
-  }, [sessionId]);
+  }, [conversationId]);
+
+  // ── 加载更早的消息（无限滚动）──
+
+  const loadMoreHistory = useCallback(async () => {
+    if (!conversationId || !hasMore || !nextCursor || isLoadingMore) return;
+    setIsLoadingMore(true);
+
+    try {
+      const params = new URLSearchParams({
+        conversation_id: conversationId,
+        limit: "5",
+        before_time: nextCursor.before_time,
+        before_id: nextCursor.before_id,
+      });
+
+      const token = localStorage.getItem("accessToken");
+      const headers: Record<string, string> = {};
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const res = await fetch(
+        `/api/agent/chat/history?${params.toString()}`,
+        { headers },
+      );
+      if (!res.ok) return;
+
+      const data: HistoryResponse = await res.json();
+      if (data.messages && data.messages.length > 0) {
+        const olderMsgs: AgentMessage[] = data.messages.map(
+          (m) => ({
+            id: m.id,
+            role: m.role as "user" | "assistant",
+            content: m.content,
+            timestamp: new Date(m.timestamp).getTime(),
+          }),
+        );
+
+        setMessages((prev) => {
+          // 跳过 welcome 消息，插入到其后
+          const welcome = prev[0];
+          const rest = prev.slice(1);
+          return [welcome, ...olderMsgs, ...rest];
+        });
+      }
+      setHasMore(data.has_more);
+      setNextCursor(data.next_cursor);
+    } catch {
+      // 加载失败静默处理
+    } finally {
+      setIsLoadingMore(false);
+    }
+  }, [conversationId, hasMore, nextCursor, isLoadingMore]);
+
+  // ── 新建对话 ──
 
   const newChat = useCallback(() => {
-    const newId = generateUUID();
-    setSessionId(newId);
-    localStorage.setItem("agent_chat_session_id", newId);
+    setConversationId("");
+    localStorage.removeItem("agent_chat_conversation_id");
     setMessages([
       {
         id: "welcome",
         role: "assistant",
         content:
-          "您好！欢迎来到 AgentForge 智能助手，有什么可以帮助您的吗？",
+          "您好！欢迎来到核身排障智能助手，请描述您遇到的问题",
         timestamp: Date.now(),
       },
     ]);
     setCurrentMeta(null);
+    setHasMore(false);
+    setNextCursor(null);
   }, []);
 
-  const switchSession = useCallback(
-    (newSessionId: string) => {
-      // 终止当前进行中的流
+  // ── 切换会话 ──
+
+  const switchConversation = useCallback(
+    (newConvId: string) => {
       abortRef.current?.abort();
       streamingRef.current = false;
       setIsStreaming(false);
 
-      setSessionId(newSessionId);
-      localStorage.setItem("agent_chat_session_id", newSessionId);
+      setConversationId(newConvId);
+      localStorage.setItem("agent_chat_conversation_id", newConvId);
       setMessages([
         {
           id: "welcome",
           role: "assistant",
           content:
-            "您好！欢迎来到 AgentForge 智能助手，有什么可以帮助您的吗？",
+            "您好！欢迎来到核身排障智能助手，请描述您遇到的问题",
           timestamp: Date.now(),
         },
       ]);
       setCurrentMeta(null);
-      // loadHistory 通过 useEffect 监听 sessionId 自动触发
+      setHasMore(false);
+      setNextCursor(null);
+      // loadHistory 通过 useEffect 监听 conversationId 自动触发
     },
     [],
   );
+
+  // ── 发送消息 ──
 
   const sendMessage = useCallback(
     async (input: string) => {
@@ -137,10 +231,19 @@ export function useAgentChatStream() {
         abortRef.current?.abort();
         abortRef.current = new AbortController();
 
+        const token = localStorage.getItem("accessToken");
+        const body: Record<string, string> = { message: trimmed };
+        if (conversationId) {
+          body.conversation_id = conversationId;
+        }
+
         const res = await fetch("/api/agent/chat", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ session_id: sessionId, message: trimmed }),
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify(body),
           signal: abortRef.current.signal,
         });
 
@@ -173,7 +276,6 @@ export function useAgentChatStream() {
                 { ...last, diagnosis: dp },
               ];
             }
-            // Create stream message if it doesn't exist yet (diagnosis may arrive before tokens)
             return [
               ...prev,
               {
@@ -206,19 +308,20 @@ export function useAgentChatStream() {
               const chunk = JSON.parse(data);
 
               if (chunk.type === "meta") {
-                if (chunk.session_id) {
+                if (chunk.conversation_id) {
                   localStorage.setItem(
-                    "agent_chat_session_id",
-                    chunk.session_id,
+                    "agent_chat_conversation_id",
+                    chunk.conversation_id,
                   );
-                  setSessionId(chunk.session_id);
+                  setConversationId(chunk.conversation_id);
                 }
                 if (chunk.knowledge && Array.isArray(chunk.knowledge)) {
                   knowledgeResults = chunk.knowledge;
                 }
                 meta = {
                   messageId: chunk.message_id,
-                  sessionId: chunk.session_id || sessionId,
+                  conversationId: chunk.conversation_id || "",
+                  sessionId: chunk.conversation_id || "",
                   model: chunk.model || "",
                   provider: chunk.provider || "",
                   knowledge: knowledgeResults || [],
@@ -233,12 +336,11 @@ export function useAgentChatStream() {
               }
 
               // ── 诊断事件处理 ──
-
               if (chunk.type === "diagnosis_started") {
                 diagnosisProgress = {
                   status: "running",
                   phases: (chunk.agents as Array<{ name: string; role: string }>).map(
-                    (a) => ({
+                    (a: { name: string; role: string }) => ({
                       phase:
                         a.name === "frontend_agent"
                           ? 1
@@ -305,7 +407,6 @@ export function useAgentChatStream() {
               }
 
               // ── 诊断信息采集事件 ──
-
               if (chunk.type === "clarification_needed") {
                 clarificationData = {
                   intent: chunk.intent as string,
@@ -429,22 +530,30 @@ export function useAgentChatStream() {
         setIsStreaming(false);
       }
     },
-    [sessionId],
+    [conversationId],
   );
 
   const abort = useCallback(() => {
     abortRef.current?.abort();
   }, []);
 
+  // 兼容旧代码：暴露 sessionId 别名
+  const sessionId = conversationId;
+
   return {
     messages,
     isStreaming,
     sessionId,
+    conversationId,
     currentMeta,
+    hasMore,
+    isLoadingMore,
     sendMessage,
     loadHistory,
+    loadMoreHistory,
     newChat,
-    switchSession,
+    switchSession: switchConversation,
+    switchConversation,
     abort,
   };
 }
@@ -459,7 +568,6 @@ function extractConclusionFromOutput(
     if (typeof finalDiag.message === "string") return finalDiag.message;
   }
   if (typeof output.conclusion === "string") {
-    // output.conclusion 可能是 LLM 原始 JSON 文本，尝试从中提取
     const parsed = tryExtractJsonField(output.conclusion, "conclusion");
     return parsed ?? output.conclusion;
   }
@@ -474,7 +582,6 @@ function tryExtractJsonField(text: string, field: string): string | null {
   } catch {
     // Not valid JSON, try regex-based extraction
   }
-  // Try finding JSON in the text via regex
   const match = text.match(/\{[\s\S]*\}/);
   if (match) {
     try {

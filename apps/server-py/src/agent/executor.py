@@ -48,19 +48,26 @@ MAX_ITERATIONS = 5
 HARDCODED_FALLBACK = "抱歉，暂时无法处理您的请求，请稍后再试或联系人工客服。"
 
 # ReAct 系统提示词（中文）
-REACT_SYSTEM_PROMPT = """你是一个专业的 AI 助手。你可以使用工具来帮助用户解决问题。
+REACT_SYSTEM_PROMPT = """你是核身排障智能助手，专门帮助用户诊断和解决身份核身（人脸核身、活体检测、OCR 识别）相关的技术问题。
+
+## 你的专业领域
+- 核身错误码排查（FACE_TIMEOUT、LIVENESS_FAIL、NETWORK_TIMEOUT、SDK_VERSION_TOO_OLD、CAMERA_PERMISSION_DENIED 等）
+- SDK 集成诊断（H5、小程序、App 端）
+- 商户接入配置与通过率优化
+- 核身批量失败应急响应
 
 ## 回答规则
-1. 先理解用户的请求，判断是否需要使用工具
-2. 如果需要查询知识库，使用 search_knowledge_base 工具
-3. 基于工具返回的结果，用自然语言回答用户
-4. 回答要简洁、专业、友好
-5. 如果工具没有返回有用信息，如实告诉用户
-6. 使用 Markdown 格式组织回答（列表、表格等）
+1. 先理解用户的问题，提取关键信息（错误码、端类型、产品类型等）
+2. 使用 search_knowledge_base 工具查询核身知识库获取排查方案
+3. 基于工具返回的知识库内容，用自然语言给出结构化的排查建议
+4. 回答要包含：原因分析 → 排查步骤 → 处理方案，使用 Markdown 列表或表格组织
+5. 如果知识库没有覆盖用户的问题，如实告知并建议联系技术支持
+6. 必要时引导用户补充更多诊断信息（如 trace 日志、SDK 版本、端类型等）
 
 ## 重要
-- 不要编造信息，严格基于工具返回的数据回答
-- 每次只调用一个工具，等待结果后再决定下一步"""
+- 严格基于知识库返回的内容回答，不要编造任何技术细节
+- 每次只调用一个工具，等待结果后再决定下一步
+- 如果用户问题不属于核身领域，礼貌说明你的专业范围"""
 
 
 class AgentExecutor:
@@ -97,6 +104,7 @@ class AgentExecutor:
         # ── 发送 meta ──
         yield StreamMeta(
             message_id=assistant_msg_id,
+            conversation_id=context.conversation_id,
             session_id=context.session_id,
             model=resolved_model,
             provider=context.provider_name,
@@ -136,15 +144,23 @@ class AgentExecutor:
             )
 
             # ── 初始状态 ──
+            # 优先使用 ContextBuilder 预组装的消息（含历史 + 摘要）
+            # 否则回退到简单模式：System Prompt + 当前用户消息
             from langchain_core.messages import HumanMessage, SystemMessage
 
-            initial_state: AgentState = {
-                "messages": [
-                    SystemMessage(content=effective_system_prompt),
-                    HumanMessage(content=context.user_message),
-                ],
-                "iteration_count": 0,
-            }
+            if context.prebuilt_messages:
+                initial_state: AgentState = {
+                    "messages": list(context.prebuilt_messages),
+                    "iteration_count": 0,
+                }
+            else:
+                initial_state: AgentState = {
+                    "messages": [
+                        SystemMessage(content=effective_system_prompt),
+                        HumanMessage(content=context.user_message),
+                    ],
+                    "iteration_count": 0,
+                }
 
             # ── 流式执行 ──
             final_answer = ""

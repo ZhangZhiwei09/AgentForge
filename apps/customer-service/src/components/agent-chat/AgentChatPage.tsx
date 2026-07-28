@@ -20,10 +20,15 @@ export function AgentChatPage() {
     messages,
     isStreaming,
     sessionId,
+    conversationId,
     currentMeta,
+    hasMore,
+    isLoadingMore,
     sendMessage,
     loadHistory,
+    loadMoreHistory,
     newChat,
+    switchConversation,
     switchSession,
     abort,
   } = useAgentChatStream();
@@ -33,11 +38,16 @@ export function AgentChatPage() {
   );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const topTriggerRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const prevScrollHeightRef = useRef<number>(0);
 
+  // 新消息时滚动到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isStreaming]);
 
+  // 首次加载 + 切换会话时加载历史
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
@@ -45,6 +55,42 @@ export function AgentChatPage() {
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
+
+  // IntersectionObserver：顶部触发加载更多
+  useEffect(() => {
+    const trigger = topTriggerRef.current;
+    if (!trigger || !hasMore) return;
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting && hasMore && !isLoadingMore) {
+          // 记录当前滚动高度，用于加载完成后保持位置
+          const container = scrollContainerRef.current;
+          if (container) {
+            prevScrollHeightRef.current = container.scrollHeight;
+          }
+          loadMoreHistory();
+        }
+      },
+      { threshold: 0.1 },
+    );
+
+    observer.observe(trigger);
+    return () => observer.disconnect();
+  }, [hasMore, isLoadingMore, loadMoreHistory]);
+
+  // 加载更早消息后恢复滚动位置
+  useEffect(() => {
+    if (!isLoadingMore && prevScrollHeightRef.current > 0) {
+      const container = scrollContainerRef.current;
+      if (container) {
+        const newScrollHeight = container.scrollHeight;
+        const diff = newScrollHeight - prevScrollHeightRef.current;
+        container.scrollTop = diff;
+        prevScrollHeightRef.current = 0;
+      }
+    }
+  }, [isLoadingMore]);
 
   const hasRealMessages = messages.length > 1 || messages[0]?.id !== "welcome";
   const lastAssistantMsg = [...messages]
@@ -91,18 +137,35 @@ export function AgentChatPage() {
     >
       {/* 左侧会话列表（ChatGPT 风格） */}
       <SessionList
-        activeSessionId={sessionId}
-        onSelectSession={switchSession}
+        activeConversationId={conversationId}
+        onSelectConversation={switchConversation}
         onNewChat={newChat}
       />
 
       {/* 中间聊天区域 */}
       <main className="flex flex-1 flex-col bg-[hsl(var(--cs-bg))]">
-        <div className="flex-1 overflow-y-auto">
+        <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
           {!hasRealMessages ? (
             <WelcomeScreen onSend={handleFAQSelect} />
           ) : (
             <div className="mx-auto max-w-2xl space-y-4 px-3 sm:px-6 py-4 sm:py-6">
+              {/* 顶部加载触发器 */}
+              <div ref={topTriggerRef} className="py-2 text-center">
+                {isLoadingMore ? (
+                  <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                    加载更早的消息...
+                  </span>
+                ) : hasMore ? (
+                  <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                    向上滚动加载更多
+                  </span>
+                ) : messages.length > 2 ? (
+                  <span className="text-xs text-[hsl(var(--muted-foreground))]">
+                    已加载全部消息
+                  </span>
+                ) : null}
+              </div>
+
               {messages
                 .filter((m) => m.id !== "welcome")
                 .map((msg) => (

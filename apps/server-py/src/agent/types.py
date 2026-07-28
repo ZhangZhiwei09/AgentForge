@@ -45,6 +45,7 @@ class StreamMeta:
     """流元信息事件。"""
     type: str = "meta"
     message_id: str = ""
+    conversation_id: str = ""
     session_id: str | None = None
     model: str = ""
     provider: str = ""
@@ -150,6 +151,7 @@ class RouteContext:
     session_id: str | None = None
     user_message: str = ""
     history: list = field(default_factory=list)
+    prebuilt_messages: list = field(default_factory=list)  # ContextBuilder 预组装的 LangChain messages
     resolved_model: str = ""
     provider_name: str = ""
     within_service_hours: bool = True
