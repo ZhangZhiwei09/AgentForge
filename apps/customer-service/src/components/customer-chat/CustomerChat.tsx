@@ -28,7 +28,7 @@ export function CustomerChat() {
     {
       id: "welcome",
       role: "assistant",
-      content: "您好！欢迎来到 AgentForge，有什么可以帮助您的吗？",
+      content: "您好！欢迎来到核身排障助手，请描述您遇到的核身问题",
       timestamp: Date.now(),
     },
   ]);
@@ -54,7 +54,7 @@ export function CustomerChat() {
       {
         id: "welcome",
         role: "assistant",
-        content: "您好！欢迎来到 AgentForge，有什么可以帮助您的吗？",
+        content: "您好！欢迎来到核身排障助手，请描述您遇到的核身问题",
         timestamp: Date.now(),
       },
     ]);

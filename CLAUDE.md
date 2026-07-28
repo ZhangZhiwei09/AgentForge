@@ -41,6 +41,12 @@ P0 问题禁止进入下一阶段。
 
 以下情况可直接进入 Implementation：Bug Fix、Config、Docs、小型重构。
 
+## Conventions
+
+- **提交信息**：英文，Conventional Commits（`feat:` / `fix:` / `chore:` / `refactor:` / `docs:` / `test:`），清晰描述 what & why
+- **中文 Prompt**：所有 LLM-facing 的 prompt 和 system message 必须使用中文，详见 `docs/engineering/chinese-prompts.md`
+- **类型安全**：详见 `docs/engineering/type-safety.md`
+
 ## Docs (Load On Demand)
 
 仅在当前任务需要时读取对应文档，禁止一次性加载全部文档。
@@ -58,4 +64,3 @@ Process:
 
 Project:
   docs/operations/development.md
-  plan.md

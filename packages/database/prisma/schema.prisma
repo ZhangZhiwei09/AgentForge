@@ -76,6 +76,7 @@ model Conversation {
   agentSessions  AgentSession[]
   ratings        SatisfactionRating[]
   approvals      AgentApproval[]
+  memory         ConversationMemory?
   @@index([sessionId], map: "ix_conversations_session_id")
   @@index([userId], map: "ix_conversations_user_id")
   @@index([userId, updatedAt], map: "ix_conversations_user_updated")
@@ -87,7 +88,9 @@ model Message {
   id             String       @id @db.VarChar(36)
   conversationId String       @map("conversation_id") @db.VarChar(36)
   role           String       @db.VarChar(16)
+  type           String       @default("text") @db.VarChar(20)
   content        String
+  metadata       Json         @default("{}")
   model          String?      @db.VarChar(64)
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -398,6 +401,22 @@ model SatisfactionRating {
   @@index([createdAt], map: "ix_satisfaction_ratings_created_at")
   @@index([rating], map: "ix_satisfaction_ratings_rating")
   @@map("satisfaction_ratings")
+}
+
+model ConversationMemory {
+  id                     String   @id @db.VarChar(36)
+  conversationId         String   @map("conversation_id") @db.VarChar(36)
+  summary                String?  @db.Text
+  coveredUntilMessageId  String?  @map("covered_until_message_id") @db.VarChar(36)
+  tokenCount             Int      @default(0) @map("token_count")
+  memoryType             String   @default("summary") @map("memory_type") @db.VarChar(20)
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  conversation           Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId], map: "ix_conversation_memory_conv_id")
+  @@index([memoryType], map: "ix_conversation_memory_type")
+  @@map("conversation_memory")
 }
 
 model Workflow {
