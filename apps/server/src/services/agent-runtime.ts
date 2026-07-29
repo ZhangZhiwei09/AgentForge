@@ -150,20 +150,31 @@ export class AgentRuntimeService {
   }
 
   // ── 会话管理 ──
-  private async getOrCreateConversation(sessionId: string | null) {
-    if (sessionId) {
-      const existing = await prisma.conversation.findFirst({
-        where: { sessionId, type: "agent_chat" },
+  /**
+   * 获取或创建会话。
+   * lookupId 可能是 conversation_id（UUID 主键）或旧的 session_id，按优先级查找。
+   */
+  private async getOrCreateConversation(lookupId: string | null, userId: string) {
+    if (lookupId) {
+      // 优先按主键（conversation_id）查找
+      const byId = await prisma.conversation.findUnique({
+        where: { id: lookupId },
       });
-      if (existing) return existing;
+      if (byId) return byId;
+
+      // Fallback：按旧的 session_id 字段查找
+      const bySessionId = await prisma.conversation.findFirst({
+        where: { sessionId: lookupId, type: "agent_chat" },
+      });
+      if (bySessionId) return bySessionId;
     }
     const conversation = await prisma.conversation.create({
       data: {
         id: randomUUID(),
         title: "智能助手会话",
-        userId: AGENT_USER_ID,
+        userId,
         type: "agent_chat",
-        sessionId,
+        sessionId: lookupId,
       },
     });
     return conversation;
@@ -207,13 +218,14 @@ export class AgentRuntimeService {
   // ═══════════════════════════════════════════════════════
 
   async *streamChat(
-    sessionId: string | null,
+    lookupId: string | null,
+    userId: string,
     userMessage: string,
     signal?: AbortSignal,
   ): AsyncGenerator<Record<string, unknown>> {
-    // ── 0. 会话级并发控制：同一 sessionId 的请求串行化 ──
+    // ── 0. 会话级并发控制：同一 lookupId 的请求串行化 ──
     // 使用带时间戳的锁条目，超时时自动垃圾回收防止僵尸锁永久阻塞
-    const lockKey = sessionId ?? `anonymous-${randomUUID()}`;
+    const lockKey = lookupId ?? `anonymous-${randomUUID()}`;
     const existingEntry = AgentRuntimeService.sessionLocks.get(lockKey);
     const previousLock = existingEntry ?? Promise.resolve();
 
@@ -279,7 +291,7 @@ export class AgentRuntimeService {
 
     try {
       // ── 1. Session 层 ──
-      const conversation = await this.getOrCreateConversation(sessionId);
+      const conversation = await this.getOrCreateConversation(lookupId, userId);
       const { providerName, modelId: resolvedModel } = resolveModel(this.modelId);
       const withinHours = this.isWithinServiceHours();
 
@@ -347,6 +359,7 @@ export class AgentRuntimeService {
 
         yield* this.streamConversationalMatch(
           assistantMsgId,
+          conversation.id,
           conversation.sessionId,
           resolvedModel,
           providerName,
@@ -553,6 +566,7 @@ export class AgentRuntimeService {
   // ── 传统对话流式输出 ──
   private async *streamConversationalMatch(
     assistantMsgId: string,
+    conversationId: string,
     sessionId: string | null,
     model: string,
     provider: string,
@@ -563,6 +577,7 @@ export class AgentRuntimeService {
     yield {
       type: "meta",
       message_id: assistantMsgId,
+      conversation_id: conversationId,
       session_id: sessionId,
       model,
       provider,

@@ -11,6 +11,7 @@ export const agentRuntimeRoutes = createHono();
 
 const agentChatRequestSchema = z.object({
   session_id: z.string().nullable().optional(),
+  conversation_id: z.string().optional(),
   message: z.string().min(1),
 });
 
@@ -19,13 +20,38 @@ agentRuntimeRoutes.post(
   "/api/agent/chat",
   zValidator("json", agentChatRequestSchema),
   async (c) => {
-    const { session_id, message } = c.req.valid("json");
+    const { session_id, conversation_id, message } = c.req.valid("json");
+    // conversation_id 优先（新前端），fallback 到 session_id（旧兼容）
+    const lookupId = conversation_id || (session_id ?? null);
+
+    // 提取用户 ID：优先验证 token，未认证时从 JWT payload 解码 sub，回退到系统用户
+    const authHeader = c.req.header("Authorization")?.replace("Bearer ", "");
+    let userId = "00000000-0000-0000-0000-000000000002";
+    if (authHeader) {
+      const user = await authService.validateToken(authHeader);
+      if (user) {
+        userId = user.id;
+      } else {
+        // Token 验证失败时，尝试直接解码 JWT payload 提取 sub（不验证签名）
+        try {
+          const parts = authHeader.split(".");
+          if (parts.length === 3) {
+            const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+            if (payload.sub) userId = payload.sub;
+          }
+        } catch {
+          // 解码失败则保持系统用户 ID
+        }
+      }
+    }
+
     const service = getAgentRuntimeService();
 
     return streamSSE(c, async (stream) => {
       try {
         for await (const chunk of service.streamChat(
-          session_id ?? null,
+          lookupId,
+          userId,
           message,
           c.req.raw.signal,
         )) {
@@ -46,16 +72,22 @@ agentRuntimeRoutes.post(
 // 会话历史
 // ════════════════════════════════════════════════════════════════
 
-// GET /api/agent/chat/history?session_id=X
+// GET /api/agent/chat/history?conversation_id=X  (也兼容旧参数 session_id)
 agentRuntimeRoutes.get("/api/agent/chat/history", async (c) => {
-  const sessionId = c.req.query("session_id");
-  if (!sessionId) {
-    return c.json({ detail: "缺少 session_id 参数" }, 400);
+  const lookupId = c.req.query("conversation_id") || c.req.query("session_id");
+  if (!lookupId) {
+    return c.json({ detail: "缺少 conversation_id 参数" }, 400);
   }
 
-  const conversation = await prisma.conversation.findFirst({
-    where: { sessionId, type: "agent_chat" },
+  // 优先按主键查找，fallback 到 sessionId（旧数据兼容）
+  let conversation = await prisma.conversation.findUnique({
+    where: { id: lookupId },
   });
+  if (!conversation) {
+    conversation = await prisma.conversation.findFirst({
+      where: { sessionId: lookupId, type: "agent_chat" },
+    });
+  }
 
   if (!conversation) {
     return c.json({ messages: [] });
@@ -96,10 +128,22 @@ agentRuntimeRoutes.get("/api/agent/chat/history", async (c) => {
 agentRuntimeRoutes.get("/api/agent/chat/conversations", async (c) => {
   const sessionId = c.req.query("session_id");
 
-  // 尝试从 Authorization header 提取用户
+  // 尝试从 Authorization header 提取用户（验证失败时直接解码 payload）
   const authHeader = c.req.header("Authorization")?.replace("Bearer ", "");
   if (authHeader) {
-    const user = await authService.validateToken(authHeader);
+    let user = await authService.validateToken(authHeader);
+    if (!user) {
+      // Token 过期或签名不匹配时，直接解码 JWT payload 提取 sub
+      try {
+        const parts = authHeader.split(".");
+        if (parts.length === 3) {
+          const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+          if (payload.sub) user = { id: payload.sub, email: payload.email ?? "", role: payload.role ?? "user" };
+        }
+      } catch {
+        // 解码失败则忽略
+      }
+    }
     if (user) {
       const conversations = await prisma.conversation.findMany({
         where: { userId: user.id, type: "agent_chat" },

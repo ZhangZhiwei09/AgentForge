@@ -101,6 +101,7 @@ export class AgentExecutor implements RouteAgent {
     yield {
       type: "meta",
       message_id: assistantMsgId,
+      conversation_id: conversationId,
       session_id: sessionId,
       model: resolvedModel,
       provider: providerName,

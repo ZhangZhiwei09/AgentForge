@@ -14,12 +14,15 @@ interface SessionListProps {
   activeConversationId: string;
   onSelectConversation: (conversationId: string) => void;
   onNewChat: () => void;
+  /** 外部触发刷新（如对话完成后递增） */
+  refreshTrigger?: number;
 }
 
 export function SessionList({
   activeConversationId,
   onSelectConversation,
   onNewChat,
+  refreshTrigger,
 }: SessionListProps) {
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [collapsed, setCollapsed] = useState(false);
@@ -53,6 +56,13 @@ export function SessionList({
   useEffect(() => {
     fetchConversations();
   }, [fetchConversations]);
+
+  // 外部触发刷新（如对话完成后）
+  useEffect(() => {
+    if (refreshTrigger !== undefined && refreshTrigger > 0) {
+      fetchConversations();
+    }
+  }, [refreshTrigger, fetchConversations]);
 
   // 新建对话后刷新列表
   function handleNewChat() {

@@ -193,6 +193,7 @@ export class DiagnosisRouteAgent implements RouteAgent {
     yield {
       type: "meta",
       message_id: messageId,
+      conversation_id: context.conversationId,
       session_id: context.sessionId,
       model: context.resolvedModel,
       provider: context.providerName,
