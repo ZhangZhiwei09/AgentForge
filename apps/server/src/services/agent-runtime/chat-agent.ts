@@ -56,6 +56,7 @@ export class ChatAgent implements RouteAgent {
     yield {
       type: "meta",
       message_id: assistantMsgId,
+      conversation_id: context.conversationId,
       session_id: sessionId,
       model: resolvedModel,
       provider: providerName,

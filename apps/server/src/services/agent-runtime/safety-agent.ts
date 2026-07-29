@@ -22,6 +22,7 @@ export class SafetyAgent implements RouteAgent {
     yield {
       type: "meta",
       message_id: context.assistantMsgId,
+      conversation_id: context.conversationId,
       session_id: context.sessionId,
       model: context.resolvedModel,
       provider: context.providerName,

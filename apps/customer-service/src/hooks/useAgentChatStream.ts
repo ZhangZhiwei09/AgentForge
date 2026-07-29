@@ -166,6 +166,9 @@ export function useAgentChatStream() {
   // ── 新建对话 ──
 
   const newChat = useCallback(() => {
+    abortRef.current?.abort();
+    streamingRef.current = false;
+    setIsStreaming(false);
     setConversationId("");
     localStorage.removeItem("agent_chat_conversation_id");
     setMessages([

@@ -75,6 +75,7 @@ export type RouteStreamEvent =
   | {
       type: "meta";
       message_id: string;
+      conversation_id: string;
       session_id: string | null;
       model: string;
       provider: string;

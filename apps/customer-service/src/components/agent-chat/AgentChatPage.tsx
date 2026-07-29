@@ -33,6 +33,8 @@ export function AgentChatPage() {
     abort,
   } = useAgentChatStream();
   const [input, setInput] = useState("");
+  const [listRefreshKey, setListRefreshKey] = useState(0);
+  const prevStreamingRef = useRef(isStreaming);
   const [expandedKnowledge, setExpandedKnowledge] = useState<Set<string>>(
     new Set(),
   );
@@ -51,6 +53,14 @@ export function AgentChatPage() {
   useEffect(() => {
     loadHistory();
   }, [loadHistory]);
+
+  // 流式完成时刷新左侧会话列表
+  useEffect(() => {
+    if (prevStreamingRef.current && !isStreaming && conversationId) {
+      setListRefreshKey((k) => k + 1);
+    }
+    prevStreamingRef.current = isStreaming;
+  }, [isStreaming, conversationId]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -140,6 +150,7 @@ export function AgentChatPage() {
         activeConversationId={conversationId}
         onSelectConversation={switchConversation}
         onNewChat={newChat}
+        refreshTrigger={listRefreshKey}
       />
 
       {/* 中间聊天区域 */}
