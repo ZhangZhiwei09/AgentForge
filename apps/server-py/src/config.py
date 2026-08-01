@@ -47,6 +47,11 @@ class Settings(BaseSettings):
     # ── LangGraph Checkpoint ─────────────────────────
     langgraph_checkpoint_enabled: bool = Field(default=False)
 
+    # ── LangGraph Diagnosis ──────────────────────────
+    # Phase 1：DIAGNOSIS 路由改用 LangGraph 图路径（multi-agent-langgraph-plan.md）
+    # 默认关；Phase 2 灰度验证后置 True 并删除旧顺序编排主体。
+    langgraph_diagnosis_enabled: bool = Field(default=False)
+
     # ── Server ──────────────────────────────────────────
     port: int = Field(default=8000)
     debug: bool = Field(default=False)

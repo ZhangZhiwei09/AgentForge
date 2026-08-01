@@ -23,6 +23,7 @@ from src.agent.executor import AgentExecutor
 from src.agent.tools.registry import ToolRegistry
 from src.agent.types import RouteContext, StreamToken
 from src.agent.diagnosis.blackboard import Blackboard
+from src.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -447,6 +448,21 @@ class DiagnosisMode:
             tools_registry: 工具注册中心（已注册所有必要工具）
             cancel_event: 可选取消信号，set 后中断诊断
         """
+        # LangGraph 图路径（feature flag 默认关，Phase 1）
+        # 惰性导入避免 import 时引入 graph → mode 的循环依赖。
+        if settings.langgraph_diagnosis_enabled:
+            from src.agent.diagnosis.graph import run_langgraph_diagnosis
+
+            async for event in run_langgraph_diagnosis(
+                roles=roles,
+                task=task,
+                conversation_id=conversation_id,
+                tools_registry=tools_registry,
+                cancel_event=cancel_event,
+            ):
+                yield event
+            return
+
         bb = Blackboard()
         frontend_role = roles.get("frontend_agent")
         backend_role = roles.get("backend_agent")

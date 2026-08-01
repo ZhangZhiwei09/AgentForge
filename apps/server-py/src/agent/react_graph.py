@@ -99,9 +99,11 @@ def build_react_graph(
             gen_span.end(output=None)
             raise
 
+        # langchain_core 1.5.1 下 AIMessage(tool_calls=None) 会触发 pydantic
+        # ValidationError（tool_calls 必须是 list）。空 list 语义等价且合法。
         response = LCAIMessage(
             content=final_content,
-            tool_calls=tool_calls if tool_calls else None,
+            tool_calls=tool_calls,
         )
 
         return {

@@ -1,6 +1,6 @@
 # Multi-Agent 编排 LangGraph 化方案
 
-> 状态：**实施中** — Phase 0 ✅（2026-08-01），Phase 1-2 待实施，Phase 3 待评估
+> 状态：**实施中** — Phase 0 ✅（2026-08-01），Phase 1 ✅（2026-08-01），Phase 2 待实施，Phase 3 待评估
 > 范围：`apps/server-py` 的 DIAGNOSIS 路由 Multi-Agent 编排
 > 关联：`docs/design/python-core-upgrade-plan.md` 的 **G5**（多 Agent 编排）与 **T1**（DiagnosisMode 重构为 LangGraph Subgraph）
 > 评审记录：本版已回应 CHANGES_REQUIRED 的 3 个阻断项（见 §3.2 实证与设计决策、§3.3 状态、§3.5 事件映射）
@@ -254,7 +254,12 @@ LangGraph 节点是普通 async 函数。`check_rule_escalation`、`resolve_diag
 - `AgentExecutor` 改为调用该工厂，行为不变。
 - **验收**：现有 `tests/test_agent.py` 全绿；TASK 行为不变。
 
-### ⬜ Phase 1 — 新增 LangGraph 版 DiagnosisMode（Feature Flag 默认关）
+### ✅ Phase 1 — 新增 LangGraph 版 DiagnosisMode（Feature Flag 默认关）
+
+> 实施说明（2026-08-01）：
+> - **事件侧信道精化**：§3.5 的"外层 astream_events 节点边界映射 + 独立 token 队列"收敛为**单 `asyncio.Queue` + 父图 `ainvoke`**。阶段节点把 AgentStarted/AgentCompleted/AgentError 推入同一 FIFO，外层按序转发；TeamCompleted 由 `ainvoke` 返回的最终状态派生。PoC 实证（`apps/server-py` venv）确认外层 `ainvoke` + 节点内驱动内层 ReAct 图（`astream_events`）可行且模型流事件被内层正确捕获，事件序列与手写版一致。
+> - **token 不进侧信道**：当前契约 `TeamStreamEvent` 无逐 token 变体，token 由 `_run_phase_agent`（复用 `AgentExecutor`）内部收集为该 Agent 的 `output`，与手写版 `_run_agent` 相同 —— 避免向 `TeamStreamEvent` 流混入 `StreamToken`。
+> - **顺带修复潜在 bug**：langchain_core 1.5.1 下 `AIMessage(tool_calls=None)` 触发 pydantic ValidationError（`react_graph.call_model` 与 `langchain_adapter._agenerate` 两处，`176769b` 引入、Phase 0 原样搬入）。已改为空 list，并新增 `tests/agent/test_react_graph.py` 回归测试。此 bug 影响 TASK 路由纯文本回复，属既有潜伏问题。
 
 文件变更：
 
