@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import { useAgentChatStream } from "@/hooks/useAgentChatStream";
 import type { AgentMessage } from "@/hooks/useAgentChatStream";
-import { RichMessageRenderer, DiagnosisCard, ClarificationCard } from "@agentforge/cui";
+import { RichMessageRenderer, DiagnosisCard, ClarificationCard, WaitingInputCard } from "@agentforge/cui";
 import { SessionList } from "./SessionList";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { QuickReplies } from "@/components/customer-chat/QuickReplies";
@@ -206,6 +206,13 @@ export function AgentChatPage() {
                         {/* 诊断进度卡片 */}
                         {msg.role === "assistant" && msg.diagnosis && (
                           <DiagnosisCard diagnosis={msg.diagnosis} />
+                        )}
+                        {/* HITL 等待补充卡片（诊断进行中暂停，用户补充后同 thread 续跑） */}
+                        {msg.role === "assistant" && msg.waitingInput && (
+                          <WaitingInputCard
+                            waitingInput={msg.waitingInput}
+                            onSubmit={sendMessage}
+                          />
                         )}
                         {msg.id === "__stream__" && isStreaming ? (
                           <div>

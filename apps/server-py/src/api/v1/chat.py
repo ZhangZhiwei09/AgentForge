@@ -37,6 +37,7 @@ from src.agent.types import (
     DiagnosisPhase,
     DiagnosisPhaseDone,
     DiagnosisStarted,
+    DiagnosisWaitingInput,
     RouteContext,
     RouteName,
     StreamDone,
@@ -172,6 +173,12 @@ async def _to_sse(events: AsyncIterator) -> AsyncIterator[str]:
         elif isinstance(event, ClarificationNeeded):
             payload = json.dumps(
                 {"type": "clarification_needed", "message_id": event.message_id, "intent": event.intent, "missing_fields": event.missing_fields, "prompt_message": event.prompt_message, "hints": event.hints},
+                ensure_ascii=False,
+            )
+        elif isinstance(event, DiagnosisWaitingInput):
+            # Phase 3b HITL：诊断在阶段边界暂停，等待用户补充信息。
+            payload = json.dumps(
+                {"type": "diagnosis_waiting_input", "message_id": event.message_id, "message": event.message, "missing_fields": event.missing_fields},
                 ensure_ascii=False,
             )
         else:

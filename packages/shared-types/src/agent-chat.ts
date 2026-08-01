@@ -20,6 +20,13 @@ export interface ClarificationRequest {
   hints: string[];
 }
 
+// ── HITL 等待补充（诊断进行中的阶段边界暂停） ──
+
+export interface WaitingInputRequest {
+  message: string;
+  missingFields: string[];
+}
+
 // ── 诊断进度（多 Agent 协同诊断） ──
 
 export interface DiagnosisPhase {
@@ -51,6 +58,8 @@ export interface AgentMessage {
   clarification?: ClarificationRequest;
   /** 多 Agent 协同诊断过程数据 */
   diagnosis?: DiagnosisProgress;
+  /** HITL 等待补充请求（诊断进行中暂停，用户补充后同 thread 续跑） */
+  waitingInput?: WaitingInputRequest;
 }
 
 // ── 流元信息 ──

@@ -162,6 +162,7 @@ export type {
   AgentMessage,
   AgentStreamMeta,
   ClarificationRequest,
+  WaitingInputRequest,
   DiagnosisProgress,
   DiagnosisPhase,
 } from "./agent-chat";

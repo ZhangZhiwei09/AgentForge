@@ -9,6 +9,7 @@ import type {
   DiagnosisProgress,
   DiagnosisPhase,
   ClarificationRequest,
+  WaitingInputRequest,
 } from "@agentforge/shared-types";
 
 // Re-export for backward compatibility
@@ -268,6 +269,7 @@ export function useAgentChatStream() {
         let meta: StreamMeta | null = null;
         let diagnosisProgress: DiagnosisProgress | undefined;
         let clarificationData: ClarificationRequest | undefined;
+        let waitingInputData: WaitingInputRequest | undefined;
 
         // Helper: update the stream message with current diagnosis progress
         function updateStreamWithDiagnosis(dp: DiagnosisProgress | undefined) {
@@ -395,16 +397,40 @@ export function useAgentChatStream() {
               }
 
               if (chunk.type === "diagnosis_completed") {
+                const output = chunk.output as Record<string, unknown>;
+                const doneProgress: DiagnosisProgress = {
+                  status: "done",
+                  phases: diagnosisProgress?.phases ?? [],
+                  resolution: String(output.resolution ?? ""),
+                  finalConclusion: extractConclusionFromOutput(output),
+                };
                 if (diagnosisProgress) {
-                  const output = chunk.output as Record<string, unknown>;
-                  diagnosisProgress = {
-                    ...diagnosisProgress,
-                    status: "done",
-                    resolution: String(output.resolution ?? ""),
-                    finalConclusion:
-                      extractConclusionFromOutput(output),
-                  };
+                  diagnosisProgress = doneProgress;
                   updateStreamWithDiagnosis(diagnosisProgress);
+                } else {
+                  // Phase 3b HITL resume：续跑流不再重放 diagnosis_started，
+                  // 局部 diagnosisProgress 为空。回填最近一条"诊断中 + 等待补充"
+                  // 的 assistant 消息为完成态，并清除等待补充标记。
+                  setMessages((prev) => {
+                    let updated = false;
+                    const next = prev.map((m) => {
+                      if (updated) return m;
+                      if (
+                        m.role === "assistant" &&
+                        m.diagnosis &&
+                        m.diagnosis.status === "running"
+                      ) {
+                        updated = true;
+                        return {
+                          ...m,
+                          diagnosis: doneProgress,
+                          waitingInput: undefined,
+                        };
+                      }
+                      return m;
+                    });
+                    return updated ? next : prev;
+                  });
                 }
                 continue;
               }
@@ -439,6 +465,45 @@ export function useAgentChatStream() {
                 continue;
               }
 
+              // ── HITL 等待补充事件（Phase 3b） ──
+              if (chunk.type === "diagnosis_waiting_input") {
+                waitingInputData = {
+                  message: (chunk.message as string) ?? "",
+                  missingFields: (chunk.missing_fields as string[]) ?? [],
+                };
+                setMessages((prev) => {
+                  // 复用最近的"诊断中/等待补充"assistant 消息，避免续跑后
+                  // re-interrupt 时产生重复的等待补充卡片。
+                  let target = -1;
+                  for (let i = prev.length - 1; i >= 0; i--) {
+                    const m = prev[i];
+                    if (m.role === "assistant" && (m.diagnosis || m.waitingInput)) {
+                      target = i;
+                      break;
+                    }
+                  }
+                  if (target >= 0) {
+                    const next = [...prev];
+                    next[target] = {
+                      ...next[target],
+                      waitingInput: waitingInputData,
+                    };
+                    return next;
+                  }
+                  return [
+                    ...prev,
+                    {
+                      id: "__stream__",
+                      role: "assistant" as const,
+                      content: "",
+                      timestamp: Date.now(),
+                      waitingInput: waitingInputData,
+                    },
+                  ];
+                });
+                continue;
+              }
+
               if (chunk.type === "token" && chunk.content) {
                 streamContent += chunk.content;
                 setMessages((prev) => {
@@ -446,7 +511,7 @@ export function useAgentChatStream() {
                   if (last?.id === "__stream__") {
                     return [
                       ...prev.slice(0, -1),
-                      { ...last, content: streamContent, diagnosis: diagnosisProgress, clarification: clarificationData },
+                      { ...last, content: streamContent, diagnosis: diagnosisProgress, clarification: clarificationData, waitingInput: waitingInputData },
                     ];
                   }
                   return [
@@ -459,6 +524,7 @@ export function useAgentChatStream() {
                       knowledge: knowledgeResults,
                       diagnosis: diagnosisProgress,
                       clarification: clarificationData,
+                      waitingInput: waitingInputData,
                     },
                   ];
                 });
@@ -492,6 +558,7 @@ export function useAgentChatStream() {
                             allBlocks.length > 0 ? allBlocks : undefined,
                           diagnosis: diagnosisProgress ?? last.diagnosis,
                           clarification: clarificationData ?? last.clarification,
+                          waitingInput: waitingInputData ?? last.waitingInput,
                         },
                       ];
                     }
