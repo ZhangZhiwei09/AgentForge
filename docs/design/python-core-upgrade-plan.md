@@ -336,7 +336,7 @@ curl -X POST localhost:8000/api/agent/chat -d '{"message":"你好"}'
 | G2 | **Human-in-the-Loop（工具调用前审批）** | V1 的 `tools_node` 无条件执行工具调用；HITL 需要 `interrupt()` + 前端审批 UI | P2 | 涉及资金操作或不可逆操作的工具上线时启动 |
 | G3 | **并行工具调用（Parallel Tool Calling）** | V1 的 `tools_node` 顺序执行多个 tool_call；当某次 LLM 响应返回多个独立 tool_call 时可并行执行 | P2 | 工具调用耗时成为瓶颈时启动 |
 | G4 | **动态 System Prompt（基于 RouteContext）** | V1 的 agent_node 用固定 system prompt；路由信息（intent/route）未注入到 prompt | P2 | 需要根据路由上下文调整 Agent 行为时启动 |
-| G5 | **多 Agent 编排（Supervisor / Swarm）** | V1 的 DIAGNOSIS 路由使用自研 `DiagnosisMode` 而非 LangGraph 多 Agent；LangGraph 的 `create_react_agent` + subgraphs 是更标准的方案 | P3 | 诊断 Agent 架构重构时启动 |
+| G5 | **多 Agent 编排（Supervisor / Swarm）** | ✅ **基础版已完成**（2026-08-01，`multi-agent-langgraph-plan.md`）：DIAGNOSIS 多 Agent 编排迁移到 LangGraph `StateGraph`（`graph.py`，胖阶段节点 + 团队级 checkpoint `thread_id=team_run_id`）。~~Supervisor / Swarm 动态委派~~ **拆分**：动态委派（角色间运行时委派）待评估 | P3 | 基础版随 `multi-agent-langgraph-plan.md` 完成；Supervisor 动态委派单独评估 |
 
 ---
 
@@ -359,7 +359,7 @@ curl -X POST localhost:8000/api/agent/chat -d '{"message":"你好"}'
 
 | # | 工作项 | 说明 | 优先级 |
 |---|--------|------|--------|
-| T1 | `DiagnosisMode` 重构为 LangGraph Subgraph | 目前是手写的 Multi-Agent 编排（~920 行 mode.py），LangGraph 迁移完成后可改为 `StateGraph` subgraph | P2 |
+| ~~T1~~ | ~~`DiagnosisMode` 重构为 LangGraph Subgraph~~ | ✅ **已完成**（2026-08-01，`multi-agent-langgraph-plan.md`）：手写编排主体已删除，`mode.py` 仅保留纯函数/prompt builder，`execute()` 委托 `graph.py::run_langgraph_diagnosis` | — |
 | T2 | `search_knowledge.py` 删除 raw asyncpg | Phase B 会解决这个问题——改为调用 `PgVectorKnowledgeService` | P1（Phase B 自动解决） |
 | T3 | `chat.py` 模块级单例改为依赖注入 | 当前 `_get_router()` / `_get_executor()` / `_get_diagnosis_agent()` 用全局变量做惰性初始化；应用增长后应用 FastAPI `Depends` 管理生命周期 | P2 |
 | T4 | Mock 工具替换为真实监控 API 调用 | `diagnosis/tools.py` 的三个工具（`query_trace_log` / `query_merchant_metrics` / `query_error_code_distribution`）返回 mock 数据 | P1 |

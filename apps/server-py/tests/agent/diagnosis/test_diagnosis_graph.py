@@ -27,6 +27,17 @@ from src.agent.tools.registry import ToolRegistry
 from src.config import settings
 
 
+@pytest.fixture(autouse=True)
+def _disable_team_checkpoint(monkeypatch):
+    """图单测测的是图逻辑/事件序列（fake runner），不测 checkpoint。
+
+    关闭团队级 checkpoint，避免每个用例真实创建 AsyncPostgresSaver
+    （DB 依赖 + 与 test_checkpoint_resume 的模块级 saver 缓存互相污染）。
+    checkpoint 行为由 test_checkpoint_resume.py 专项验证。
+    """
+    monkeypatch.setattr(settings, "langgraph_diagnosis_checkpoint_enabled", False)
+
+
 # ── 测试用角色 ────────────────────────────────────────────
 
 
@@ -276,26 +287,14 @@ class TestDiagnosisGraphCancel:
         assert not any(isinstance(ev, TeamCompleted) for ev in events)
 
 
-class TestDiagnosisModeFlagSplit:
-    """DiagnosisMode.execute 按 langgraph_diagnosis_enabled 分流。
+class TestDiagnosisModeGraphPath:
+    """DiagnosisMode.execute 恒走 LangGraph 图路径（Phase 2 删除旧编排后）。
 
-    双路径在缺失 frontend_role 时均产出 TeamFailed（无需 LLM 即可验证路由）。
+    缺失 frontend_role 时图路径产出 TeamFailed（无需 LLM 即可验证路由）。
     """
 
     @pytest.mark.asyncio
-    async def test_flag_off_uses_legacy_path(self, monkeypatch):
-        monkeypatch.setattr(settings, "langgraph_diagnosis_enabled", False)
-        events = []
-        async for ev in DiagnosisMode().execute(
-            {}, "task", "conv-1", ToolRegistry()
-        ):
-            events.append(ev)
-        assert len(events) == 1
-        assert isinstance(events[0], TeamFailed)
-
-    @pytest.mark.asyncio
-    async def test_flag_on_delegates_to_graph_path(self, monkeypatch):
-        monkeypatch.setattr(settings, "langgraph_diagnosis_enabled", True)
+    async def test_missing_frontend_yields_team_failed(self):
         events = []
         async for ev in DiagnosisMode().execute(
             {}, "task", "conv-1", ToolRegistry()

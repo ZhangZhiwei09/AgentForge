@@ -45,12 +45,19 @@ class Settings(BaseSettings):
     langfuse_base_url: str = Field(default="https://cloud.langfuse.com")
 
     # ── LangGraph Checkpoint ─────────────────────────
+    # G1 全局门控：开启后 TASK 路由的 ReAct 也会挂 checkpointer（thread=conversation_id）。
+    # 保持默认关 —— 团队级诊断 checkpoint 由下方独立的
+    # langgraph_diagnosis_checkpoint_enabled 控制，二者互不牵连。
     langgraph_checkpoint_enabled: bool = Field(default=False)
 
     # ── LangGraph Diagnosis ──────────────────────────
-    # Phase 1：DIAGNOSIS 路由改用 LangGraph 图路径（multi-agent-langgraph-plan.md）
-    # 默认关；Phase 2 灰度验证后置 True 并删除旧顺序编排主体。
-    langgraph_diagnosis_enabled: bool = Field(default=False)
+    # DIAGNOSIS 路由改用 LangGraph 图路径（multi-agent-langgraph-plan.md）。
+    # Phase 1 默认关；Phase 2 默认开并删除旧顺序编排主体。
+    langgraph_diagnosis_enabled: bool = Field(default=True)
+    # 团队级 checkpoint（Phase 2）：父图挂 AsyncPostgresSaver（thread_id=team_run_id）。
+    # 与 langgraph_checkpoint_enabled 独立 —— 仅诊断父图启用，不影响 TASK/内层 ReAct。
+    # 开启时父图 checkpoint 中间态；DB 不可用时会降级为无状态执行（见 graph.py）。
+    langgraph_diagnosis_checkpoint_enabled: bool = Field(default=True)
 
     # ── Server ──────────────────────────────────────────
     port: int = Field(default=8000)

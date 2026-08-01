@@ -1,6 +1,6 @@
 # Multi-Agent 编排 LangGraph 化方案
 
-> 状态：**实施中** — Phase 0 ✅（2026-08-01），Phase 1 ✅（2026-08-01），Phase 2 待实施，Phase 3 待评估
+> 状态：**实施中** — Phase 0 ✅（2026-08-01），Phase 1 ✅（2026-08-01），Phase 2 ✅（2026-08-01），Phase 3 待评估
 > 范围：`apps/server-py` 的 DIAGNOSIS 路由 Multi-Agent 编排
 > 关联：`docs/design/python-core-upgrade-plan.md` 的 **G5**（多 Agent 编排）与 **T1**（DiagnosisMode 重构为 LangGraph Subgraph）
 > 评审记录：本版已回应 CHANGES_REQUIRED 的 3 个阻断项（见 §3.2 实证与设计决策、§3.3 状态、§3.5 事件映射）
@@ -274,12 +274,32 @@ LangGraph 节点是普通 async 函数。`check_rule_escalation`、`resolve_diag
 
 - **验收**：双路径下 `TeamStreamEvent` 序列一致；新旧各跑一组端到端（`test_agent.py` + 手 curl）。
 
-### ⬜ Phase 2 — 默认开启 + 团队级 Checkpointing
+### ✅ Phase 2 — 默认开启 + 团队级 Checkpointing
 
-- flag 默认 `True`；图顶层挂 `AsyncPostgresSaver`（`thread_id = team_run_id`），验证断点恢复（先跑 §7 的 `test_nested_checkpoint` 实验测试）。
-- 灰度验证后**删除旧顺序编排主体**（保留全部纯函数与 prompt builder）。
+> 实施说明（2026-08-01）：
+> - **Windows 事件循环（关键前提）**：psycopg（AsyncPostgresSaver 后端）不能在 ProactorEventLoop 上运行；uvicorn 0.36+ 的 `asyncio_loop_factory` 在 win32 硬编码 ProactorEventLoop（无视事件循环 policy）。`main.py` 切 `WindowsSelectorEventLoopPolicy` + `loop="none"`，推荐 `python -m src.main` 启动（`python -m uvicorn src.main:app` 会先建 loop 再导入 app，policy 来不及生效）。
+> - **隔离策略**：新增 `langgraph_diagnosis_checkpoint_enabled`（默认 True）专控父图团队级 checkpoint，与 G1 `langgraph_checkpoint_enabled` 隔离 —— G1 保持默认关，避免 TASK 路由的 ReAct 也挂 checkpointer（thread=conversation_id，多轮消息会累积/串扰）。内层阶段 `_run_phase_agent` 显式 `checkpoint=False`（即便未来激活 G1 也保持瞬态）。
+> - **断点恢复实证（§7 `test_nested_checkpoint` 实验 PASS）**：阶段崩溃（runner 抛 BaseException，`_emit_agent_run` 的 `except Exception` 不捕获）后，同 thread `ainvoke(None)` 续跑 —— `get_state.next` 定位待续节点，frontend **不重跑**、崩溃前产物（`frontend_output`）从 checkpoint 保留，backend→leader→resolve 续至完成，`TeamCompleted` 可派生。**注意**：续跑不能重传全量 initial_state（会重置状态、从 START 重跑）。
+> - **已知限制**：续跑时 Blackboard 闭包是新建的空实例，`_build_*_task` 的 `bb.to_context_string()` 上下文丢失（`context_for_backend` 存于 state 保留，不影响核心事实数据）。如需完整保真，节点需从 `state["blackboard"]` 恢复 bb（后续增强）。
+> - **降级**：DB/loop 不可用时 checkpointer 创建失败 → 日志告警 + 降级为无状态执行（等价 Phase 1），不阻断诊断。
+
+文件变更：
+
+| 操作 | 文件 | 说明 |
+|---|---|---|
+| MODIFY | `src/config.py` | `langgraph_diagnosis_enabled` 默认 True；新增 `langgraph_diagnosis_checkpoint_enabled`（默认 True） |
+| MODIFY | `src/agent/checkpoint.py` | `get_checkpointer(required=...)`：团队级 checkpoint 可跳过 G1 门控；pool 加 `autocommit=True`（`CREATE INDEX CONCURRENTLY` 不能在事务块内执行） |
+| MODIFY | `src/agent/diagnosis/graph.py` | `build_diagnosis_graph(checkpointer=...)`；`run_langgraph_diagnosis` 挂 saver（thread_id=team_run_id）+ 降级兜底；`_run_phase_agent` 显式 `checkpoint=False` |
+| MODIFY | `src/agent/executor.py` | `AgentExecutor(checkpoint=...)` 参数（内层瞬态） |
+| MODIFY | `src/agent/diagnosis/mode.py` | **删除旧顺序编排主体 + `_run_agent` + `AgentRunResult`**；`execute()` 恒委托图路径 |
+| MODIFY | `src/main.py` | Windows 事件循环切 SelectorEventLoop（psycopg 前提）+ `loop="none"` |
+| CREATE | `tests/agent/diagnosis/test_checkpoint_resume.py` | `test_nested_checkpoint` 实验（DB 可用则跑，否则 skip） |
+| MODIFY | `tests/agent/diagnosis/test_diagnosis_graph.py` | 图单测关闭团队级 checkpoint；flag 分流测试收敛为恒走图路径 |
+
+- flag 默认 `True`；图顶层挂 `AsyncPostgresSaver`（`thread_id = team_run_id`），断点恢复经 §7 实验实证（见上）。
+- 灰度验证（curl DIAGNOSIS 端到端，0 Proactor 错误 + checkpoint 落库）通过后**删除旧顺序编排主体**（保留全部纯函数与 prompt builder）。
 - 同步更新 `python-core-upgrade-plan.md`：T1 标记完成、G5 拆分为"基础版已完成 / Supervisor 动态委派待评估"。
-- **验收**：DIAGNOSIS 回归通过；`mode.py` 编排主体移除。
+- **验收**：DIAGNOSIS 回归通过（全量 145 passed，2 个既有失败不变：stale `test_config` + DB 依赖 `search_knowledge`）；`mode.py` 编排主体移除。
 
 ### ⬜ Phase 3 — 独立增强（各有触发条件，不阻塞）
 
@@ -313,7 +333,7 @@ LangGraph 节点是普通 async 函数。`check_rule_escalation`、`resolve_diag
 | `test_resolution_branches` | `needs_human` / `adopt_*` / `divergent` 各分支 |
 | `test_cancel` | `cancel_event.set()` 中途中断 |
 | `test_blackboard_serialize_roundtrip` | Blackboard JSON 往返 + 非序列化值降级 |
-| `test_nested_checkpoint`（实验，可 skip） | 验证父图挂 checkpointer、节点内 ReAct 不挂时，checkpoint blob 内容与恢复行为，为 Phase 2 提供数据 |
+| ✅ `test_nested_checkpoint`（实验，已实现为 `test_checkpoint_resume.py`，DB 可用则跑否则 skip） | 父图挂 checkpointer 时 checkpoint blob 内容与恢复行为。Phase 2 实证：中间态快照保留 + 崩溃后续跑（`ainvoke(None)`）不重跑 frontend |
 
 **端到端验收**：
 

@@ -55,9 +55,11 @@ from src.agent.diagnosis.mode import (
     parse_scoring_output,
     resolve_diagnosis,
 )
+from src.agent.checkpoint import get_checkpointer
 from src.agent.diagnosis.state import DiagnosisState
 from src.agent.executor import AgentExecutor
 from src.agent.tools.registry import ToolRegistry
+from src.config import settings
 from src.agent.types import RouteContext, StreamToken
 
 logger = logging.getLogger(__name__)
@@ -87,7 +89,9 @@ async def _run_phase_agent(
     filtered_registry = (
         tools_registry.filter(role.tools) if role.tools else tools_registry
     )
-    executor = AgentExecutor(registry=filtered_registry)
+    # 内层 ReAct 保持瞬态（checkpoint=False）：父图是唯一被 checkpoint 的图
+    # （multi-agent-langgraph-plan.md §4.3）。即便未来激活 G1 全局门控，也不挂。
+    executor = AgentExecutor(registry=filtered_registry, checkpoint=False)
 
     context = RouteContext(
         conversation_id=conversation_id,
@@ -128,6 +132,7 @@ def build_diagnosis_graph(
     cancel_event: asyncio.Event | None = None,
     phase_runner: PhaseRunner | None = None,
     blackboard: Blackboard | None = None,
+    checkpointer: Any | None = None,
 ) -> CompiledStateGraph:
     """构建 LangGraph 诊断父图（胖阶段节点）。
 
@@ -140,6 +145,8 @@ def build_diagnosis_graph(
         cancel_event: 可选取消信号，set 后中断诊断。
         phase_runner: 可注入的阶段 runner（测试用）；默认走真实 _run_phase_agent。
         blackboard: 可注入的共享 Blackboard；缺省时新建并写入 task。
+        checkpointer: 团队级 checkpointer（Phase 2，thread_id=team_run_id）。
+            父图是唯一被 checkpoint 的图；内部 ReAct（阶段 runner）保持瞬态不挂载。
     """
     bb = blackboard or Blackboard()
     if not bb.has("task"):
@@ -315,7 +322,7 @@ def build_diagnosis_graph(
     workflow.add_edge("resolve", END)
     workflow.add_edge("fast_track", END)
 
-    return workflow.compile()
+    return workflow.compile(checkpointer=checkpointer)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -398,6 +405,19 @@ async def run_langgraph_diagnosis(
         )
         return
 
+    # Phase 2：团队级 checkpointing —— 父图是唯一被 checkpoint 的图。
+    # 由 langgraph_diagnosis_checkpoint_enabled 门控（与 G1 全局门控隔离）；
+    # 创建失败（DB 不可用）时降级为无状态执行，不阻断诊断。
+    checkpointer = None
+    if settings.langgraph_diagnosis_checkpoint_enabled:
+        try:
+            checkpointer = await get_checkpointer(required=True)
+        except Exception as exc:  # noqa: BLE001 - 降级而非中断诊断
+            logger.warning(
+                "LangGraph diagnosis: checkpointer unavailable, "
+                "falling back to stateless run: %s",
+                exc,
+            )
     graph = build_diagnosis_graph(
         roles=roles,
         task=task,
@@ -407,14 +427,21 @@ async def run_langgraph_diagnosis(
         cancel_event=cancel_event,
         phase_runner=phase_runner,
         blackboard=bb,
+        checkpointer=checkpointer,
     )
+
+    # team_run_id 同时作为 checkpoint 的 thread_id（诊断实例级隔离）
+    team_run_id = str(uuid.uuid4())
+    run_config: dict[str, Any] = {
+        "configurable": {"thread_id": team_run_id}
+    }
 
     agents_info = [
         {"name": r.name, "role": r.display_name}
         for r in roles.values()
     ]
     yield TeamStarted(
-        team_run_id=str(uuid.uuid4()),
+        team_run_id=team_run_id,
         team_name="核身诊断团队",
         mode="diagnosis",
         agents=agents_info,
@@ -436,7 +463,7 @@ async def run_langgraph_diagnosis(
     async def _run() -> None:
         nonlocal final_state
         try:
-            final_state = await graph.ainvoke(initial_state)
+            final_state = await graph.ainvoke(initial_state, config=run_config)
         finally:
             queue.put_nowait(None)
 

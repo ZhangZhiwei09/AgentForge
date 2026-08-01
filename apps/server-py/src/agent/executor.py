@@ -82,8 +82,22 @@ class AgentExecutor:
 
     route = RouteName.TASK
 
-    def __init__(self, registry: ToolRegistry | None = None) -> None:
+    def __init__(
+        self,
+        registry: ToolRegistry | None = None,
+        *,
+        checkpoint: bool = True,
+    ) -> None:
+        """初始化执行器。
+
+        Args:
+            registry: 工具注册中心；缺省用全局单例。
+            checkpoint: 是否给 ReAct 图挂 checkpointer（G1 全局门控下）。
+                DIAGNOSIS 多 Agent 编排的内层阶段设为 False（multi-agent-langgraph-plan.md
+                §4.3：内层 ReAct 是瞬态工作，父图是唯一被 checkpoint 的图）。
+        """
         self._registry = registry or tool_registry
+        self._checkpoint = checkpoint
 
     async def execute(
         self,
@@ -134,7 +148,9 @@ class AgentExecutor:
             )
 
             # ── 获取 Checkpointer ──
-            checkpointer = await get_checkpointer()
+            checkpointer = (
+                await get_checkpointer() if self._checkpoint else None
+            )
 
             # ── 构建 LangGraph StateGraph ──
             graph = build_react_graph(
