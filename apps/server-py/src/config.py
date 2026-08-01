@@ -44,6 +44,28 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = Field(default="")
     langfuse_base_url: str = Field(default="https://cloud.langfuse.com")
 
+    # ── LangGraph Checkpoint ─────────────────────────
+    # G1 全局门控：开启后 TASK 路由的 ReAct 也会挂 checkpointer（thread=conversation_id）。
+    # 保持默认关 —— 团队级诊断 checkpoint 由下方独立的
+    # langgraph_diagnosis_checkpoint_enabled 控制，二者互不牵连。
+    langgraph_checkpoint_enabled: bool = Field(default=False)
+
+    # ── LangGraph Diagnosis ──────────────────────────
+    # DIAGNOSIS 路由改用 LangGraph 图路径（multi-agent-langgraph-plan.md）。
+    # Phase 1 默认关；Phase 2 默认开并删除旧顺序编排主体。
+    langgraph_diagnosis_enabled: bool = Field(default=True)
+    # 团队级 checkpoint（Phase 2）：父图挂 AsyncPostgresSaver（thread_id=team_run_id）。
+    # 与 langgraph_checkpoint_enabled 独立 —— 仅诊断父图启用，不影响 TASK/内层 ReAct。
+    # 开启时父图 checkpoint 中间态；DB 不可用时会降级为无状态执行（见 graph.py）。
+    langgraph_diagnosis_checkpoint_enabled: bool = Field(default=True)
+    # Phase 3a：每阶段超时（毫秒）。0 = 禁用（保持外层整体 180s 超时）。
+    langgraph_diagnosis_stage_timeout_ms: int = Field(default=0)
+    # 阶段超时后的重试次数（仅超时触发重试，异常不重试）。
+    langgraph_diagnosis_stage_max_retries: int = Field(default=1)
+    # Phase 3b：HITL —— Leader 判定信息不足时 interrupt 暂停等用户补充
+    # （需团队级 checkpoint 已开启；checkpointer 不可用时自动降级为 needs_human）。
+    langgraph_diagnosis_hitl_enabled: bool = Field(default=False)
+
     # ── Server ──────────────────────────────────────────
     port: int = Field(default=8000)
     debug: bool = Field(default=False)

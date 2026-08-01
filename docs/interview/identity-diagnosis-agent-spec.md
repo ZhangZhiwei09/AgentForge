@@ -1,8 +1,12 @@
 # Identity Diagnosis Agent Spec
 
+> **⚠️ 架构已变更（2026-07）**: 此 Spec 描述的是独立 LangGraph 端点方案。实际实现已改为 DIAGNOSIS 作为 Agent Runtime 的第 5 条路由（`DiagnosisRouteAgent`），通过主链路 `AgentRuntimeService → Router → DiagnosisRouteAgent` 执行，不再使用 LangGraph。详见 `docs/architecture/routing.md`。
+>
+> 以下为原始 Spec，保留作为设计参考。
+
 ## Goal
 
-Build an independent LangGraph-based diagnosis endpoint for identity verification troubleshooting.
+Build an independent LangGraph-based diagnosis endpoint for identity verification troubleshooting. *(注：LangGraph 方案已废弃，见 ADR-001)*
 
 The first version reduces repeated manual frontend troubleshooting by turning user questions into a controlled workflow:
 

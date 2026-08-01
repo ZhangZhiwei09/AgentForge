@@ -131,10 +131,24 @@ class ClarificationNeeded:
     hints: list[str] = field(default_factory=list)
 
 
+@dataclass(slots=True)
+class DiagnosisWaitingInput:
+    """HITL 事件（Phase 3b）—— 诊断在阶段边界暂停，等待用户补充信息。
+
+    与 ClarificationNeeded 的区别：这是诊断**进行中**的暂停（已跑完
+    frontend/backend/leader），用户补充后走同一 thread 续跑；而
+    ClarificationNeeded 是诊断**开始前**的信息预检。
+    """
+    type: str = "diagnosis_waiting_input"
+    message_id: str = ""
+    message: str = ""
+    missing_fields: list[str] = field(default_factory=list)
+
+
 # Union type alias（Python 3.12+ 的 type statement）
 type RouteStreamEvent = (StreamMeta | StreamToken | StreamDone | StreamError
     | DiagnosisStarted | DiagnosisPhase | DiagnosisPhaseDone
-    | DiagnosisCompleted | ClarificationNeeded)
+    | DiagnosisCompleted | ClarificationNeeded | DiagnosisWaitingInput)
 
 
 # ═══════════════════════════════════════════════════════════

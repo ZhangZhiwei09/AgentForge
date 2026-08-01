@@ -4,17 +4,26 @@
 
 所有 Agent 通过 Blackboard 读写共享状态，实现累积式知识构建。
 支持版本控制和历史追踪。
+
+multi-agent-langgraph-plan.md §3.3：write() 值类型收紧为 JSONValue（类型层），
+serialize() 增加 JSON 往返守卫（运行时降级）。
 """
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
+
+# JSON 可序列化值类型（Blackboard 值必须可持久化）
+JSONValue = str | int | float | bool | None | list["JSONValue"] | dict[str, "JSONValue"]
 
 
 @dataclass(slots=True)
 class BlackboardEntry:
     """Blackboard 中的一条记录。"""
     key: str
-    value: object
+    value: JSONValue
     written_by: str
     timestamp: str
     version: int
@@ -38,13 +47,16 @@ class Blackboard:
     def write(
         self,
         key: str,
-        value: object,
+        value: JSONValue,
         agent_name: str,
         metadata: dict | None = None,
     ) -> BlackboardEntry:
         """写入一个值（带版本控制）。
 
         如果 key 已存在，版本号自动递增。
+
+        value 类型已收紧为 JSONValue（类型层防非序列化数据进入）；
+        运行时兜底由 serialize() 的 JSON 往返守卫承担。
         """
         prev = self._entries.get(key)
         entry = BlackboardEntry(
@@ -59,7 +71,7 @@ class Blackboard:
         self._history.append(entry)
         return entry
 
-    def read(self, key: str) -> object | None:
+    def read(self, key: str) -> JSONValue | None:
         """读取 key 的最新值。"""
         entry = self._entries.get(key)
         return entry.value if entry else None
@@ -72,7 +84,7 @@ class Blackboard:
         """检查 key 是否存在。"""
         return key in self._entries
 
-    def snapshot(self) -> dict[str, object]:
+    def snapshot(self) -> dict[str, JSONValue]:
         """获取所有当前 entry 的快照（plain dict）。"""
         return {key: entry.value for key, entry in self._entries.items()}
 
@@ -106,9 +118,27 @@ class Blackboard:
         """历史记录总数（含所有版本）。"""
         return len(self._history)
 
-    def serialize(self) -> dict[str, object]:
-        """序列化为 plain dict（用于 DB 持久化）。"""
-        return self.snapshot()
+    def serialize(self) -> dict[str, JSONValue]:
+        """序列化为 plain dict（用于 DB 持久化）。
+
+        JSON 往返守卫：对每个值做 json.dumps 校验，非 JSON 可序列化值
+        降级为 str(value) 并记日志，保证返回值可被直接 JSON 序列化。
+        """
+        import json as _json
+
+        result: dict[str, JSONValue] = {}
+        for key, entry in self._entries.items():
+            try:
+                _json.dumps(entry.value, ensure_ascii=False)
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Blackboard: key %r has non-JSON value; degrading to str",
+                    key,
+                )
+                result[key] = str(entry.value)
+            else:
+                result[key] = entry.value
+        return result
 
     def to_context_string(self) -> str:
         """转换为 context string，用于注入 Agent System Prompt。

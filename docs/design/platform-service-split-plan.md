@@ -1,8 +1,10 @@
 # 平台服务化拆分方案
 
-> **状态：** 草案，待讨论
+> **状态：** 草案，Phase 1 暂不执行
 > **日期：** 2026-07-10
 > **范围：** 将 AgentForge 从单体 Server 演进为领域驱动的多服务架构，支持多个前端应用
+>
+> **✅ 已执行的独立决策**: 决策 #1 Neo4j 已移除、决策 #3 Orchestrator/Peer/Debate 已移除。各服务拆分（knowledge-worker、codegen-service、media-service）尚未执行。
 
 ---
 
@@ -326,7 +328,6 @@ pnpm dev:all              # 所有服务
 
 ## 八、与现有文档的关系
 
-- 本方案是 `docs/architecture/overview.md` 中架构图的演进版本
+- 本方案是 `docs/architecture/routing.md` 所述 Agent Runtime 路由架构之上的演进版本
 - 不影响 `docs/architecture/routing.md` 中描述的路由架构（Core 不动）
-- 不影响 `docs/p0-platform-foundation.md` 中已完成的平台基础
-- 涉及的服务职责边界参考了 `docs/server-services.md`
+- 涉及 P0-P1 平台基础（Auth、Logging、Testing、CI/CD、Security、Jobs、Observability）— 均已完成

@@ -38,12 +38,21 @@ class TestRouter:
         assert result is not None
         assert result.route == RouteName.HUMAN
 
+    def test_chat_greeting_routes_to_chat(self):
+        """寒暄问候应命中 CHAT。"""
+        result = quick_route_scan("你好")
+        assert result is not None
+        assert result.route == RouteName.CHAT
+
+        decision = self.router.classify("你好")
+        assert decision.route == RouteName.CHAT
+
     def test_normal_chat_falls_to_task(self):
-        """普通聊天应 fallback 到 TASK。"""
-        result = quick_route_scan("今天天气怎么样")
+        """非寒暄的普通消息应 fallback 到 TASK。"""
+        result = quick_route_scan("帮我写一个Python脚本处理CSV文件")
         assert result is None  # L1 不匹配
 
-        decision = self.router.classify("今天天气怎么样")
+        decision = self.router.classify("帮我写一个Python脚本处理CSV文件")
         assert decision.route == RouteName.TASK
 
     def test_router_classify_safety(self):

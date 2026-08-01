@@ -1,6 +1,6 @@
 # AgentForge 路由架构
 
-> **Rule First + LLM Fallback** — 四路由分类器（SAFETY / CHAT / TASK / HUMAN）
+> **Rule First + LLM Fallback** — 五路由分类器（SAFETY / CHAT / TASK / HUMAN / DIAGNOSIS）
 >
 > 转人工请求优先走规则匹配，其余由 RouterLLM 输出结构化分类结果。
 > 三层降级保障：规则 → LLM → 正则兜底。
@@ -48,16 +48,17 @@ resolveAgent(route) → 分发到对应 Agent 执行             [agent-runtime.
 | `apps/server/src/services/agent-runtime/safety-agent.ts` | 59 | SAFETY 路由 — 零延迟静态拒绝 |
 | `apps/server/src/services/agent-runtime/chat-agent.ts` | 141 | CHAT 路由 — 轻量 LLM 对话 |
 | `apps/server/src/services/agent-runtime/human-agent.ts` | 99 | HUMAN 路由 — 更新状态 + 转人工消息 |
+| `apps/server/src/services/agent-runtime/diagnosis-agent.ts` | - | DIAGNOSIS 路由 — 身份诊断分析 |
 | `apps/server/src/services/agent-runtime/agent-executor.ts` | 685 | TASK 路由 — ReAct 执行器 |
 
 ---
 
 ## 3. 路由定义
 
-四路由由 `RouteName` 类型定义（`types.ts:10`）：
+五路由由 `RouteName` 类型定义（`types.ts:10`）：
 
 ```typescript
-export type RouteName = "SAFETY" | "CHAT" | "TASK" | "HUMAN";
+export type RouteName = "SAFETY" | "CHAT" | "TASK" | "HUMAN" | "DIAGNOSIS";
 ```
 
 | 路由 | 触发条件 | 执行 Agent | LLM 调用 |
@@ -66,6 +67,7 @@ export type RouteName = "SAFETY" | "CHAT" | "TASK" | "HUMAN";
 | **CHAT** | 问候、感谢、道别、能力询问、闲聊 | ChatAgent | 1 次 (chatSync, jsonMode) |
 | **TASK** | 业务问题、知识查询、需要工具的任务 | AgentExecutor (ReAct) | N 次 (ReAct 循环) |
 | **HUMAN** | 明确要求转人工、投诉升级 | HumanAgent | 无（消息模板） |
+| **DIAGNOSIS** | 身份诊断、用户画像分析 | DiagnosisRouteAgent | N 次（多阶段分析） |
 
 ---
 
@@ -163,6 +165,9 @@ function quickRouteScan(message: string): QuickRouteResult | null {
 所有业务问题、知识查询、需要工具的任务 → route: "TASK"
 Agent 会自主决定是否搜索知识库、调用业务工具，或组合使用。
 
+### DIAGNOSIS（身份诊断）
+用户画像分析、身份推断、行为模式识别 → route: "DIAGNOSIS"
+
 ## 输出格式（仅 JSON）
 {"route":"TASK","confidence":0.9,"reasoning":"简短的意图分析"}
 ```
@@ -178,7 +183,7 @@ Agent 会自主决定是否搜索知识库、调用业务工具，或组合使�
 
 ```typescript
 const RouterDecisionSchema = z.object({
-  route: z.enum(["SAFETY", "CHAT", "TASK", "HUMAN"]),
+  route: z.enum(["SAFETY", "CHAT", "TASK", "HUMAN", "DIAGNOSIS"]),
   confidence: z.number().min(0).max(1),
   reasoning: z.string().max(200),
   escalation_reason: z.string().max(100).default(""),
@@ -244,10 +249,11 @@ agentRouteConfidence.observe({ route: decision.route }, decision.confidence);
 ```typescript
 // 构造函数中构建强类型注册表
 this.agentRegistry = {
-  SAFETY: this.safetyAgent,
-  CHAT:   this.chatAgent,
-  TASK:   this.agentExecutor,
-  HUMAN:  this.humanAgent,
+  SAFETY:    this.safetyAgent,
+  CHAT:      this.chatAgent,
+  TASK:      this.agentExecutor,
+  HUMAN:     this.humanAgent,
+  DIAGNOSIS: this.diagnosisAgent,
 };
 
 // 分发方法
@@ -266,8 +272,9 @@ private resolveAgent(route: RouteName): RouteAgent {
 |---|---|---|---|---|---|
 | SafetyAgent | `safety-agent.ts` | 无 | 无 | 无 | < 1ms |
 | ChatAgent | `chat-agent.ts` | 1 次 (temp=0.3, 512t, jsonMode) | 无 | 无 | ~500ms |
-| AgentExecutor | `agent-executor.ts` | N 次 (ReAct 循环) | 有 (Milvus) | 有 (ToolRegistry) | 3-30s |
+| AgentExecutor | `agent-executor.ts` | N 次 (ReAct 循环) | 有 (PGVector+ES) | 有 (ToolRegistry) | 3-30s |
 | HumanAgent | `human-agent.ts` | 无 | 无 | 无 | < 1ms |
+| DiagnosisRouteAgent | `diagnosis-agent.ts` | N 次（多阶段分析） | 有 | 有 | 5-30s |
 
 ### AgentExecutor 内部二次分类
 
@@ -321,11 +328,12 @@ type RouteStreamEvent =
 | **成本** | 每条消息都调 LLM | 规则命中时不调 LLM（~15-30% 消息） |
 | **降级保障** | LLM 挂了全挂 | 三层保障，LLM 挂了还有正则兜底 |
 
-### 为何四路由而非两路由（TASK / NON_TASK）？
+### 为何五路由而非两路由（TASK / NON_TASK）？
 
 1. **SAFETY 需要独立路径** — 安全拦截不能与普通路由混在一起，需要独立的审计日志和零延迟保证
 2. **HUMAN 需要状态变更** — 转人工不只是消息回复，还需要更新会话状态为 `escalated`、记录升级事件
 3. **CHAT 与 TASK 资源消耗不同** — CHAT 不需要 KB 搜索和工具调用，独立路径可避免不必要的资源开销
+4. **DIAGNOSIS 需要独立分析流程** — 身份诊断涉及多阶段分析和不同的 Prompt 策略，与 TASK 的 ReAct 循环模式不同
 
 ---
 
@@ -333,5 +341,4 @@ type RouteStreamEvent =
 
 - `docs/agent-runtime.md` — Agent Runtime 状态模型（三维状态机、事件协议）
 - `docs/runtime/execution-runtime-v1.md` — 执行运行时详细设计
-- `docs/architecture/overview.md` — 系统架构总览
-- `docs/server-services.md` — 服务层各模块职责
+- `docs/decisions/adr-001-remove-langgraph.md` — ADR：移除 LangGraph 决策记录

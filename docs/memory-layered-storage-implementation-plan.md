@@ -1,5 +1,7 @@
 # Redis + Mem0 分层记忆实现方案
 
+> **⚠️ 状态: Mem0 未实现，Milvus 已移除（2026-08）** — Mem0 从未落地，无相关代码/配置/API Key。Milvus 已全部迁移到 PGVector。此方案中的 Mem0 长期记忆层和 Milvus 引用已过时。Redis 短期记忆部分可能仍有参考价值。保留作为设计参考。
+
 ## Summary
 
 在现有 `MemoryService` 门面上完成记忆系统闭环：Redis 负责短期记忆的滑动窗口和摘要压缩，Mem0 负责长期记忆的用户级、会话级分层存储与检索；所有 Agent 对话统一通过 `MemoryService` 读取和写入，避免散落调用 `MemoryEngine`。

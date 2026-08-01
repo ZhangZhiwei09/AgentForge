@@ -4,8 +4,8 @@
 
 | 项目 | 值 |
 |------|-----|
-| 公网 IP | `39.108.63.145` |
-| SSH | `ssh root@39.108.63.145`（密码见 `.env.production`） |
+| 公网 IP | `<SERVER_IP>`（配置于 `.env.production`） |
+| SSH | `ssh root@<SERVER_IP>`（密钥/密码见 `.env.production`） |
 | 系统 | Alibaba Cloud ECS 华南1（深圳），Docker 26.1.3 |
 | 代码路径 | `/root/agentforge/` |
 | 配置文件 | `/root/agentforge/infra/docker/.env.production` |
@@ -25,12 +25,12 @@
 ### 启动全部服务
 
 ```bash
-ssh root@39.108.63.145
+ssh root@<SERVER_IP>
 cd /root/agentforge/infra/docker
 docker compose --env-file .env.production -f docker-compose.prod.yml up -d
 ```
 
-首次冷启动约 30 秒，DB + Redis + Milvus + Server + Nginx + Langfuse 全部就绪。
+首次冷启动约 30 秒，DB + Redis + Server + Nginx + Langfuse 全部就绪。
 
 ### 停止全部服务
 
@@ -75,10 +75,10 @@ Server 重启约 10 秒，期间客服前端暂时不可用。
 pnpm --filter @agentforge/customer-service build
 
 # 上传到服务器
-scp -r apps/customer-service/dist/* root@39.108.63.145:/tmp/html/
+scp -r apps/customer-service/dist/* root@<SERVER_IP>:/tmp/html/
 
 # SSH 到服务器替换
-ssh root@39.108.63.145
+ssh root@<SERVER_IP>
 docker cp /tmp/html/. docker-customer-service-1:/usr/share/nginx/html/
 # 无需重启，刷新页面即生效
 ```
@@ -90,7 +90,7 @@ docker cp /tmp/html/. docker-customer-service-1:/usr/share/nginx/html/
 git add . && git commit -m "feat: xxx" && git push
 
 # 在服务器上拉取最新代码
-ssh root@39.108.63.145
+ssh root@<SERVER_IP>
 cd /root/agentforge
 git pull
 
@@ -136,8 +136,8 @@ docker exec -w /app/apps/server -i docker-server-1 node < infra/scripts/seed-use
 
 | 项目 | 值 |
 |------|-----|
-| 访问地址 | http://39.108.63.145:3000 |
-| Public Key | `pk-lf-3f1072ce-4009-4f9c-a997-718460ea52ee` |
+| 访问地址 | http://<SERVER_IP>:3000 |
+| Public Key | `<LANGFUSE_PUBLIC_KEY>`（完整值见 `.env.production`） |
 | Secret Key | `sk-lf-...`（完整值见服务器 `.env.production`） |
 
 ### 首次设置

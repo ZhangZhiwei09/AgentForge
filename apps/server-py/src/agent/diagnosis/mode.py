@@ -2,26 +2,22 @@
 
 对应 TS: apps/server/src/teams/modes/diagnosis.ts
 
-三阶段流程：
-  Phase 1: 前端 Agent 排查 → 自评是否需要升级
-  Phase 2: 后端 Agent 独立排查（仅升级时）
-  Phase 3: Leader Agent 评分汇总（仅升级时）
+Phase 2（2026-08-01）后：手写三阶段顺序编排主体已删除，`execute()` 统一委托
+LangGraph 图路径（`graph.py::run_langgraph_diagnosis`）。本模块仅保留：
 
-Fast Track: 前端能独立解决则不调用后端和 Leader。
+- 事件/输出 dataclass（TeamStarted/AgentStarted/TeamCompleted 等，供 graph 与 route_agent 使用）
+- 纯函数：`parse_*`、`check_rule_escalation`、`resolve_diagnosis`、`build_fallback_scoring`
+- prompt builders：`_build_frontend_task` / `_build_backend_task` / `_build_leader_task`（中文，graph 经无状态实例复用）
 """
 
 import asyncio
 import json as _json
 import logging
 import re
-import time
-import uuid
 from collections.abc import AsyncIterator
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 
-from src.agent.executor import AgentExecutor
 from src.agent.tools.registry import ToolRegistry
-from src.agent.types import RouteContext, StreamToken
 from src.agent.diagnosis.blackboard import Blackboard
 
 logger = logging.getLogger(__name__)
@@ -60,8 +56,6 @@ BACKEND_ABNORMAL_PATTERN = re.compile(
     r".*(?:异常|失败|错误|error|fail|timeout|超时)",
     re.IGNORECASE,
 )
-
-DIAGNOSIS_TIMEOUT_MS = 60_000
 
 # ── Internal Types ─────────────────────────────────────────
 
@@ -148,9 +142,22 @@ class TeamFailed:
     error: str = ""
 
 
+@dataclass
+class TeamWaitingForInput:
+    """HITL（Phase 3b）事件 —— Leader 判定信息不足，阶段边界 interrupt 暂停。
+
+    图已通过 langgraph `interrupt()` 暂停在 ask_clarification 节点，等待
+    用户补充信息后用同一 thread（team_run_id）续跑。
+    """
+    type: str = "team_waiting_input"
+    team_run_id: str = ""
+    message: str = ""          # 中文提示（Leader scoring.message 或默认文案）
+    missing_fields: list[str] = field(default_factory=list)
+
+
 type TeamStreamEvent = (
     TeamStarted | AgentStarted | AgentCompleted | AgentError
-    | TeamCompleted | TeamFailed
+    | TeamCompleted | TeamFailed | TeamWaitingForInput
 )
 
 
@@ -166,6 +173,9 @@ class AgentRole:
     tools: list[str] = field(default_factory=list)
     max_iterations: int = 5
     priority: int = 5
+    # Phase 3a：每阶段超时（毫秒）覆盖。None → 回落全局
+    # langgraph_diagnosis_stage_timeout_ms。
+    timeout_ms: int | None = None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -414,11 +424,6 @@ def resolve_diagnosis(
 # DiagnosisMode
 # ═══════════════════════════════════════════════════════════
 
-@dataclass
-class AgentRunResult:
-    events: list[TeamStreamEvent] = field(default_factory=list)
-    output: str | None = None
-
 
 class DiagnosisMode:
     """前端先行排查 + 后端按需介入的诊断执行器。
@@ -447,294 +452,18 @@ class DiagnosisMode:
             tools_registry: 工具注册中心（已注册所有必要工具）
             cancel_event: 可选取消信号，set 后中断诊断
         """
-        bb = Blackboard()
-        frontend_role = roles.get("frontend_agent")
-        backend_role = roles.get("backend_agent")
-        leader_role = roles.get("leader")
-        team_run_id = str(uuid.uuid4())
+        # LangGraph 图路径（Phase 2：旧顺序编排主体已删除，统一走图路径）。
+        # 惰性导入避免 import 时引入 graph → mode 的循环依赖。
+        from src.agent.diagnosis.graph import run_langgraph_diagnosis
 
-        if not frontend_role:
-            yield TeamFailed(
-                error=(
-                    "DiagnosisMode requires 'frontend_agent' in roles dict"
-                )
-            )
-            return
-
-        bb.write("task", task, "system")
-
-        # Collect agent names for team_started
-        agents_info = [
-            {"name": r.name, "role": r.display_name}
-            for r in roles.values()
-        ]
-        yield TeamStarted(
-            team_run_id=team_run_id,
-            team_name="核身诊断团队",
-            mode="diagnosis",
-            agents=agents_info,
-        )
-
-        # ═════════════════════════════════════════════════════
-        # Phase 1: Frontend Agent Investigation
-        # ═════════════════════════════════════════════════════
-
-        frontend_result = await self._run_agent(
-            frontend_role,
-            self._build_frontend_task(frontend_role, task, bb),
-            conversation_id,
-            tools_registry,
+        async for event in run_langgraph_diagnosis(
+            roles=roles,
+            task=task,
+            conversation_id=conversation_id,
+            tools_registry=tools_registry,
             cancel_event=cancel_event,
-        )
-        for event in frontend_result.events:
+        ):
             yield event
-
-        frontend_output = parse_frontend_output(
-            frontend_result.output or ""
-        )
-
-        # Cancel check: user interrupted during Phase 1
-        if cancel_event and cancel_event.is_set():
-            logger.info("DiagnosisMode: cancelled during Phase 1")
-            yield TeamFailed(error="诊断已被用户取消。")
-            return
-
-        # Safety net: rule-based check overrides LLM self-assessment
-        if check_rule_escalation(frontend_result.output or ""):
-            if not frontend_output.need_escalation:
-                logger.info(
-                    "DiagnosisMode: rule-based escalation triggered "
-                    "(LLM missed it)"
-                )
-                frontend_output.need_escalation = True
-                frontend_output.escalation_reason = (
-                    "rule_override: backend error code or stage "
-                    "detected in frontend output"
-                )
-
-        bb.write("frontend_conclusion", {
-            "conclusion": frontend_output.conclusion,
-            "evidence": frontend_output.evidence,
-            "need_escalation": frontend_output.need_escalation,
-        }, "frontend_agent")
-
-        # ---- Fast Track: Frontend Resolved Alone ----
-        if not frontend_output.need_escalation:
-            frontend_scoring = ScoringResult(
-                frontend_score=9,
-                backend_score=0,
-                synthesis=frontend_output.conclusion,
-            )
-            yield TeamCompleted(
-                output={
-                    "conclusion": frontend_output.conclusion,
-                    "evidence": frontend_output.evidence,
-                    "resolution": "frontend_only",
-                    "escalated": False,
-                    "scoring": asdict(frontend_scoring),
-                },
-                rounds_count=1,
-            )
-            return
-
-        # Store context for backend (facts only, not the conclusion)
-        bb.write(
-            "context_for_backend",
-            frontend_output.context_for_backend or {},
-            "frontend_agent",
-        )
-
-        # ═════════════════════════════════════════════════════
-        # Phase 2: Backend Agent Independent Investigation
-        # ═════════════════════════════════════════════════════
-
-        backend_output: BackendOutput
-        if not backend_role:
-            logger.warning(
-                "DiagnosisMode: escalated but no backend_agent in team"
-            )
-            backend_output = BackendOutput(
-                conclusion="后端排查 Agent 未配置，无法执行独立排查。",
-                evidence=[],
-            )
-        else:
-            backend_result = await self._run_agent(
-                backend_role,
-                self._build_backend_task(
-                    backend_role,
-                    task,
-                    frontend_output.context_for_backend,
-                    bb,
-                ),
-                conversation_id,
-                tools_registry,
-                cancel_event=cancel_event,
-            )
-            for event in backend_result.events:
-                yield event
-
-            # Cancel check: user interrupted during Phase 2
-            if cancel_event and cancel_event.is_set():
-                logger.info("DiagnosisMode: cancelled during Phase 2")
-                yield TeamFailed(error="诊断已被用户取消。")
-                return
-
-            backend_output = parse_backend_output(
-                backend_result.output or ""
-            )
-
-        bb.write("backend_conclusion", {
-            "conclusion": backend_output.conclusion,
-            "evidence": backend_output.evidence,
-        }, "backend_agent")
-
-        # ═════════════════════════════════════════════════════
-        # Phase 3: Leader Scoring & Synthesis
-        # ═════════════════════════════════════════════════════
-
-        scoring_result: ScoringResult
-        if not leader_role:
-            logger.warning(
-                "DiagnosisMode: escalated but no leader agent in team"
-            )
-            scoring_result = build_fallback_scoring(
-                frontend_output,
-                backend_output,
-                "团队未配置 leader Agent。",
-            )
-        else:
-            leader_result = await self._run_agent(
-                leader_role,
-                self._build_leader_task(
-                    leader_role,
-                    task,
-                    frontend_output,
-                    backend_output,
-                    bb,
-                ),
-                conversation_id,
-                tools_registry,
-                cancel_event=cancel_event,
-            )
-            for event in leader_result.events:
-                yield event
-
-            # Cancel check: user interrupted during Phase 3
-            if cancel_event and cancel_event.is_set():
-                logger.info("DiagnosisMode: cancelled during Phase 3")
-                yield TeamFailed(error="诊断已被用户取消。")
-                return
-
-            scoring_result = parse_scoring_output(
-                leader_result.output or ""
-            )
-
-        bb.write("scoring_result", {
-            "frontend_score": scoring_result.frontend_score,
-            "backend_score": scoring_result.backend_score,
-            "synthesis": scoring_result.synthesis,
-        }, "leader")
-
-        resolution = resolve_diagnosis(
-            frontend_output, backend_output, scoring_result
-        )
-
-        yield TeamCompleted(
-            output={
-                "resolution": resolution.resolution,
-                "final_diagnosis": resolution.final_diagnosis,
-                "scoring": asdict(scoring_result),
-                "escalated": True,
-            },
-            rounds_count=3,
-        )
-
-    # ═════════════════════════════════════════════════════
-    # Agent Runner
-    # ═════════════════════════════════════════════════════
-
-    async def _run_agent(
-        self,
-        role: AgentRole,
-        task_prompt: str,
-        conversation_id: str,
-        tools_registry: ToolRegistry,
-        cancel_event: asyncio.Event | None = None,
-    ) -> AgentRunResult:
-        """运行单个 Agent，收集事件和最终输出。
-
-        使用现有的 AgentExecutor ReAct 循环。
-        role.system_prompt 作为 LLM system prompt，
-        task_prompt 作为 user message。
-
-        对应 TS: DiagnosisMode.runAgentAndCollect()
-        - role.tools 过滤工具列表（对应 TS role.tools 参数）
-        - cancel_event 支持取消中断（对应 TS scope.controller.shouldStop）
-        """
-        events: list[TeamStreamEvent] = []
-        output: str | None = None
-
-        events.append(AgentStarted(
-            agent_name=role.name,
-            role=role.display_name,
-            task=task_prompt,
-        ))
-
-        # 工具过滤：每个 Agent 只能使用其声明的工具
-        # 对应 TS: agentService.run(..., { tools: role.tools })
-        if role.tools:
-            filtered_registry = tools_registry.filter(role.tools)
-        else:
-            filtered_registry = tools_registry
-
-        try:
-            executor = AgentExecutor(registry=filtered_registry)
-
-            context = RouteContext(
-                conversation_id=conversation_id,
-                user_message=task_prompt,
-                resolved_model="",
-                provider_name="",
-                assistant_msg_id=f"diag-{role.name}-{int(time.time() * 1000)}",
-                intent="diagnosis",
-            )
-
-            # 收集 token 输出
-            tokens: list[str] = []
-            async for event in executor.execute(
-                context,
-                system_prompt=role.system_prompt,
-            ):
-                # 取消检查：对应 TS scope.controller.shouldStop
-                if cancel_event and cancel_event.is_set():
-                    logger.info(
-                        "DiagnosisMode: agent %s cancelled", role.name
-                    )
-                    break
-
-                if isinstance(event, StreamToken):
-                    tokens.append(event.content)
-
-            output = "".join(tokens) if tokens else None
-
-            events.append(AgentCompleted(
-                agent_name=role.name,
-                output=output or "",
-                duration_ms=0,
-            ))
-        except Exception as exc:
-            error_msg = str(exc)
-            logger.error(
-                "DiagnosisMode: agent %s failed: %s",
-                role.name,
-                error_msg,
-            )
-            events.append(AgentError(
-                agent_name=role.name,
-                error=error_msg,
-            ))
-
-        return AgentRunResult(events=events, output=output)
 
     # ═════════════════════════════════════════════════════
     # Task Builders

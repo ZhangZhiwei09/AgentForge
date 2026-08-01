@@ -19,6 +19,8 @@ dependencies = [
     "langchain-core>=0.3.0",
     "pgvector>=0.3.0",
     "langfuse>=3.0.0",
+    "langgraph-checkpoint-postgres>=3.1.1",
+    "psycopg-binary>=3.3.4",
 ]
 
 [build-system]

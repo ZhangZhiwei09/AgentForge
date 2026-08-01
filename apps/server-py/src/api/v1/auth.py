@@ -10,31 +10,15 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from jose import jwt
 import bcrypt as _bcrypt
-from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_user, get_db
 from src.config import settings
 from src.models.user import User
+from src.schemas.user import SignInRequest, SignUpRequest, TokenResponse
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
-
-
-class SignUpRequest(BaseModel):
-    email: str
-    password: str = Field(min_length=6)
-
-
-class SignInRequest(BaseModel):
-    email: str
-    password: str
-
-
-class TokenResponse(BaseModel):
-    access_token: str
-    refresh_token: str
-    user: dict
 
 
 def _create_tokens(user: User) -> dict:
@@ -46,10 +30,11 @@ def _create_tokens(user: User) -> dict:
     refresh_payload = {
         "sub": user.id, "type": "refresh", "iat": now, "exp": now + 86400 * 7,
     }
+    # 返回 camelCase，匹配前端 SDK AuthResponse 契约（见 schemas/user.py TokenResponse）
     return {
-        "access_token": jwt.encode(access_payload, settings.jwt_secret, algorithm="HS256"),
-        "refresh_token": jwt.encode(refresh_payload, settings.jwt_secret, algorithm="HS256"),
         "user": {"id": user.id, "email": user.email, "role": user.role},
+        "accessToken": jwt.encode(access_payload, settings.jwt_secret, algorithm="HS256"),
+        "refreshToken": jwt.encode(refresh_payload, settings.jwt_secret, algorithm="HS256"),
     }
 
 

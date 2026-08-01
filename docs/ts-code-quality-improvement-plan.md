@@ -758,7 +758,7 @@ Week 3 (2-3 days):
 - [x] `dag-executor.ts` → `dag-executor.ts` + `step-runner.ts` + `checkpoint.ts`
 - [x] `codegen.ts` → `codegen/` (5 阶段模块 + barrel re-export)
 - [x] 全量 typecheck + lint 通过 (11/11 packages)
-- [x] 详细实施方案见 `docs/phase3-file-splitting-implementation-plan.md`
+- [x] 详细实施方案（`docs/phase3-file-splitting-implementation-plan.md` 已归档）
 
 ### Phase 4 — Prisma JSON Types
 - [ ] `AgentSession.scratchpad` Zod Schema + safeParse

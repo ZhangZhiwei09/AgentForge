@@ -1,6 +1,8 @@
 """Tests for Blackboard — shared context store for multi-agent collaboration.
 """
 
+import json
+
 from src.agent.diagnosis.blackboard import Blackboard
 
 
@@ -126,3 +128,25 @@ class TestBlackboard:
         assert self.bb.size == 0
         assert self.bb.history_count == 0
         assert self.bb.keys() == []
+
+
+class TestBlackboardSerializeRoundtrip:
+    """serialize() 的 JSON 往返守卫（multi-agent-langgraph-plan.md §3.3）。"""
+
+    def test_json_roundtrip(self):
+        bb = Blackboard()
+        bb.write("k1", "v1", "agent_a")
+        bb.write("k2", {"key": "val", "n": 3, "flag": True}, "agent_b")
+        data = bb.serialize()
+        # JSON 往返成功，且值不被改写
+        assert json.loads(json.dumps(data)) == data
+        assert data == {"k1": "v1", "k2": {"key": "val", "n": 3, "flag": True}}
+
+    def test_non_json_value_degrades_to_str(self):
+        bb = Blackboard()
+        # 类型层之外的非法值（运行时绕过 JSONValue 注解）
+        bb.write("bad", object(), "agent_a")
+        data = bb.serialize()
+        assert isinstance(data["bad"], str)
+        # 降级后整表仍可 JSON 序列化
+        assert json.loads(json.dumps(data)) == data
