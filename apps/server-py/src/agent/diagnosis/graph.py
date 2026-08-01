@@ -5,6 +5,8 @@
 图拓扑:
     START → frontend ─(escalate_router)─→ backend → leader → resolve → END
                       └─(无需升级)─→ fast_track → END
+    （Phase 3b HITL：leader 判定信息不足 → (clarify_router) → ask_clarification → resolve；
+      通过 langgraph interrupt() 暂停等用户补充，同一 thread 续跑。）
 
 设计要点：
 - **胖阶段节点**：frontend/backend/leader 是父图里的普通 async 节点，内部经
@@ -17,6 +19,10 @@
   流出，与手写版 `DiagnosisMode.execute` 一致）。
 - **取消**：外层 drain 在阶段边界（AgentCompleted/AgentError 之后）检测
   cancel_event → TeamFailed；节点内部 `_run_phase_agent` 也在循环中检测取消。
+- **HITL interrupt（Phase 3b）**：langgraph 1.x 的 interrupt() 不抛异常，而是让
+  ainvoke 正常返回带 `__interrupt__` 键的状态 —— `run_langgraph_diagnosis`
+  检测该键并产出 TeamWaitingForInput；`resume_langgraph_diagnosis` 用
+  `Command(resume=...)` 续跑。
 - **纯函数与中文 prompt 原样复用**：`parse_*`、`check_rule_escalation`、
   `resolve_diagnosis`、`build_fallback_scoring` 及 `mode.py` 的 `_build_*_task`
   （经无状态 `DiagnosisMode()` 实例调用，方法不使用 self）。
@@ -32,6 +38,7 @@ from typing import Any
 
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command, interrupt
 
 from src.agent.diagnosis.blackboard import Blackboard
 from src.agent.diagnosis.mode import (
@@ -48,6 +55,7 @@ from src.agent.diagnosis.mode import (
     TeamFailed,
     TeamStarted,
     TeamStreamEvent,
+    TeamWaitingForInput,
     build_fallback_scoring,
     check_rule_escalation,
     parse_backend_output,
@@ -373,6 +381,24 @@ def build_diagnosis_graph(
     async def fast_track_node(state: DiagnosisState) -> dict:
         return {"resolution": DiagnosisResolution(resolution="frontend_only")}
 
+    async def ask_clarification_node(state: DiagnosisState) -> dict:
+        """HITL（Phase 3b）：Leader 判定信息不足 → interrupt 暂停等用户补充。
+
+        interrupt() 首次调用抛 GraphInterrupt 挂起图（ainvoke 返回带
+        __interrupt__ 的状态）；用户补充后以同一 thread `Command(resume=...)`
+        续跑，本节点重新执行，interrupt() 返回补充内容写入 user_supplement。
+        """
+        sc = state.get("scoring")
+        answer = interrupt({
+            "type": "diagnosis_clarification",
+            "message": (
+                sc.message if sc and sc.message else "需要补充以下信息以完成诊断。"
+            ),
+            "missing_fields": sc.missing_fields if sc else [],
+        })
+        # answer：用户补充的消息文本 / 字段 dict（由 route_agent 透传）
+        return {"user_supplement": answer, "blackboard": state.get("blackboard")}
+
     # ── 条件边 ────────────────────────────────────────────
 
     def _escalate_router(state: DiagnosisState) -> str:
@@ -381,6 +407,17 @@ def build_diagnosis_graph(
         if fe is not None and fe.need_escalation:
             return "backend"
         return "fast_track"
+
+    def _clarify_router(state: DiagnosisState) -> str:
+        """HITL 条件边：Leader 产出 missing_fields → ask_clarification，否则直达 resolve。
+
+        该条件边仅在 `hitl_enabled and checkpointer is not None` 时挂载（见组装），
+        因此此处只需判断 scoring 是否携带 missing_fields。
+        """
+        sc = state.get("scoring")
+        if sc is not None and sc.missing_fields:
+            return "ask_clarification"
+        return "resolve"
 
     # ── 组装 ──────────────────────────────────────────────
 
@@ -397,7 +434,25 @@ def build_diagnosis_graph(
         {"backend": "backend", "fast_track": "fast_track"},
     )
     workflow.add_edge("backend", "leader")
-    workflow.add_edge("leader", "resolve")
+
+    # Phase 3b HITL：仅当开关开启 **且** checkpointer 可用时挂载 ask_clarification。
+    # interrupt() 依赖 checkpointer 持久化暂停点；checkpointer 不可用（如 DB 宕机）
+    # 时降级为 needs_human（直达 resolve），避免运行时因缺 checkpointer 抛错。
+    hitl_enabled = (
+        settings.langgraph_diagnosis_hitl_enabled
+        and checkpointer is not None
+    )
+    if hitl_enabled:
+        workflow.add_node("ask_clarification", ask_clarification_node)
+        workflow.add_conditional_edges(
+            "leader",
+            _clarify_router,
+            {"ask_clarification": "ask_clarification", "resolve": "resolve"},
+        )
+        workflow.add_edge("ask_clarification", "resolve")
+    else:
+        workflow.add_edge("leader", "resolve")
+
     workflow.add_edge("resolve", END)
     workflow.add_edge("fast_track", END)
 
@@ -405,8 +460,32 @@ def build_diagnosis_graph(
 
 
 # ═══════════════════════════════════════════════════════════
-# TeamCompleted 派生
+# TeamCompleted / TeamWaitingForInput 派生
 # ═══════════════════════════════════════════════════════════
+
+
+def _build_team_waiting_input(
+    team_run_id: str,
+    interrupts: list,
+) -> TeamWaitingForInput:
+    """从 ainvoke 返回状态的 `__interrupt__` 派生 TeamWaitingForInput。
+
+    langgraph 1.x 中 interrupt() 不抛出 GraphInterrupt，而是让 ainvoke 正常
+    返回带 `__interrupt__` 键的状态（值为 Interrupt 对象列表）。本函数提取
+    Interrupt.value（我们传入的 dict）中的 message / missing_fields。
+    """
+    iv = interrupts[0]
+    value = getattr(iv, "value", iv)
+    message = ""
+    missing_fields = []
+    if isinstance(value, dict):
+        message = value.get("message", "") or ""
+        missing_fields = value.get("missing_fields", []) or []
+    return TeamWaitingForInput(
+        team_run_id=team_run_id,
+        message=message,
+        missing_fields=missing_fields,
+    )
 
 
 def _build_team_completed(final_state: dict[str, Any]) -> TeamCompleted:
@@ -464,14 +543,22 @@ async def run_langgraph_diagnosis(
     tools_registry: ToolRegistry,
     cancel_event: asyncio.Event | None = None,
     phase_runner: PhaseRunner | None = None,
+    checkpointer: Any | None = None,
 ) -> AsyncIterator[TeamStreamEvent]:
     """LangGraph 图路径的诊断入口。
 
     事件序列与 `DiagnosisMode.execute` 手写版一致：
         TeamStarted → (AgentStarted/AgentCompleted|AgentError)* → TeamCompleted
+    仅当 langgraph_diagnosis_hitl_enabled 且 checkpointer 可用时，Leader 判定
+    信息不足会在阶段边界 interrupt，事件流以 TeamWaitingForInput 结束（无
+    TeamCompleted），等待用户补充后经 `resume_langgraph_diagnosis` 续跑。
 
     取消语义与手写版一致：阶段边界（AgentCompleted/AgentError 之后）检测到
     cancel_event → TeamFailed 并中断图运行。
+
+    Args:
+        checkpointer: 可选注入的 checkpointer（测试用 InMemorySaver 等）；
+            缺省时按 langgraph_diagnosis_checkpoint_enabled 从 DB 获取。
     """
     queue: asyncio.Queue[TeamStreamEvent | None] = asyncio.Queue()
 
@@ -487,10 +574,12 @@ async def run_langgraph_diagnosis(
     # Phase 2：团队级 checkpointing —— 父图是唯一被 checkpoint 的图。
     # 由 langgraph_diagnosis_checkpoint_enabled 门控（与 G1 全局门控隔离）；
     # 创建失败（DB 不可用）时降级为无状态执行，不阻断诊断。
-    checkpointer = None
-    if settings.langgraph_diagnosis_checkpoint_enabled:
+    # 注：HITL（Phase 3b）依赖 checkpointer 做 interrupt/resume，checkpointer
+    # 不可用时会自动降级为 needs_human（见 build_diagnosis_graph 的 hitl_enabled）。
+    ckp = checkpointer
+    if ckp is None and settings.langgraph_diagnosis_checkpoint_enabled:
         try:
-            checkpointer = await get_checkpointer(required=True)
+            ckp = await get_checkpointer(required=True)
         except Exception as exc:  # noqa: BLE001 - 降级而非中断诊断
             logger.warning(
                 "LangGraph diagnosis: checkpointer unavailable, "
@@ -506,7 +595,7 @@ async def run_langgraph_diagnosis(
         cancel_event=cancel_event,
         phase_runner=phase_runner,
         blackboard=bb,
-        checkpointer=checkpointer,
+        checkpointer=ckp,
     )
 
     # team_run_id 同时作为 checkpoint 的 thread_id（诊断实例级隔离）
@@ -534,6 +623,7 @@ async def run_langgraph_diagnosis(
         "scoring": None,
         "resolution": None,
         "blackboard": bb.serialize(),
+        "user_supplement": None,
     }
 
     final_state: dict[str, Any] | None = None
@@ -577,4 +667,77 @@ async def run_langgraph_diagnosis(
         cancelled = True
 
     if not cancelled and final_state is not None:
+        # Phase 3b HITL：ainvoke 正常返回但状态带 __interrupt__ → 图暂停在
+        # ask_clarification 等用户补充（langgraph 1.x 不抛 GraphInterrupt，
+        # 而是把 Interrupt 对象放进返回状态的 __interrupt__ 键）。
+        interrupts = final_state.get("__interrupt__")
+        if interrupts:
+            yield _build_team_waiting_input(team_run_id, list(interrupts))
+            return
         yield _build_team_completed(final_state)
+
+
+# ═══════════════════════════════════════════════════════════
+# HITL 续跑入口（Phase 3b）
+# ═══════════════════════════════════════════════════════════
+
+
+async def resume_langgraph_diagnosis(
+    roles: dict[str, AgentRole],
+    conversation_id: str,
+    tools_registry: ToolRegistry,
+    team_run_id: str,
+    user_input: str | dict,
+    cancel_event: asyncio.Event | None = None,
+    checkpointer: Any | None = None,
+) -> AsyncIterator[TeamStreamEvent]:
+    """HITL 续跑入口（Phase 3b）。
+
+    用同一 thread_id（team_run_id）重建图，`ainvoke(Command(resume=user_input))`
+    从被 interrupt 的 ask_clarification 节点续跑 → resolve → END，产出
+    TeamCompleted（用户补充内容写入 state.user_supplement，节点内可见）。
+
+    不传 initial_state（Phase 2 实证：传全量状态会重置、从 START 重跑），
+    状态从 checkpoint 恢复。
+
+    Args:
+        checkpointer: 注入的 checkpointer（测试用 InMemorySaver 等）；缺省时
+            从 DB 获取 —— HITL 续跑必须能读到同一 thread 的持久化 checkpoint。
+    """
+    ckp = checkpointer
+    if ckp is None and settings.langgraph_diagnosis_checkpoint_enabled:
+        try:
+            ckp = await get_checkpointer(required=True)
+        except Exception as exc:  # noqa: BLE001 - 续跑失败给明确 TeamFailed
+            logger.warning(
+                "LangGraph diagnosis: resume checkpointer unavailable: %s", exc
+            )
+    if ckp is None:
+        yield TeamFailed(
+            error="无法续跑诊断：checkpointer 不可用（HITL 需要持久化 checkpoint）。"
+        )
+        return
+
+    graph = build_diagnosis_graph(
+        roles=roles,
+        task="",  # 续跑路径节点（ask_clarification/resolve）不读闭包 bb/task，
+                  # checkpoint 已恢复完整 state（含 task/frontend/backend/scoring）。
+        conversation_id=conversation_id,
+        tools_registry=tools_registry,
+        queue=asyncio.Queue(),  # 续跑路径无阶段节点，队列实际不会被写入
+        cancel_event=cancel_event,
+        checkpointer=ckp,
+    )
+    run_config: dict[str, Any] = {"configurable": {"thread_id": team_run_id}}
+
+    final_state: dict[str, Any] | None = await graph.ainvoke(
+        Command(resume=user_input), config=run_config
+    )
+    if final_state is None:
+        return
+    interrupts = final_state.get("__interrupt__")
+    if interrupts:
+        # 极端：续跑后 Leader 仍判定需补充 → 再次 TeamWaitingForInput（route_agent 重记）。
+        yield _build_team_waiting_input(team_run_id, list(interrupts))
+        return
+    yield _build_team_completed(final_state)

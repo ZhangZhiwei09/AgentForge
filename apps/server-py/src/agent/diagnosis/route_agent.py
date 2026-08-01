@@ -28,9 +28,11 @@ from src.agent.diagnosis.mode import (
     TeamFailed,
     TeamStarted,
     TeamStreamEvent,
+    TeamWaitingForInput,
     extract_json,
     resolve_diagnosis,
 )
+from src.agent.diagnosis.graph import resume_langgraph_diagnosis
 from src.agent.diagnosis.nodes import (
     build_clarification_content,
     classify_intent_from_query,
@@ -44,6 +46,7 @@ from src.agent.types import (
     DiagnosisPhase,
     DiagnosisPhaseDone,
     DiagnosisStarted,
+    DiagnosisWaitingInput,
     RouteAgent,
     RouteContext,
     RouteName,
@@ -57,6 +60,11 @@ from src.agent.types import (
 logger = logging.getLogger(__name__)
 
 DIAGNOSIS_TIMEOUT_MS = 180_000
+
+# Phase 3b HITL：conversation_id → team_run_id，记录"正在等用户补充"的会话。
+# 内存 Map 的局限：进程重启后丢失（MVP 可接受）。如需持久化 → 复用
+# conversation_id → team_run_id 落库，列为后续工作。
+_active_hitl: dict[str, str] = {}
 
 # Agent name → phase number mapping
 AGENT_PHASE_MAP: dict[str, int] = {
@@ -301,6 +309,14 @@ def _translate_team_event(
             )
             return StreamError(content=f"诊断失败：{event.error}")
 
+        case TeamWaitingForInput():
+            # Phase 3b HITL：Leader 判定信息不足，诊断暂停等用户补充。
+            return DiagnosisWaitingInput(
+                message=event.message,
+                missing_fields=event.missing_fields,
+                message_id=message_id,
+            )
+
         case _:
             return None
 
@@ -399,6 +415,42 @@ class DiagnosisRouteAgent:
             memory_count=len(context.injected_memories),
         )
 
+        # Phase 3b HITL：命中"等待用户补充"的会话 → 同 thread 续跑诊断。
+        # 需在信息预检之前 —— 用户补充的消息大概率仍会被判为信息不足。
+        team_run_id = _active_hitl.get(context.conversation_id)
+        if team_run_id:
+            logger.info(
+                "DiagnosisRouteAgent: resuming HITL diagnosis, "
+                "conversation=%s team_run=%s",
+                context.conversation_id, team_run_id,
+            )
+            still_waiting = False
+            async for team_event in resume_langgraph_diagnosis(
+                roles=IDENTITY_DIAGNOSIS_ROLES,
+                conversation_id=context.conversation_id,
+                tools_registry=tools_registry,
+                team_run_id=team_run_id,
+                user_input=context.user_message,
+                cancel_event=cancel_event,
+            ):
+                if isinstance(team_event, TeamWaitingForInput):
+                    # 极端：续跑后仍判定需补充 → 保持等待记录
+                    still_waiting = True
+                    _active_hitl[context.conversation_id] = (
+                        team_event.team_run_id
+                    )
+                chat_event = _translate_team_event(team_event, message_id)
+                if chat_event:
+                    yield chat_event
+            if not still_waiting:
+                _active_hitl.pop(context.conversation_id, None)
+            yield StreamDone(
+                message_id=message_id,
+                usage={},
+                route=self.route.value,
+            )
+            return
+
         # 2. Info sufficiency check
         info = _check_info_sufficiency(context.user_message)
         if not info["sufficient"]:
@@ -468,6 +520,12 @@ class DiagnosisRouteAgent:
                     logger.info("DiagnosisRouteAgent: user cancelled")
                     status = "cancelled"
                     break
+
+                # Phase 3b HITL：Leader 判定信息不足 → 记录续跑点
+                if isinstance(team_event, TeamWaitingForInput):
+                    _active_hitl[context.conversation_id] = (
+                        team_event.team_run_id
+                    )
 
                 chat_event = _translate_team_event(team_event, message_id)
                 if chat_event:

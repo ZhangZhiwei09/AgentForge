@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     langgraph_diagnosis_stage_timeout_ms: int = Field(default=0)
     # 阶段超时后的重试次数（仅超时触发重试，异常不重试）。
     langgraph_diagnosis_stage_max_retries: int = Field(default=1)
+    # Phase 3b：HITL —— Leader 判定信息不足时 interrupt 暂停等用户补充
+    # （需团队级 checkpoint 已开启；checkpointer 不可用时自动降级为 needs_human）。
+    langgraph_diagnosis_hitl_enabled: bool = Field(default=False)
 
     # ── Server ──────────────────────────────────────────
     port: int = Field(default=8000)

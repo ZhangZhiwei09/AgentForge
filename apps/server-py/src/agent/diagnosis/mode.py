@@ -142,9 +142,22 @@ class TeamFailed:
     error: str = ""
 
 
+@dataclass
+class TeamWaitingForInput:
+    """HITL（Phase 3b）事件 —— Leader 判定信息不足，阶段边界 interrupt 暂停。
+
+    图已通过 langgraph `interrupt()` 暂停在 ask_clarification 节点，等待
+    用户补充信息后用同一 thread（team_run_id）续跑。
+    """
+    type: str = "team_waiting_input"
+    team_run_id: str = ""
+    message: str = ""          # 中文提示（Leader scoring.message 或默认文案）
+    missing_fields: list[str] = field(default_factory=list)
+
+
 type TeamStreamEvent = (
     TeamStarted | AgentStarted | AgentCompleted | AgentError
-    | TeamCompleted | TeamFailed
+    | TeamCompleted | TeamFailed | TeamWaitingForInput
 )
 
 

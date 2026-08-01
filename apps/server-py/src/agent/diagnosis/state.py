@@ -32,6 +32,8 @@ class DiagnosisState(TypedDict):
         scoring: Leader 评分结果。
         resolution: 最终决议（resolve / fast_track 节点写入）。
         blackboard: Blackboard 序列化快照（镜像）。
+        user_supplement: HITL（Phase 3b）用户补充信息 —— interrupt 后由
+            resume(Command(resume=...)) 写入，ask_clarification 节点的返回。
     """
 
     task: str
@@ -41,3 +43,4 @@ class DiagnosisState(TypedDict):
     scoring: ScoringResult | None
     resolution: DiagnosisResolution | None
     blackboard: dict | None
+    user_supplement: str | dict | None
