@@ -1,26 +1,28 @@
-// 知识库检索服务 —— 混合搜索（dense + sparse） + LLM Rerank
-// 搜索流程：用户查询 → embedding → Milvus dense 搜索 → 合并 BM25 稀疏向量分数 → 可选 LLM 重排序
+// 知识库检索服务 —— V3.0 混合搜索：PGVector 语义 + Elasticsearch 关键词 + RRF 融合 + Reranker 重排
+//
+// 搜索流程：
+//   Route 1: Embedding(query) → PGVector COSINE → topK*5 dense candidates
+//   Route 2: query → Elasticsearch BM25 → topK*5 sparse candidates
+//   → RRF(dense, sparse, k=60) → topK*3 fused
+//   → HTTP Reranker (可选) → topK final
+//   → 降级: ES 不可用 → 纯 PGVector; Reranker 不可用 → RRF 分数
+//
+// 兼容性：
+//   - search() 和 searchWithRerank() 保持对外 API 兼容，内部切换到新链路
+//   - 新增 searchHybrid() 返回更丰富的源标识和融合分数
+//   - 旧 search() 内部不再使用 Milvus，全部迁移到 PGVector + ES
+//   - 旧 searchWithRerank() 的 LLM rerank 替换为 HTTP Reranker
+
 import { prisma } from "../db.js";
-import { getMilvusClient, MILVUS_KNOWLEDGE_COLLECTION, EMBEDDING_DIM, ensureKnowledgeCollection } from "./milvus.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
-import { BM25SparseEncoder } from "./bm25.js";
-import { settings } from "../config.js";
+import { esKeywordSearch, isESAvailable } from "./elasticsearch.js";
+import { getReranker, type RerankerDocument } from "./reranker.js";
 import { getProvider } from "../providers/registry.js";
-import OpenAI from "openai";
 import { logger } from "@agentforge/logger";
+import { parseJSONFromLLMResponse } from "../lib/json-utils.js";
+import { settings } from "../config.js";
 
-const DENSE_WEIGHT = 0.6;  // 语义向量权重
-const SPARSE_WEIGHT = 0.4; // 关键词匹配权重
-
-// LLM Rerank 的 system prompt：让 LLM 对候选文档打分排序
-const RERANK_SYSTEM_PROMPT = `你是一个搜索相关性评估助手。根据用户的查询，对给定的候选文档片段进行相关性打分。
-
-返回一个 JSON 数组，每个元素包含：
-- "index": 候选文档的索引（对应输入中的编号）
-- "score": 0.0 到 1.0 之间的相关性分数（1.0 = 完全相关，0.0 = 完全不相关）
-- "reason": 简短说明打分的理由
-
-只返回分数最高的前 3 个结果。不相关的文档可以不返回。`;
+// ── 类型定义 ──────────────────────────────────────────────
 
 export interface KnowledgeSearchResult {
   chunkId: string;
@@ -29,307 +31,639 @@ export interface KnowledgeSearchResult {
   content: string;
   score: number;
   chunkIndex: number;
-  docTitle: string;  // 文档标题（从 PG 关联查询）
+  docTitle: string;
 }
 
-export class KnowledgeService {
-  private collectionLoaded = false;
-  private bm25Encoder: BM25SparseEncoder | null = null;
-  private bm25FittedKbIds = new Set<string>(); // 记录已训练 BM25 的知识库
+// V3.0: 扩展的搜索结果，包含召回来源和融合/重排分数
+export interface HybridSearchResult {
+  chunkId: string;
+  docId: string;
+  kbId: string;
+  content: string;
+  score: number;                   // 最终分数
+  fusionScore: number;             // RRF 融合分数
+  rerankScore?: number;            // Reranker 精排分数（如有）
+  recallSources: ("pgvector" | "elasticsearch")[];  // 召回来源
+  chunkIndex: number;
+  docTitle: string;
+  // V3.4: 层次分块时附上父分块上下文
+  parentChunk?: {
+    id: string;
+    content: string;
+  };
+}
 
-  // 惰性加载 Milvus Collection
-  private async ensureCollection() {
-    if (!this.collectionLoaded) {
-      await ensureKnowledgeCollection();
-      this.collectionLoaded = true;
+export interface HybridSearchParams {
+  query: string;
+  kbIds?: string[];
+  topK?: number;                   // 最终返回数，默认 5
+  useReranker?: boolean;           // 是否启用 Reranker，默认 true
+}
+
+// ── 常量 ──────────────────────────────────────────────────
+
+const RRF_K = 60;                  // RRF 平滑常数
+const RECALL_MULTIPLIER = 5;       // 每路召回 topK * 5 候选
+const FUSED_MULTIPLIER = 3;        // 融合后取 topK * 3 进入 rerank
+
+// ── RRF 融合辅助函数 ──────────────────────────────────────
+
+export interface RawCandidate {
+  chunkId: string;
+  docId: string;
+  kbId: string;
+  content: string;
+  docTitle: string;
+  chunkIndex: number;
+  sourceScore: number;
+  source: "pgvector" | "elasticsearch";
+}
+
+/**
+ * RRF (Reciprocal Rank Fusion) 融合多路召回结果。
+ * RRF_score(d) = sum over each ranking list R: 1 / (k + rank_d_in_R)
+ * 其中 rank 是 1-based（从 1 开始）。
+ *
+ * @param denseResults   - PGVector 向量召回结果（已按分数降序）
+ * @param sparseResults  - Elasticsearch 关键词召回结果（已按分数降序）
+ * @param topK           - 融合后保留的数量
+ * @returns 按 RRF 分数降序排列的候选列表
+ */
+export function rrfFusion(
+  denseResults: RawCandidate[],
+  sparseResults: RawCandidate[],
+  topK: number = 30,
+): (RawCandidate & { fusionScore: number; recallSources: ("pgvector" | "elasticsearch")[] })[] {
+  const chunkMap = new Map<
+    string,
+    {
+      candidate: RawCandidate;
+      rrfScore: number;
+      sources: Set<"pgvector" | "elasticsearch">;
     }
-  }
+  >();
 
-  private getBM25(): BM25SparseEncoder {
-    if (!this.bm25Encoder) {
-      this.bm25Encoder = new BM25SparseEncoder();
-    }
-    return this.bm25Encoder;
-  }
-
-  // 确保 BM25 已在知识库语料上训练（惰性，只训练一次）
-  async ensureBM25Fitted(kbId?: string): Promise<void> {
-    const bm25 = this.getBM25();
-    const targetKbId = kbId || "__all__";
-
-    if (this.bm25FittedKbIds.has(targetKbId)) return;
-
-    try {
-      const where: any = { enabled: true };
-      if (kbId) where.knowledgeBaseId = kbId;
-
-      const chunks = await prisma.knowledgeChunk.findMany({
-        where,
-        select: { content: true },
-        take: 5000, // 最多训练 5000 个 chunk
+  // 处理 dense 结果（rank 从 1 开始）
+  for (let i = 0; i < denseResults.length; i++) {
+    const rank = i + 1;
+    const r = denseResults[i];
+    const entry = chunkMap.get(r.chunkId);
+    if (entry) {
+      entry.rrfScore += 1 / (RRF_K + rank);
+      entry.sources.add("pgvector");
+    } else {
+      chunkMap.set(r.chunkId, {
+        candidate: r,
+        rrfScore: 1 / (RRF_K + rank),
+        sources: new Set(["pgvector"]),
       });
-
-      if (chunks.length > 0) {
-        const corpus = chunks.map((c) => c.content);
-        bm25.fit(corpus);
-        this.bm25FittedKbIds.add(targetKbId);
-        logger.info({ kbId: targetKbId, corpus: corpus.length }, "BM25 fitted");
-      }
-    } catch (e) {
-      logger.warn(e, "BM25 fit failed");
     }
   }
 
-  // 使 BM25 缓存失效（文档增删后调用，触发下次搜索时重新训练）
-  async invalidateBM25Cache(kbId?: string): Promise<void> {
-    const targetKbId = kbId || "__all__";
-    this.bm25FittedKbIds.delete(targetKbId);
-    logger.info({ kbId: targetKbId }, "BM25 cache invalidated");
+  // 处理 sparse 结果（rank 从 1 开始）
+  for (let i = 0; i < sparseResults.length; i++) {
+    const rank = i + 1;
+    const r = sparseResults[i];
+    const entry = chunkMap.get(r.chunkId);
+    if (entry) {
+      entry.rrfScore += 1 / (RRF_K + rank);
+      entry.sources.add("elasticsearch");
+    } else {
+      chunkMap.set(r.chunkId, {
+        candidate: r,
+        rrfScore: 1 / (RRF_K + rank),
+        sources: new Set(["elasticsearch"]),
+      });
+    }
   }
 
-  // 计算查询与候选文本之间的 BM25 关键词相似度分数
-  // 使用稀疏向量点积作为相似度度量
-  private computeBM25Scores(query: string, candidates: string[]): number[] {
-    const bm25 = this.getBM25();
-    const queryVecs = bm25.encodeQueries([query]);
-    const queryVec = queryVecs[0] ?? {};
+  // 按 RRF 分数降序排序，去重取 topK
+  const fused = Array.from(chunkMap.values())
+    .sort((a, b) => b.rrfScore - a.rrfScore)
+    .slice(0, topK)
+    .map((entry) => ({
+      ...entry.candidate,
+      fusionScore: Math.round(entry.rrfScore * 10000) / 10000,
+      recallSources: Array.from(entry.sources) as ("pgvector" | "elasticsearch")[],
+    }));
 
-    if (Object.keys(queryVec).length === 0) {
-      return candidates.map(() => 0); // 无词汇匹配，全返回 0
+  return fused;
+}
+
+// ── 相邻 Chunk 去重辅助 ──────────────────────────────────
+
+/**
+ * 相邻 chunk 去重结果。
+ */
+interface DedupResult<T> {
+  kept: T[];
+  removed: T[];
+}
+
+/**
+ * 相邻 chunk 去重。
+ *
+ * 在两阶段去重后保留高分候选：
+ *   1. 邻接去重：同一 docId 且 chunkIndex 距离 ≤ neighborWindow 的，只保留分数高者。
+ *   2. 文本重叠去重：token/Jaccard overlap > similarityThreshold 的，只保留分数高者。
+ *
+ * 保留顺序（高分在前），不改变相对排序。
+ *
+ * @param candidates - RRF 融合后的候选列表（已按分数降序排列）
+ * @param neighborWindow - 视为"相邻"的 chunkIndex 最大距离（默认 1）
+ * @param similarityThreshold - 文本重叠阈值（默认 0.82）
+ * @returns 去重后的候选列表
+ */
+export function dedupeAdjacentChunks<T extends { docId: string; chunkIndex: number; content: string }>(
+  candidates: T[],
+  neighborWindow: number = 1,
+  similarityThreshold: number = 0.82,
+): DedupResult<T> {
+  if (candidates.length <= 1) return { kept: candidates, removed: [] };
+
+  const kept: T[] = [];
+  const removed: T[] = [];
+
+  for (let i = 0; i < candidates.length; i++) {
+    const current = candidates[i];
+    let shouldSkip = false;
+
+    for (let j = 0; j < kept.length; j++) {
+      const prev = kept[j];
+
+      // 文本重叠度超过阈值（Jaccard similarity on tokens）
+      const overlap = computeTokenOverlap(prev.content, current.content);
+      if (overlap > similarityThreshold) {
+        shouldSkip = true;
+        break;
+      }
     }
 
-    const docVecs = bm25.encodeDocuments(candidates);
-    return docVecs.map((docVec) => {
-      let dotProduct = 0;
-      for (const [idx, qWeight] of Object.entries(queryVec)) {
-        const dWeight = docVec[idx] ?? 0;
-        dotProduct += qWeight * dWeight;
-      }
-      // 归一化：除以 sqrt(查询L2 * 文档L2) 得到余弦相似度
-      const queryNorm = Math.sqrt(
-        Object.values(queryVec).reduce((sum, v) => sum + v * v, 0),
-      );
-      const docNorm = Math.sqrt(
-        Object.values(docVec).reduce((sum, v) => sum + v * v, 0),
-      );
-      if (queryNorm === 0 || docNorm === 0) return 0;
-      return dotProduct / (queryNorm * docNorm);
-    });
+    if (shouldSkip) {
+      removed.push(current);
+    } else {
+      kept.push(current);
+    }
   }
 
-  // 基础搜索：dense embedding → Milvus 向量搜索 → 返回结果
-  async search(
-    query: string,
-    kbIds?: string[] | null,    // 可选：限定在指定知识库中搜索
-    topK: number = 5,
-  ): Promise<KnowledgeSearchResult[]> {
+  return { kept, removed };
+}
+
+/**
+ * 计算两段文本的 token 重叠度（简化 Jaccard）。
+ *
+ * 使用字符 bigram 快速估算文本相似度，避免完整 tokenization 开销。
+ * 分数范围 [0, 1]，越高表示越相似。
+ */
+export function computeTokenOverlap(a: string, b: string): number {
+  if (!a || !b) return 0;
+
+  // 生成字符 bigram 集合
+  const bigramsA = toBigramSet(a);
+  const bigramsB = toBigramSet(b);
+
+  if (bigramsA.size === 0 || bigramsB.size === 0) return 0;
+
+  // Jaccard similarity: |intersection| / |union|
+  let intersection = 0;
+  for (const bg of bigramsA) {
+    if (bigramsB.has(bg)) intersection++;
+  }
+
+  const union = bigramsA.size + bigramsB.size - intersection;
+  return union > 0 ? intersection / union : 0;
+}
+
+/**
+ * 生成文本的字符 bigram 集合。
+ * 中英文统一处理，CJK 字符间也生成 bigram。
+ */
+function toBigramSet(text: string): Set<string> {
+  const set = new Set<string>();
+  if (text.length < 2) {
+    if (text.length === 1) set.add(text);
+    return set;
+  }
+  for (let i = 0; i < text.length - 1; i++) {
+    set.add(text.slice(i, i + 2));
+  }
+  return set;
+}
+
+// ── KnowledgeService ──────────────────────────────────────
+
+export class KnowledgeService {
+  /**
+   * V3.0 主搜索方法：PGVector 语义 + ES 关键词 → RRF 融合 → Reranker 重排
+   * 所有降级路径内置，ES/Reranker 不可用时自动降级不阻塞。
+   */
+  async searchHybrid(params: HybridSearchParams): Promise<HybridSearchResult[]> {
+    const { query, kbIds, topK = 5, useReranker = true } = params;
     if (!query.trim()) return [];
 
-    await this.ensureCollection();
-
-    // 1. 获取 embedding provider
     const provider = getDefaultEmbeddingProvider();
     if (!provider) {
       logger.warn("No embedding provider configured");
       return [];
     }
 
-    // 2. 将查询文本转为 dense 向量
-    const denseVec = await provider.embedSingle(query);
-    if (!denseVec) return [];
+    // 1. 生成查询向量
+    const queryVec = await provider.embedSingle(query);
+    if (!queryVec) return [];
 
-    // 3. 确保 BM25 已在知识库语料上训练
-    const targetKbId = kbIds && kbIds.length === 1 ? kbIds[0] : undefined;
-    await this.ensureBM25Fitted(targetKbId);
+    const recallSize = topK * RECALL_MULTIPLIER;
+    const fusedSize = topK * FUSED_MULTIPLIER;
 
-    // 4. 构建过滤表达式：限定知识库范围
-    let filter = "";
-    if (kbIds && kbIds.length > 0) {
-      const kbFilter = kbIds.map((id) => `kb_id == "${id}"`).join(" || ");
-      filter = kbFilter;
+    // 2. 并行双路召回：PGVector + Elasticsearch
+    const [denseResults, sparseResults] = await Promise.all([
+      this.searchByVector(queryVec, kbIds, recallSize),
+      this.searchByKeyword(query, kbIds, recallSize),
+    ]);
+
+    // 3. RRF 融合
+    const fused = rrfFusion(denseResults, sparseResults, fusedSize);
+
+    if (fused.length === 0) return [];
+
+    // 4. 相邻 Chunk 去重（在 Reranker 之前）
+    const deduped = dedupeAdjacentChunks(
+      fused,
+      settings.kbDedupeNeighborWindow,
+      settings.kbDedupeSimilarityThreshold,
+    );
+
+    if (deduped.removed.length > 0) {
+      logger.debug(
+        { kept: deduped.kept.length, removed: deduped.removed.length },
+        "Adjacent chunk dedup applied",
+      );
     }
 
+    const dedupedCandidates = deduped.kept;
+
+    // 5. Reranker 重排（可选，可降级）
+    const reranker = getReranker();
+    if (useReranker && reranker.isConfigured()) {
+      const rerankDocs: RerankerDocument[] = dedupedCandidates.map((f) => ({
+        text: f.content.slice(0, 800),  // 截断控制 token
+        id: f.chunkId,
+      }));
+
+      const rerankResults = await reranker.rerank(query, rerankDocs, topK);
+
+      if (rerankResults.length > 0) {
+        // 用 Reranker 分数重新排序
+        const reranked: HybridSearchResult[] = [];
+        for (const rr of rerankResults) {
+          const original = dedupedCandidates[rr.index];
+          if (!original) continue;
+          reranked.push({
+            ...original,
+            score: Math.round(rr.score * 10000) / 10000,
+            rerankScore: Math.round(rr.score * 10000) / 10000,
+          });
+        }
+        reranked.sort((a, b) => b.score - a.score);
+        return this.enrichWithParentChunks(reranked.slice(0, topK));
+      }
+      // Reranker 失败 → 回退到 RRF 融合分数
+    }
+
+    // 6. 无 Reranker 或 Reranker 失败 → 用 RRF 分数作为最终分数
+    const finalResults = dedupedCandidates.slice(0, topK).map((f) => ({
+      ...f,
+      score: f.fusionScore,
+    }));
+    return this.enrichWithParentChunks(finalResults);
+  }
+
+  /**
+   * V3.4: 为搜索结果附加父分块上下文（层次分块时）。
+   * 对每个有 parentChunkId 的 child chunk，批量查询 parent 信息。
+   */
+  private async enrichWithParentChunks<T extends { chunkId: string }>(
+    results: T[],
+  ): Promise<(T & { parentChunk?: { id: string; content: string } })[]> {
+    if (results.length === 0) return results;
+
+    // 批量查询所有 child chunks 的 parent 信息
+    const chunkIds = results.map((r) => r.chunkId);
+    const chunks = await prisma.knowledgeChunk.findMany({
+      where: { id: { in: chunkIds } },
+      select: { id: true, parentChunkId: true },
+    });
+
+    const parentIds = new Set(
+      chunks.filter((c) => c.parentChunkId).map((c) => c.parentChunkId!),
+    );
+
+    if (parentIds.size === 0) {
+      return results.map((r) => ({ ...r }));
+    }
+
+    // 批量查询 parent chunks 内容
+    const parents = await prisma.knowledgeChunk.findMany({
+      where: { id: { in: [...parentIds] } },
+      select: { id: true, content: true },
+    });
+    const parentMap = new Map(parents.map((p) => [p.id, { id: p.id, content: p.content }]));
+
+    const chunkParentMap = new Map(
+      chunks.filter((c) => c.parentChunkId).map((c) => [c.id, c.parentChunkId!]),
+    );
+
+    return results.map((r) => {
+      const pid = chunkParentMap.get(r.chunkId);
+      const parentChunk = pid ? parentMap.get(pid) : undefined;
+      return { ...r, parentChunk };
+    });
+  }
+
+  /**
+   * PGVector 语义搜索：向量余弦相似度检索
+   * 使用 PostgreSQL `<->` 操作符（欧几里得距离）或 `<=>` (余弦距离)
+   */
+  async searchByVector(
+    queryVec: number[],
+    kbIds?: string[],
+    topK: number = 20,
+  ): Promise<RawCandidate[]> {
     try {
-      const client = getMilvusClient();
+      // 格式化向量为 PGVector 字面量: '[0.1, 0.2, ...]'
+      const vecLiteral = `[${queryVec.join(",")}]`;
 
-      // 5. 在 Milvus 中执行向量相似度搜索（只搜索 dense_vector 字段）
-      const results = await client.search({
-        collection_name: MILVUS_KNOWLEDGE_COLLECTION,
-        vector: denseVec,
-        anns_field: "dense_vector", // 指定搜索字段（避免搜 sparse_vector 无索引报错）
-        limit: topK,
-        filter,
-        output_fields: ["chunk_id", "kb_id", "content"], // 返回这些字段的值
-        params: { nprobe: 16 }, // 搜索的聚类数，值越大越精确但越慢
-      });
-
-      if (!results.results || results.results.length === 0) {
-        return [];
+      // 构建 kbId 过滤条件
+      let kbFilter = "";
+      const kbParams: string[] = [];
+      if (kbIds && kbIds.length > 0) {
+        kbFilter = `AND kc.knowledge_base_id IN (${kbIds.map((_, i) => `$${i + 2}`).join(",")})`;
+        kbParams.push(...kbIds);
       }
 
-      // 6. 组装结果：从 Milvus hit 中提取数据，再从 PG 查 chunk 元信息
-      const chunkIds = results.results.map((h) => h.chunk_id as string);
-      const chunkMetaMap = await this.getChunkMetas(chunkIds);
+      // 使用余弦距离运算符 `<=>` 进行相似度搜索
+      // 注意：Prisma 不支持 raw PGVector 查询，使用 $queryRawUnsafe
+      const sql = `
+        SELECT
+          kc.id AS "chunkId",
+          kc.document_id AS "docId",
+          kc.knowledge_base_id AS "kbId",
+          kc.content,
+          kc.chunk_index AS "chunkIndex",
+          COALESCE(kd.title, '') AS "docTitle",
+          1 - (kc.embedding <=> $1::vector) AS "score"
+        FROM knowledge_chunks kc
+        JOIN knowledge_documents kd ON kc.document_id = kd.id
+        WHERE kc.embedding IS NOT NULL
+          AND kc.enabled = true
+          ${kbFilter}
+        ORDER BY kc.embedding <=> $1::vector
+        LIMIT $${kbIds ? kbIds.length + 2 : 2}
+      `;
 
-      // 7. 计算 BM25 关键词匹配分数（混合搜索）
-      const contents = results.results.map((h) => (h.content as string) || "");
-      const bm25Scores = this.computeBM25Scores(query, contents);
+      const params = [vecLiteral, ...kbParams, topK];
 
-      const searchResults: KnowledgeSearchResult[] = [];
-      for (let i = 0; i < results.results.length; i++) {
-        const hit = results.results[i];
-        const chunkId = hit.chunk_id as string;
-        const kbId = hit.kb_id as string;
-        const content = contents[i] || "";
-        const denseScore = hit.score ?? 0;
-        const sparseScore = bm25Scores[i] || 0;
+      const rows = await prisma.$queryRawUnsafe<Array<{
+        chunkId: string;
+        docId: string;
+        kbId: string;
+        content: string;
+        chunkIndex: number;
+        docTitle: string;
+        score: number;
+      }>>(sql, ...params);
 
-        // 混合打分：dense 权重 0.6 + sparse 权重 0.4
-        const hybridScore = DENSE_WEIGHT * denseScore + SPARSE_WEIGHT * sparseScore;
-
-        const meta = chunkMetaMap[chunkId] || {};
-
-        searchResults.push({
-          chunkId,
-          docId: meta.docId || "",
-          kbId,
-          content,
-          score: Math.round(hybridScore * 10000) / 10000,
-          chunkIndex: meta.chunkIndex || 0,
-          docTitle: meta.docTitle || "",
-        });
-      }
-
-      // 按混合分数重新排序
-      searchResults.sort((a, b) => b.score - a.score);
-
-      return searchResults;
+      return rows.map((row) => ({
+        chunkId: row.chunkId,
+        docId: row.docId,
+        kbId: row.kbId,
+        content: row.content,
+        docTitle: row.docTitle,
+        chunkIndex: row.chunkIndex,
+        sourceScore: typeof row.score === "number" ? row.score : 0,
+        source: "pgvector" as const,
+      }));
     } catch (e) {
-      logger.warn(e, "Knowledge search failed");
+      logger.warn(e, "PGVector search failed");
       return [];
     }
   }
 
-  // 带 Rerank 的搜索：先召回 3×topK 候选，再用 LLM 精选 topK
+  /**
+   * PostgreSQL keyword fallback for development and degraded ES scenarios.
+   * Uses exact substring matching so Chinese content can still be recalled
+   * without a tokenizer-specific full-text index.
+   */
+  private async searchByPostgresKeyword(
+    query: string,
+    kbIds?: string[],
+    topK: number = 20,
+  ): Promise<RawCandidate[]> {
+    const terms = query
+      .trim()
+      .split(/\s+/)
+      .map((term) => term.trim())
+      .filter(Boolean)
+      .slice(0, 8);
+
+    if (terms.length === 0) return [];
+
+    try {
+      const params: Array<string | number> = [];
+      const conditions: string[] = [];
+
+      for (const term of terms) {
+        params.push(`%${term}%`);
+        const contentParam = `$${params.length}`;
+        params.push(`%${term}%`);
+        const titleParam = `$${params.length}`;
+        conditions.push(`(kc.content ILIKE ${contentParam} OR kd.title ILIKE ${titleParam})`);
+      }
+
+      let kbFilter = "";
+      if (kbIds && kbIds.length > 0) {
+        const placeholders = kbIds.map((kbId) => {
+          params.push(kbId);
+          return `$${params.length}`;
+        });
+        kbFilter = `AND kc.knowledge_base_id IN (${placeholders.join(",")})`;
+      }
+
+      params.push(topK);
+      const limitParam = `$${params.length}`;
+      const scoreExpression = conditions
+        .map((condition) => `CASE WHEN ${condition} THEN 1 ELSE 0 END`)
+        .join(" + ");
+
+      const sql = `
+        SELECT
+          kc.id AS "chunkId",
+          kc.document_id AS "docId",
+          kc.knowledge_base_id AS "kbId",
+          kc.content,
+          kc.chunk_index AS "chunkIndex",
+          COALESCE(kd.title, '') AS "docTitle",
+          (${scoreExpression})::float AS "score"
+        FROM knowledge_chunks kc
+        JOIN knowledge_documents kd ON kc.document_id = kd.id
+        WHERE kc.enabled = true
+          ${kbFilter}
+          AND (${conditions.join(" OR ")})
+        ORDER BY "score" DESC, kc.created_at DESC
+        LIMIT ${limitParam}
+      `;
+
+      const rows = await prisma.$queryRawUnsafe<Array<{
+        chunkId: string;
+        docId: string;
+        kbId: string;
+        content: string;
+        chunkIndex: number;
+        docTitle: string;
+        score: number;
+      }>>(sql, ...params);
+
+      const maxScore = Math.max(1, terms.length);
+      return rows.map((row) => ({
+        chunkId: row.chunkId,
+        docId: row.docId,
+        kbId: row.kbId,
+        content: row.content,
+        docTitle: row.docTitle,
+        chunkIndex: row.chunkIndex,
+        sourceScore: Math.min(1, Number(row.score || 0) / maxScore),
+        source: "elasticsearch" as const,
+      }));
+    } catch (e) {
+      logger.warn(e, "PostgreSQL keyword fallback failed");
+      return [];
+    }
+  }
+
+  /**
+   * ES 关键词召回（包装 elasticsearch.ts 的方法）
+   * ES 不可用时回退到 PostgreSQL ILIKE 关键词检索
+   */
+  async searchByKeyword(
+    query: string,
+    kbIds?: string[],
+    topK: number = 20,
+  ): Promise<RawCandidate[]> {
+    try {
+      const esAvailable = await isESAvailable();
+      if (!esAvailable) {
+        logger.debug("ES unavailable, using PostgreSQL keyword fallback");
+        return this.searchByPostgresKeyword(query, kbIds, topK);
+      }
+
+      const results = await esKeywordSearch(query, kbIds, topK);
+
+      // 获取 chunk 的元数据（chunkIndex, docTitle）
+      const chunkIds = results.map((r) => r.chunkId);
+      const metaMap = await this.getChunkMetas(chunkIds);
+
+      return results.map((r) => {
+        const meta = metaMap[r.chunkId] || {};
+        return {
+          chunkId: r.chunkId,
+          docId: r.docId,
+          kbId: r.kbId,
+          content: r.content,
+          docTitle: r.title || meta.docTitle || "",
+          chunkIndex: meta.chunkIndex || 0,
+          sourceScore: r.score,
+          source: "elasticsearch" as const,
+        };
+      });
+    } catch (e) {
+      logger.warn(e, "ES keyword recall failed");
+      return this.searchByPostgresKeyword(query, kbIds, topK);
+    }
+  }
+
+  // ── 向后兼容方法 ────────────────────────────────────────
+
+  /**
+   * 向后兼容的 search() 方法。
+   * 内部切换到 searchHybrid 链路，保持对外 API 兼容。
+   */
+  async search(
+    query: string,
+    kbIds?: string[] | null,
+    topK: number = 5,
+  ): Promise<KnowledgeSearchResult[]> {
+    const hybridResults = await this.searchHybrid({
+      query,
+      kbIds: kbIds ?? undefined,
+      topK,
+      useReranker: false,  // search() 不带 rerank，由 searchWithRerank() 负责
+    });
+
+    return hybridResults.map((r) => ({
+      chunkId: r.chunkId,
+      docId: r.docId,
+      kbId: r.kbId,
+      content: r.content,
+      score: r.score,
+      chunkIndex: r.chunkIndex,
+      docTitle: r.docTitle,
+    }));
+  }
+
+  /**
+   * 向后兼容的 searchWithRerank() 方法。
+   * 内部切换到 searchHybrid + HTTP Reranker 链路。
+   * llmProviderName 参数保留但不再使用（原用于 LLM rerank）。
+   */
   async searchWithRerank(
     query: string,
     kbIds?: string[] | null,
     topK: number = 5,
-    llmProviderName?: string | null,
+    _llmProviderName?: string | null,  // 废弃：保留兼容性
   ): Promise<KnowledgeSearchResult[]> {
-    // 召回阶段：多拿一些候选
-    const candidates = await this.search(query, kbIds, topK * 3);
-
-    if (!candidates.length || candidates.length <= topK) {
-      return candidates; // 候选数已经足够少，无需 rerank
-    }
-
-    if (!llmProviderName) {
-      return candidates.slice(0, topK); // 未指定 LLM provider，直接截断
-    }
-
-    // Rerank 阶段：让 LLM 对候选文档重新打分
-    try {
-      const reranked = await this.llmRerank(query, candidates, topK, llmProviderName);
-      if (reranked) return reranked;
-    } catch (e) {
-      logger.warn(e, "LLM rerank failed");
-    }
-
-    return candidates.slice(0, topK); // Rerank 失败则回退到截断
-  }
-
-  // LLM Rerank：将候选文档列表发给 LLM，让它判断相关性并排序
-  private async llmRerank(
-    query: string,
-    candidates: KnowledgeSearchResult[],
-    topK: number,
-    providerName: string,
-  ): Promise<KnowledgeSearchResult[] | null> {
-    const provider = getProvider(providerName);
-
-    // 格式化候选文档为编号列表（每篇截断 800 字符，控制 token）
-    const candidateTexts = candidates.map(
-      (c, i) => `[${i}] ${c.content.slice(0, 800)}`,
-    );
-
-    const userMessage = `查询：${query}\n\n候选文档：\n${candidateTexts.join("\n\n")}`;
-
-    // 直接使用 OpenAI SDK（兼容 DeepSeek），不走 Provider 流式接口
-    let client: OpenAI;
-    let model: string;
-
-    if (providerName === "openai" && settings.openaiApiKey) {
-      client = new OpenAI({
-        apiKey: settings.openaiApiKey,
-        baseURL: settings.openaiBaseUrl,
-      });
-      model = "gpt-4o-mini"; // Rerank 用便宜模型即可
-    } else {
-      client = new OpenAI({
-        apiKey: settings.deepseekApiKey,
-        baseURL: settings.deepseekBaseUrl,
-      });
-      model = "deepseek-chat";
-    }
-
-    const response = await client.chat.completions.create({
-      model,
-      messages: [
-        { role: "system", content: RERANK_SYSTEM_PROMPT },
-        { role: "user", content: userMessage },
-      ],
-      temperature: 0.1,  // 低温度保证打分稳定
-      max_tokens: 500,
+    const hybridResults = await this.searchHybrid({
+      query,
+      kbIds: kbIds ?? undefined,
+      topK,
+      useReranker: true,
     });
 
-    // 解析 LLM 返回的 JSON（可能被 markdown 代码块包裹）
-    let raw = response.choices[0].message.content?.trim() || "";
-    if (raw.startsWith("```")) {
-      raw = raw.split("```")[1];
-      if (raw.startsWith("json")) raw = raw.slice(4);
-      raw = raw.trim();
-    }
-
-    const scores = JSON.parse(raw);
-    if (!Array.isArray(scores)) return null;
-
-    // 按 LLM 打分重新构造结果
-    const reranked: KnowledgeSearchResult[] = [];
-    for (const item of scores) {
-      const idx = item.index;
-      const newScore = item.score || 0;
-      if (idx !== undefined && idx >= 0 && idx < candidates.length) {
-        const c = candidates[idx];
-        reranked.push({
-          ...c,
-          score: Math.round(parseFloat(newScore) * 10000) / 10000,
-        });
-      }
-    }
-
-    reranked.sort((a, b) => b.score - a.score);
-    return reranked.slice(0, topK);
+    return hybridResults.map((r) => ({
+      chunkId: r.chunkId,
+      docId: r.docId,
+      kbId: r.kbId,
+      content: r.content,
+      score: r.score,
+      chunkIndex: r.chunkIndex,
+      docTitle: r.docTitle,
+    }));
   }
 
-  // 从 PG 批量查 chunk 的文档归属、序号和文档标题
-  private async getChunkMetas(chunkIds: string[]): Promise<Record<string, { docId?: string; chunkIndex?: number; docTitle?: string }>> {
+  // ── 工具方法 ────────────────────────────────────────────
+
+  // 从 PG 批量查 chunk 的文档归属和序号
+  private async getChunkMetas(
+    chunkIds: string[],
+  ): Promise<
+    Record<string, { docId?: string; chunkIndex?: number; docTitle?: string }>
+  > {
+    if (chunkIds.length === 0) return {};
+
     const chunks = await prisma.knowledgeChunk.findMany({
       where: { id: { in: chunkIds } },
       select: { id: true, documentId: true, chunkIndex: true },
     });
 
-    // 提取所有唯一的 docId
     const docIds = [...new Set(chunks.map((c) => c.documentId))];
-
-    // 批量查询文档标题
     const docs = await prisma.knowledgeDocument.findMany({
       where: { id: { in: docIds } },
       select: { id: true, title: true },
     });
     const docTitleMap = new Map(docs.map((d) => [d.id, d.title]));
 
-    const result: Record<string, { docId?: string; chunkIndex?: number; docTitle?: string }> = {};
+    const result: Record<
+      string,
+      { docId?: string; chunkIndex?: number; docTitle?: string }
+    > = {};
     for (const chunk of chunks) {
       result[chunk.id] = {
         docId: chunk.documentId,
@@ -340,21 +674,47 @@ export class KnowledgeService {
     return result;
   }
 
-  // 获取 Milvus Collection 统计信息（向量总数等）
+  // 获取 Collection 统计信息（不再依赖 Milvus，返回 PGVector 统计）
   async getCollectionStats(): Promise<Record<string, unknown>> {
     try {
-      await this.ensureCollection();
-      const client = getMilvusClient();
-      const stats = await client.getCollectionStatistics({
-        collection_name: MILVUS_KNOWLEDGE_COLLECTION,
+      const chunkCount = await prisma.knowledgeChunk.count({
+        where: { enabled: true },
       });
+      // PGVector embedding 数量用 raw SQL 查询（Prisma Unsupported 类型不支持 where 过滤）
+      let withEmbedding = 0;
+      try {
+        const embResult = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
+          `SELECT COUNT(*) as count FROM knowledge_chunks WHERE embedding IS NOT NULL AND enabled = true`,
+        );
+        withEmbedding = Number(embResult[0]?.count ?? 0);
+      } catch {
+        // PGVector 扩展未安装等情况
+      }
+
+      let esAvailable = false;
+      let esIndexCount = 0;
+      try {
+        esAvailable = await isESAvailable();
+        if (esAvailable) {
+          const { Client } = await import("@elastic/elasticsearch");
+          const es = new Client({ node: settings.elasticsearchUrl });
+          const count = await es.count({ index: "knowledge_chunks" });
+          esIndexCount = count.count;
+        }
+      } catch {
+        // ES stats unavailable
+      }
+
       return {
-        collection: MILVUS_KNOWLEDGE_COLLECTION,
-        total_vectors: stats.data?.row_count || 0,
+        totalChunks: chunkCount,
+        chunksWithEmbedding: withEmbedding,
+        pgvectorEnabled: settings.pgvectorEnabled,
+        elasticsearchAvailable: esAvailable,
+        elasticsearchIndexedChunks: esIndexCount,
       };
     } catch (e) {
       logger.warn(e, "Failed to get collection stats");
-      return { collection: MILVUS_KNOWLEDGE_COLLECTION, total_vectors: 0 };
+      return { totalChunks: 0 };
     }
   }
 }

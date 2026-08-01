@@ -1,13 +1,20 @@
 // AuthService — JWT-based authentication with refresh tokens and API key support
 import { randomUUID, createHash, createHmac, timingSafeEqual } from "crypto";
+import bcrypt from "bcryptjs";
 import { prisma } from "../db.js";
 import { logger } from "@agentforge/logger";
-import type { AuthUser, AuthResponse, ApiKeyDTO, CreateApiKeyResponse } from "@agentforge/shared-types";
+import type {
+  AuthUser,
+  AuthResponse,
+  ApiKeyDTO,
+  CreateApiKeyResponse,
+} from "@agentforge/shared-types";
 
 // ---- JWT Implementation (using Web Crypto, no external JWT library) ----
 
-const JWT_SECRET = process.env.JWT_SECRET || "agentforge-dev-secret-change-in-production";
-const ACCESS_TOKEN_EXPIRY = 15 * 60;       // 15 minutes
+const JWT_SECRET =
+  process.env.JWT_SECRET || "agentforge-dev-secret-change-in-production";
+const ACCESS_TOKEN_EXPIRY = 15 * 60; // 15 minutes
 const REFRESH_TOKEN_EXPIRY = 7 * 24 * 3600; // 7 days
 
 // Base64url encode/decode
@@ -24,17 +31,26 @@ function sign(data: string, secret: string): string {
 }
 
 interface JwtPayload {
-  sub: string;      // user id
+  sub: string; // user id
   email: string;
   role: string;
+  jti: string; // unique token ID to prevent identical tokens
   iat: number;
   exp: number;
   type: "access" | "refresh";
 }
 
-function createToken(payload: Omit<JwtPayload, "iat" | "exp">, expiresIn: number): string {
+function createToken(
+  payload: Omit<JwtPayload, "iat" | "exp" | "jti">,
+  expiresIn: number,
+): string {
   const now = Math.floor(Date.now() / 1000);
-  const fullPayload = { ...payload, iat: now, exp: now + expiresIn };
+  const fullPayload = {
+    ...payload,
+    jti: randomUUID(),
+    iat: now,
+    exp: now + expiresIn,
+  };
   const header = base64urlEncode(JSON.stringify({ alg: "HS256", typ: "JWT" }));
   const body = base64urlEncode(JSON.stringify(fullPayload));
   const signature = sign(`${header}.${body}`, JWT_SECRET);
@@ -47,32 +63,66 @@ function verifyToken(token: string): JwtPayload | null {
     if (parts.length !== 3) return null;
     const [header, body, sig] = parts;
     const expectedSig = sign(`${header}.${body}`, JWT_SECRET);
-    if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig))) return null;
+    if (!timingSafeEqual(Buffer.from(sig), Buffer.from(expectedSig)))
+      return null;
 
     const payload = JSON.parse(base64urlDecode(body)) as JwtPayload;
     if (payload.exp < Math.floor(Date.now() / 1000)) return null;
     return payload;
   } catch {
+    // Expected: invalid/expired JWT or malformed token — returns null (caller treats as unauthenticated)
     return null;
   }
 }
 
-// ---- Password Hashing (SHA-256 with salt) ----
+// ---- Password Hashing (bcrypt, with transparent migration from legacy SHA-256) ----
+
+const BCRYPT_ROUNDS = 12;
 
 function hashPassword(password: string): string {
-  const salt = randomUUID();
-  const hash = createHash("sha256").update(salt + password).digest("hex");
-  return `${salt}:${hash}`;
+  return bcrypt.hashSync(password, BCRYPT_ROUNDS);
 }
 
-function verifyPassword(password: string, storedHash: string): boolean {
-  const [salt, hash] = storedHash.split(":");
-  const computed = createHash("sha256").update(salt + password).digest("hex");
-  try {
-    return timingSafeEqual(Buffer.from(computed), Buffer.from(hash));
-  } catch {
-    return false;
+/**
+ * Verify a password against a stored hash.
+ * Supports bcrypt ($2a$/$2b$ prefix) and legacy SHA-256 (salt:hash format).
+ * @returns { valid, needsUpgrade } — needsUpgrade is true if the hash uses the old format
+ */
+function verifyPassword(
+  password: string,
+  storedHash: string,
+): { valid: boolean; needsUpgrade: boolean } {
+  // bcrypt format: starts with $2a$ or $2b$
+  if (storedHash.startsWith("$2")) {
+    return {
+      valid: bcrypt.compareSync(password, storedHash),
+      needsUpgrade: false,
+    };
   }
+
+  // Legacy SHA-256 format: salt:hash
+  const parts = storedHash.split(":");
+  if (parts.length === 2) {
+    const [salt, hash] = parts;
+    const computed = createHash("sha256")
+      .update(salt + password)
+      .digest("hex");
+    try {
+      const valid = timingSafeEqual(Buffer.from(computed), Buffer.from(hash));
+      return { valid, needsUpgrade: valid }; // Upgrade on successful legacy verification
+    } catch {
+      return { valid: false, needsUpgrade: false };
+    }
+  }
+
+  return { valid: false, needsUpgrade: false };
+}
+
+/**
+ * Check if a hash needs migration (legacy format or low bcrypt rounds)
+ */
+function needsRehash(storedHash: string): boolean {
+  return !storedHash.startsWith("$2");
 }
 
 // Hash a token/API key for storage (one-way)
@@ -104,7 +154,11 @@ export class AuthService {
 
     logger.info({ userId, email }, "User registered");
 
-    const authUser: AuthUser = { id: user.id, email: user.email, role: user.role };
+    const authUser: AuthUser = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    };
     const accessToken = createToken(
       { sub: user.id, email: user.email, role: user.role, type: "access" },
       ACCESS_TOKEN_EXPIRY,
@@ -121,13 +175,28 @@ export class AuthService {
       throw new Error("Invalid email or password");
     }
 
-    if (!verifyPassword(password, user.passwordHash)) {
+    const { valid, needsUpgrade } = verifyPassword(password, user.passwordHash);
+    if (!valid) {
       throw new Error("Invalid email or password");
+    }
+
+    // Transparently upgrade legacy SHA-256 hash to bcrypt
+    if (needsUpgrade) {
+      const newHash = hashPassword(password);
+      await prisma.user.update({
+        where: { id: user.id },
+        data: { passwordHash: newHash },
+      });
+      logger.info({ userId: user.id }, "Password hash upgraded to bcrypt");
     }
 
     logger.info({ userId: user.id }, "User signed in");
 
-    const authUser: AuthUser = { id: user.id, email: user.email, role: user.role };
+    const authUser: AuthUser = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    };
     const accessToken = createToken(
       { sub: user.id, email: user.email, role: user.role, type: "access" },
       ACCESS_TOKEN_EXPIRY,
@@ -168,7 +237,11 @@ export class AuthService {
       data: { revoked: true },
     });
 
-    const authUser: AuthUser = { id: user.id, email: user.email, role: user.role };
+    const authUser: AuthUser = {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    };
     const accessToken = createToken(
       { sub: user.id, email: user.email, role: user.role, type: "access" },
       ACCESS_TOKEN_EXPIRY,
@@ -183,7 +256,11 @@ export class AuthService {
     // Try JWT first
     const jwtPayload = verifyToken(token);
     if (jwtPayload && jwtPayload.type === "access") {
-      return { id: jwtPayload.sub, email: jwtPayload.email, role: jwtPayload.role };
+      return {
+        id: jwtPayload.sub,
+        email: jwtPayload.email,
+        role: jwtPayload.role,
+      };
     }
 
     // Try API key
@@ -199,7 +276,11 @@ export class AuthService {
         where: { id: apiKey.id },
         data: { lastUsed: new Date() },
       });
-      return { id: apiKey.user.id, email: apiKey.user.email, role: apiKey.user.role };
+      return {
+        id: apiKey.user.id,
+        email: apiKey.user.email,
+        role: apiKey.user.role,
+      };
     }
 
     return null;
@@ -223,7 +304,10 @@ export class AuthService {
 
   // ---- API Key Management ----
 
-  async createApiKey(userId: string, name: string): Promise<CreateApiKeyResponse> {
+  async createApiKey(
+    userId: string,
+    name: string,
+  ): Promise<CreateApiKeyResponse> {
     const key = `af_${randomUUID().replace(/-/g, "")}`;
     const id = randomUUID();
     const keyHash = hashToken(key);

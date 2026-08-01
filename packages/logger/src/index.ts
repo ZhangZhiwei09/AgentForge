@@ -17,10 +17,7 @@ export function getRequestContext(): RequestContext | undefined {
 }
 
 /** Run a callback within a request context — used by request-id middleware */
-export function runWithRequestContext<T>(
-  ctx: RequestContext,
-  fn: () => T,
-): T {
+export function runWithRequestContext<T>(ctx: RequestContext, fn: () => T): T {
   return contextStore.run(ctx, fn);
 }
 

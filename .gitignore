@@ -17,3 +17,20 @@ venv/
 .trae/
 .DS_Store
 Thumbs.db
+
+# Runtime eval logs
+apps/logs/
+apps/server/logs/
+
+# Runtime data (OrderService persistence — auto-generated from seed)
+apps/server/data/
+
+# Claude Code session data
+.claude/agent-memory/
+.claude/worktrees/
+
+# Test coverage reports
+apps/server/coverage/
+
+# Build artifacts
+*.tar.gz

@@ -1,19 +1,19 @@
 {
-    "name": "@agentforge/sdk",
-    "version": "0.0.1",
-    "private": true,
-    "main": "./src/index.ts",
-    "types": "./src/index.ts",
-    "scripts": {
-        "build": "tsc --noEmit",
-        "typecheck": "tsc --noEmit",
-        "clean": "rimraf dist",
-        "lint": "eslint src/"
-    },
-    "dependencies": {
-        "@agentforge/shared-types": "workspace:*"
-    },
-    "devDependencies": {
-        "typescript": "^5.7.0"
-    }
+  "name": "@agentforge/sdk",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "scripts": {
+    "build": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "clean": "rimraf dist",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agentforge/shared-types": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0"
+  }
 }

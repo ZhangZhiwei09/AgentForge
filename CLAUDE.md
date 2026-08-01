@@ -1,178 +1,73 @@
-# CLAUDE.md
+# AgentForge
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
-
-## Common Commands
-
-```bash
-# Install all dependencies
-pnpm install
-
-# Start infrastructure (PostgreSQL, pgAdmin, Milvus) — once per machine
-pnpm infra:up
-pnpm infra:down    # Stop infrastructure
-pnpm infra:restart # Restart infrastructure
-
-# Start backend + frontend in dev mode
-pnpm dev
-
-# Or start separately in different terminals:
-pnpm server:dev     # Backend on :8000 (TS Hono)
-pnpm web:dev        # Frontend on :5173
-
-# One-click script (Windows only — does infra + setup + dev all at once)
-pnpm start
-
-# Build all packages
-pnpm build
-
-# Typecheck all packages
-pnpm typecheck
-
-# Lint all packages
-pnpm lint
-
-# Format all source files
-pnpm format
-
-# Database — from root
-pnpm db:migrate     # Run Prisma migrations
-pnpm db:seed        # Seed users + knowledge base
-pnpm db:studio      # Open Prisma Studio GUI
-pnpm db:generate    # Regenerate Prisma Client
-
-# TS backend — from apps/server/
-cd apps/server
-pnpm dev            # Dev with hot reload (tsx watch)
-
-# Single package dev — from root
-pnpm --filter @agentforge/web dev
-pnpm --filter @agentforge/web build
-pnpm --filter @agentforge/server dev
-```
-
-**Environment setup:** Copy `apps/server/.env` (created during setup) and fill in API keys. Copy `packages/database/.env` to the same and set the DATABASE_URL.
-
-### Startup Flow (Recommended)
-
-The recommended way to start is **layered**:
-
-```bash
-# 1st terminal: Start Docker infrastructure (once, stays running)
-pnpm infra:up
-
-# 2nd terminal: Generate Prisma client + run migrations (first time)
-pnpm db:generate
-pnpm db:migrate
-
-# 3rd terminal: Start backend
-pnpm server:dev
-
-# 4th terminal: Start frontend
-pnpm web:dev
-```
-
-This way each component is independently controllable — restart the backend without touching the DB, rebuild the frontend without restarting the server, etc.
+渐进式 AI Agent 平台。pnpm + Turborepo monorepo。
 
 ## Architecture
 
-AgentForge is a **pnpm + Turborepo monorepo** building a ChatGPT clone as the foundation (V1) for a progressive AI agent platform. The roadmap spans platform engineering (P0-P2) and agent capability phases (V5-V10). Completed phases are marked with ✅ in both this file and `plan.md`.
+Agent Runtime 是系统核心。统一 `AgentExecutor`（ReAct），5-route 分类器（SAFETY/CHAT/TASK/HUMAN/DIAGNOSIS）。新增能力必须复用现有 Runtime，禁止绕过 Agent Runtime 创建平行执行链路。
 
-**Evolution path:** V1 ChatGPT Clone → V2 Memory → V3 RAG → V4 Tool Calling → P0 Platform Foundation → P1 Agent Kernel → V5 Voice → V6 Workflow → V7-V8 Browser Agent → V9 Multi-Agent → V10 MCP
+## Type Safety
 
-### Package Layout
+- 业务代码禁止 `any`；第三方库类型缺失时允许 `unknown` 或临时 `any`，必须标注原因
+- 禁止无注释 `as unknown as`
+- 外部数据先校验再获得类型（Prisma Json、HTTP、LLM 输出、Redis、Queue、文件系统、MCP 返回值）
+- 优先：Prisma 类型推导 → Zod `safeParse` → Type Guard → `instanceof` → Discriminated Union
+- 禁止通过类型断言掩盖设计问题
 
-| Package | Runtime | Purpose |
-|---------|---------|---------|
-| `apps/web` | React 19 / Vite 6 / TypeScript | Chat UI on port 5173 |
-| `apps/server` | Node.js 20+ / Hono 4 / TypeScript | Backend API on port 8000 |
-| `apps/api` | Python 3.12 / FastAPI | **Retained for reference only — not running** |
-| `packages/database` | Prisma 6 | Shared Prisma schema + client singleton (`@agentforge/database`) |
-| `packages/shared-types` | TypeScript (type-only) | Shared type definitions — no runtime code |
-| `packages/shared-prompts` | TypeScript | Centralized prompt registry |
-| `packages/sdk` | TypeScript | API client (`AgentForgeClient`) + SSE streaming |
+## Reliability
 
-### Data Flow
+- 禁止业务逻辑中的空 `catch {}`
+- catch 必须记录日志或显式说明忽略原因
+- 不允许静默吞掉错误
+- `JSON.parse` 等可能失败的操作必须提供降级策略
+
+## Refactoring
+
+- 优先最小改动
+- 不为消除告警而重构
+- 不为拆文件而拆文件
+- 外部 API 保持兼容
+- 大规模重构前先提交设计方案
+
+## Workflow
+
+复杂需求（新功能、架构调整、跨 3 个以上文件修改、数据库 Schema 变更、API 协议变更）走 gated pipeline：
 
 ```
-Browser (React) ←SSE/HTTP→ Hono (8000) → LLMProvider (abstract) → OpenAI | DeepSeek
-                                    ↓
-                               ChatService
-                              ↙           ↘
-                 ToolRegistry          @agentforge/database (Prisma)
-                                           ↓
-                                     PostgreSQL 16
-                                           ↓
-                                   Milvus Vector DB
+Architect → Architecture Review → Implementation → Compliance Review → Code Review
 ```
 
-**Streaming path:** Frontend calls `POST /api/chat` → Hono SSE via `streamSSE()` yields `data: {json}\n\n` lines → `AgentForgeClient.streamChat()` parses the `ReadableStream` into an `AsyncGenerator<ChatStreamChunk>` → Zustand store accumulates tokens into messages.
+P0 问题禁止进入下一阶段。
 
-### Key Design Decisions
+以下情况可直接进入 Implementation：Bug Fix、Config、Docs、小型重构。
 
-1. **Provider abstraction** (`apps/server/src/providers/`): All LLM calls go through the `LLMProvider` interface (`streamChat()`, `listModels()`). Adding a new provider means implementing those two methods — business logic in `chat.ts` never changes.
+## Conventions
 
-2. **Prisma as shared package** (`packages/database/`): Single source of truth for the data model. All packages import `prisma` from `@agentforge/database`. Migrations are managed independently via `pnpm db:migrate`.
+- **提交信息**：英文，Conventional Commits（`feat:` / `fix:` / `chore:` / `refactor:` / `docs:` / `test:`），清晰描述 what & why
+- **中文 Prompt**：所有 LLM-facing 的 prompt 和 system message 必须使用中文，详见 `docs/engineering/chinese-prompts.md`
+- **类型安全**：详见 `docs/engineering/type-safety.md`
 
-3. **Single-tenant MVP (temporary):** A default user (`00000000-0000-0000-0000-000000000001`) is auto-seeded on startup. All conversations belong to this user. **This will be replaced by P0-1 (Auth & Multi-Tenancy)** — JWT-based authentication with per-user data isolation.
+## Docs (Load On Demand)
 
-4. **Conversation titles** are auto-generated from the first line of the first user message (max 80 chars).
+仅在当前任务需要时读取对应文档，禁止一次性加载全部文档。
 
-5. **Database port is 5434** (not the default 5432) to avoid conflicts.
+Architecture:
+  docs/architecture/routing.md
+  docs/architecture/knowledge-hybrid-retrieval.md
+  docs/runtime/execution-runtime-v1.md
+  docs/agent-runtime.md
 
-6. **Frontend state:** Zustand for UI state, TanStack Query for server data. Three-panel layout: sidebar | chat area | debug panel.
+Engineering:
+  docs/engineering/type-safety.md
+  docs/engineering/chinese-prompts.md
 
-7. **Vite proxies** `/api` requests to `localhost:8000` in dev mode — no changes needed when switching backends.
+Decisions:
+  docs/decisions/adr-001-remove-langgraph.md
 
-8. **UUID generation** uses Node.js built-in `crypto.randomUUID()` — no external uuid package needed.
+Process:
+  docs/agents/pipeline.md
 
-9. **SSE format** is strictly `data: {json}\n\n` + `data: [DONE]\n\n` — the frontend SDK's stream parser depends on this exact format.
-
-10. **DB schema is baseline-introspected** from the existing Python Alembic tables. The Prisma schema uses `@@map`/`@map` for snake_case column names. IDs are `@db.VarChar(36)` (not UUID type), so UUIDs are generated in application code.
-
-11. **Tool Calling** (`apps/server/src/tools/`): Server-side multi-round tool calling loop in `ChatService.streamChat()` (max 5 rounds). Tools are registered via `ToolRegistry` singleton and sent to LLM only when explicitly requested via `tools` param. The SSE protocol extends with `tool_call` and `tool_result` event types. Built-in tools include `get_current_time`, `calculator`, and `web_search` (stub). The `LLMProvider` interface was extended with `ChatMessage` type (supporting `tool_calls` and `tool_call_id` fields) and an optional `tools` parameter.
-
-### Python Backend (Retained)
-
-The original Python FastAPI backend lives in `apps/api/` and is preserved for reference. It is not included in the Turbo pipeline (`turbo dev` filters `@agentforge/server` + `@agentforge/web` only). The Python code, Alembic migrations, and models remain untouched.
-
-### Keeping CLAUDE.md in Sync with plan.md
-
-When a development phase from `plan.md` is completed:
-1. Mark the phase with ✅ in `plan.md` (version roadmap + acceptance criteria)
-2. Update the "Version Roadmap" section above with the same ✅ and a brief description of what was built
-3. If the phase introduced new packages, commands, or architectural patterns, add them to the relevant sections
-
-This ensures CLAUDE.md always reflects the current state of the project, not just the original plan.
-
-### Version Roadmap (V1→V10 + P0-P2)
-
-The `plan.md` defines the full V1→V10 + P0-P2 roadmap. Completed phases are marked with ✅. When a new phase is completed, update both `plan.md` and this section.
-
-**Platform Foundation:**
-- **P0-1 Auth & Multi-Tenancy:** JWT authentication, API keys, per-user data isolation
-- **P0-2 Structured Logging:** pino-based structured logging with correlation IDs
-- **P0-3 Testing:** vitest unit + integration tests with CI enforcement
-- **P0-4 CI/CD:** GitHub Actions pipeline (typecheck → lint → test → build)
-- **P0-5 Security:** Rate limiting, Zod validation, content safety
-- **P1-1 Background Jobs:** BullMQ job queue for async memory extraction
-- **P1-2 Observability:** Prometheus metrics + OpenTelemetry tracing
-- **P1-3 Agent Reasoning:** ReAct loop with structured decision output
-- **P1-4 Working Memory:** Agent scratchpad for multi-step task context
-- **P1-5 Human-in-the-Loop:** Approval gates for high-risk tool operations
-- **P1-6 Tool Ecosystem:** Code sandbox, 10+ production tools with timeouts/circuit-breakers
-
-**Agent Capabilities:**
-- **V1 ChatGPT Clone:** Multi-turn chat, streaming, model switching, provider abstraction ✅
-- **V2 Memory:** PostgreSQL + Milvus for long-term memory ✅
-- **V3 RAG:** Document ingestion, hybrid search, knowledge UI, customer chat ✅
-- **V4 Tool Calling:** Tool registry and execution engine ✅
-- **V5 Voice Agent:** WebSocket real-time audio, ASR/TTS, interruption handling
-- **V6 Workflow Engine:** DAG-based orchestration, checkpoint/resume, human approval nodes
-- **V7 Browser Extension:** Chrome extension companion with page context awareness
-- **V8 Browser Agent:** Playwright sandbox, DOM understanding, web automation
-- **V9 Multi-Agent:** Role-based agent teams, message bus, 3 collaboration patterns
-- **V10 MCP Ecosystem:** MCP Server + Client, dynamic tool discovery, hot-reload
-
-**Beyond V10:**
-- Agent evaluation & benchmarking, fine-tuning pipeline, multi-modal, K8s deployment
+Project:
+  docs/operations/development.md
+  docs/operations/backup-restore.md
+  docs/operations/deployment.md

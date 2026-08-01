@@ -1,10 +1,12 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [pgvector(map: "vector", schema: "public")]
 }
 
 model User {
@@ -16,9 +18,13 @@ model User {
   createdAt     DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt     DateTime       @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
   conversations Conversation[]
-  memories      Memory[]
   refreshTokens RefreshToken[]
   apiKeys       ApiKey[]
+  workflows     Workflow[]
+  workflowRuns  WorkflowRun[]
+  agentTeams    AgentTeam[]
+  agentTeamRuns AgentTeamRun[]
+  appProjects   AppProject[]
 
   @@map("users")
 }
@@ -59,14 +65,22 @@ model Conversation {
   userId    String    @map("user_id") @db.VarChar(36)
   createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt DateTime  @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  type      String    @default("chat") @db.VarChar(32)
-  sessionId String?   @map("session_id") @db.VarChar(64)
-  user      User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  memories  Memory[]
-  messages  Message[]
-
+  type           String         @default("chat") @db.VarChar(32)
+  sessionId      String?        @map("session_id") @db.VarChar(64)
+  intent         String?        @db.VarChar(100)
+  rating         String?        @db.VarChar(20)
+  status         String?        @default("active") @db.VarChar(20)
+  customerMeta   Json?          @map("customer_meta")
+  user           User           @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  messages       Message[]
+  agentSessions  AgentSession[]
+  ratings        SatisfactionRating[]
+  approvals      AgentApproval[]
+  memory         ConversationMemory?
   @@index([sessionId], map: "ix_conversations_session_id")
   @@index([userId], map: "ix_conversations_user_id")
+  @@index([userId, updatedAt], map: "ix_conversations_user_updated")
+  @@index([type, createdAt], map: "ix_conversations_type_created")
   @@map("conversations")
 }
 
@@ -74,42 +88,46 @@ model Message {
   id             String       @id @db.VarChar(36)
   conversationId String       @map("conversation_id") @db.VarChar(36)
   role           String       @db.VarChar(16)
+  type           String       @default("text") @db.VarChar(20)
   content        String
+  metadata       Json         @default("{}")
   model          String?      @db.VarChar(64)
   createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
   conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([conversationId], map: "ix_messages_conversation_id")
+  @@index([conversationId, createdAt], map: "ix_messages_conversation_created")
   @@map("messages")
-}
-
-model Memory {
-  id             String        @id @db.VarChar(36)
-  userId         String        @map("user_id") @db.VarChar(36)
-  type           memory_type
-  content        String
-  importance     Float
-  embeddingId    Int?          @map("embedding_id")
-  metadata       Json?         @map("metadata")
-  conversationId String?       @map("conversation_id") @db.VarChar(36)
-  createdAt      DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt      DateTime      @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  user           User          @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-
-  @@index([userId], map: "ix_memories_user_id")
-  @@map("memories")
 }
 
 model KnowledgeBase {
   id          String              @id @db.VarChar(36)
   name        String              @db.VarChar(255)
   description String?
+  category    String?             @db.VarChar(100)
   enabled     Boolean             @default(true)
   createdAt   DateTime?           @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt   DateTime?           @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
-  chunks      KnowledgeChunk[]
-  documents   KnowledgeDocument[]
+
+  // V3.1: Token-aware 分片参数（nullable，null 时使用环境默认值）
+  chunkSizeTokens    Int?    @map("chunk_size_tokens")
+  chunkOverlapTokens Int?    @map("chunk_overlap_tokens")
+
+  // V3.4: 切分模式与自定义分隔符
+  separatorMode   String? @default("auto") @map("separator_mode") @db.VarChar(20)  // "auto" | "custom"
+  customSeparator String? @map("custom_separator") @db.VarChar(100)               // 如 "\n## "、"\n\n"
+
+  // V3.4: 层次分块（parent-child chunking）
+  chunkStructure    String? @default("paragraph") @map("chunk_structure") @db.VarChar(20)  // "paragraph" | "hierarchical"
+  childChunkSize    Int?    @map("child_chunk_size_tokens")                                // 子分块 token 数
+  childChunkOverlap Int?    @map("child_chunk_overlap_tokens")                             // 子分块 overlap
+
+  // V3.5: 文本预处理规则（参考 Dify PRE_PROCESSING_RULES）
+  removeExtraSpaces Boolean  @default(true)  @map("remove_extra_spaces")
+  removeUrlsEmails  Boolean  @default(false) @map("remove_urls_emails")
+
+  chunks    KnowledgeChunk[]
+  documents KnowledgeDocument[]
 
   @@map("knowledge_bases")
 }
@@ -120,10 +138,35 @@ model KnowledgeDocument {
   title           String           @db.VarChar(500)
   content         String
   chunkCount      Int              @default(0) @map("chunk_count")
-  status          String           @default("pending") @db.VarChar(20)
+  status          String           @default("pending") @db.VarChar(50)
   enabled         Boolean          @default(true)
   createdAt       DateTime?        @default(now()) @map("created_at") @db.Timestamptz(6)
   updatedAt       DateTime?        @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  // V2.2: 文件上传元数据（nullable，手动创建的文档为 null）
+  originalFilename  String?        @map("original_filename") @db.VarChar(500)
+  originalFileType  String?        @map("original_file_type") @db.VarChar(100)
+  originalFileSize  Int?           @map("original_file_size")
+  originalFilePath  String?        @map("original_file_path") @db.VarChar(1000)
+
+  // V2.2: 失败原因与重试
+  errorMessage      String?        @map("error_message") @db.VarChar(2000)
+  retryCount        Int            @default(0) @map("retry_count")
+
+  // V2.2: 质量标签（good / low，由 Worker quality gate 判定）
+  qualityLabel      String?        @map("quality_label") @db.VarChar(20)
+
+  // V3.1: 处理进度详情（JSON：{phase, progress, total, message, startedAt}）
+  processingDetail  String?        @map("processing_detail")
+
+  // V3.2: 阶段时间戳 — 参考 Dify Document 模型的 per-stage timestamp 设计
+  processingStartedAt      DateTime? @map("processing_started_at") @db.Timestamptz(6)
+  downloadingCompletedAt   DateTime? @map("downloading_completed_at") @db.Timestamptz(6)
+  parsingCompletedAt       DateTime? @map("parsing_completed_at") @db.Timestamptz(6)
+  normalizingCompletedAt   DateTime? @map("normalizing_completed_at") @db.Timestamptz(6)
+  chunkingCompletedAt      DateTime? @map("chunking_completed_at") @db.Timestamptz(6)
+  embeddingCompletedAt     DateTime? @map("embedding_completed_at") @db.Timestamptz(6)
+
   chunks          KnowledgeChunk[]
   knowledgeBase   KnowledgeBase    @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
@@ -138,23 +181,413 @@ model KnowledgeChunk {
   chunkIndex      Int               @map("chunk_index")
   content         String
   tokenCount      Int               @default(0) @map("token_count")
-  milvusId        BigInt?           @map("milvus_id")
+  embedding       Unsupported("vector(1024)")?  // PGVector 语义向量（bge-m3 / text-embedding-v3 = 1024 维）
   enabled         Boolean           @default(true)
   created_at      DateTime?         @default(now()) @db.Timestamptz(6)
-  document        KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  knowledgeBase   KnowledgeBase     @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  // V2.2: 来源类型与质量标签（供未来 search bias 使用）
+  sourceType      String?           @map("source_type") @db.VarChar(20)
+  qualityLabel    String?           @map("quality_label") @db.VarChar(20)
+
+  // V3.4: 层次分块 — 子分块指向父分块（nullable，普通分块为 null）
+  parentChunkId String?         @map("parent_chunk_id") @db.VarChar(36)
+  parentChunk   KnowledgeChunk? @relation("ChildChunks", fields: [parentChunkId], references: [id], onDelete: SetNull)
+  childChunks   KnowledgeChunk[] @relation("ChildChunks")
+
+  document      KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  knowledgeBase KnowledgeBase     @relation(fields: [knowledgeBaseId], references: [id], onDelete: NoAction, onUpdate: NoAction)
 
   @@index([documentId], map: "ix_knowledge_chunks_doc_id")
   @@index([knowledgeBaseId], map: "ix_knowledge_chunks_kb_id")
   @@map("knowledge_chunks")
 }
 
-model alembic_version {
-  version_num String @id(map: "alembic_version_pkc") @db.VarChar(32)
+// V3.5: 检索审计日志（hit-testing / 搜索查询记录）
+model KnowledgeQueryLog {
+  id        String   @id @db.VarChar(36)
+  kbId      String   @map("kb_id") @db.VarChar(36)
+  query     String   @db.VarChar(1000)
+  method    String   @default("hybrid") @db.VarChar(20)  // "hybrid" | "semantic" | "keyword"
+  results   Int      @default(0)
+  source    String   @default("hit_testing") @db.VarChar(20)  // "hit_testing" | "search" | "agent"
+  elapsedMs Int      @default(0) @map("elapsed_ms")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([kbId], map: "ix_query_log_kb")
+  @@index([createdAt], map: "ix_query_log_created")
+  @@map("knowledge_query_logs")
 }
 
-enum memory_type {
-  episodic
-  semantic
-  preference
+// V12: 意图语义分类样本表（Embedding + pgvector k-NN 路由使用）
+model IntentSample {
+  id        String   @id @db.VarChar(36)
+  route     String   @db.VarChar(20)       // SAFETY|CHAT|TASK|HUMAN|DIAGNOSIS
+  text      String   @db.VarChar(2000)     // 用户典型表达
+  embedding Unsupported("vector(1024)")?   // 文本向量（bge-m3 / text-embedding-v3）
+  source    String   @default("manual") @db.VarChar(20)  // manual|feedback|synthetic
+  active    Boolean  @default(true)        // 软删除/禁用
+  usageCount Int     @default(0) @map("usage_count")  // L2 匹配命中次数
+  lastUsedAt DateTime? @map("last_used_at")
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@index([route], map: "ix_intent_samples_route")
+  @@index([active], map: "ix_intent_samples_active")
+  @@map("intent_samples")
+}
+
+// V12: 意图分类审计日志
+model RouteClassificationLog {
+  id          String   @id @db.VarChar(36)
+  sessionId   String?  @map("session_id") @db.VarChar(64)
+  conversationId String? @map("conversation_id") @db.VarChar(36)
+  userMessage String   @map("user_message") @db.VarChar(2000)
+  route       String   @db.VarChar(20)       // 最终路由结果
+  confidence  Float
+  source      String   @db.VarChar(20)       // keyword|l2_semantic|l3_fewshot|llm|fallback
+  topMatches  Json?    @map("top_matches")   // L2 匹配到的 Top-K 样本
+  latencyMs   Int      @default(0) @map("latency_ms")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  @@index([source], map: "ix_route_classification_log_source")
+  @@index([route], map: "ix_route_classification_log_route")
+  @@index([sessionId], map: "ix_route_classification_log_session")
+  @@index([createdAt], map: "ix_route_classification_log_created")
+  @@map("route_classification_logs")
+}
+
+model KnowledgeRegressionTestSet {
+  id          String   @id @db.VarChar(36)
+  kbId        String   @map("kb_id") @db.VarChar(36)
+  name        String   @db.VarChar(255)
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  cases KnowledgeRegressionCase[]
+  runs  KnowledgeRegressionRun[]
+
+  @@index([kbId], map: "ix_regression_test_sets_kb")
+  @@map("knowledge_regression_test_sets")
+}
+
+model KnowledgeRegressionCase {
+  id             String   @id @db.VarChar(36)
+  testSetId      String   @map("test_set_id") @db.VarChar(36)
+  kbId           String   @map("kb_id") @db.VarChar(36)
+  name           String   @db.VarChar(255)
+  query          String   @db.VarChar(1000)
+  expectedTopK   Int      @default(5) @map("expected_top_k")
+  minScore       Float?   @map("min_score")
+  searchMethod   String   @default("hybrid") @map("search_method") @db.VarChar(20)
+  topK           Int      @default(10) @map("top_k")
+  rerankingEnable Boolean @default(true) @map("reranking_enable")
+  scoreThreshold Float    @default(0) @map("score_threshold")
+
+  expectedDocTitles       Json @default("[]") @map("expected_doc_titles")
+  expectedDocIds          Json @default("[]") @map("expected_doc_ids")
+  requiredText            Json @default("[]") @map("required_text")
+  forbiddenText           Json @default("[]") @map("forbidden_text")
+  promptRequiredContextText Json @default("[]") @map("prompt_required_context_text")
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  testSet KnowledgeRegressionTestSet @relation(fields: [testSetId], references: [id], onDelete: Cascade)
+  items   KnowledgeRegressionRunItem[]
+
+  @@index([testSetId], map: "ix_regression_cases_test_set")
+  @@index([kbId], map: "ix_regression_cases_kb")
+  @@map("knowledge_regression_cases")
+}
+
+model KnowledgeRegressionRun {
+  id           String    @id @db.VarChar(36)
+  testSetId    String    @map("test_set_id") @db.VarChar(36)
+  kbId         String    @map("kb_id") @db.VarChar(36)
+  status       String    @default("running") @db.VarChar(20)
+  totalCases   Int       @default(0) @map("total_cases")
+  passedCases  Int       @default(0) @map("passed_cases")
+  failedCases  Int       @default(0) @map("failed_cases")
+  hitRate      Float     @default(0) @map("hit_rate")
+  averageRank  Float?    @map("average_rank")
+  averageElapsedMs Float? @map("average_elapsed_ms")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  completedAt  DateTime? @map("completed_at") @db.Timestamptz(6)
+
+  testSet KnowledgeRegressionTestSet @relation(fields: [testSetId], references: [id], onDelete: Cascade)
+  items   KnowledgeRegressionRunItem[]
+
+  @@index([testSetId], map: "ix_regression_runs_test_set")
+  @@index([kbId], map: "ix_regression_runs_kb")
+  @@index([createdAt], map: "ix_regression_runs_created")
+  @@map("knowledge_regression_runs")
+}
+
+model KnowledgeRegressionRunItem {
+  id              String   @id @db.VarChar(36)
+  runId           String   @map("run_id") @db.VarChar(36)
+  caseId          String   @map("case_id") @db.VarChar(36)
+  passed          Boolean
+  rank            Int?
+  score           Float?
+  matchedDocId    String?  @map("matched_doc_id") @db.VarChar(36)
+  failureReason   String?  @map("failure_reason") @db.VarChar(2000)
+  resultsSnapshot Json     @default("[]") @map("results_snapshot")
+  promptSnapshot  String?  @map("prompt_snapshot")
+  elapsedMs       Int      @default(0) @map("elapsed_ms")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  run      KnowledgeRegressionRun  @relation(fields: [runId], references: [id], onDelete: Cascade)
+  testCase KnowledgeRegressionCase @relation(fields: [caseId], references: [id], onDelete: Cascade)
+
+  @@index([runId], map: "ix_regression_run_items_run")
+  @@index([caseId], map: "ix_regression_run_items_case")
+  @@map("knowledge_regression_run_items")
+}
+
+model AgentSession {
+  id                String       @id @db.VarChar(36)
+  conversationId    String       @map("conversation_id") @db.VarChar(36)
+  task              String
+  status            String       @default("running") @db.VarChar(20)
+  scratchpad        Json         @default("[]")
+  finalSummary      String?      @map("final_summary")
+  compressedSummary String?      @map("compressed_summary")
+  runtimeState      Json?        @map("runtime_state")
+  startedAt         DateTime     @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt       DateTime?    @map("completed_at") @db.Timestamptz(6)
+  conversation      Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  approvals         AgentApproval[]
+
+  @@index([conversationId], map: "ix_agent_sessions_conversation_id")
+  @@map("agent_sessions")
+}
+
+model AgentApproval {
+  id              String        @id @db.VarChar(36)
+  sessionId       String        @map("session_id") @db.VarChar(36)
+  conversationId  String        @map("conversation_id") @db.VarChar(36)
+  stepNumber      Int           @map("step_number")
+  toolName        String        @map("tool_name") @db.VarChar(128)
+  toolArgs        Json          @map("tool_args")
+  riskLevel       String        @map("risk_level") @db.VarChar(20)
+  reason          String        @db.VarChar(500)
+  status          String        @default("pending") @db.VarChar(20)
+  approvedBy      String?       @map("approved_by") @db.VarChar(36)
+  modifiedArgs    Json?         @map("modified_args")
+  rejectionReason String?       @map("rejection_reason") @db.VarChar(500)
+  timeoutMs       Int           @default(300000) @map("timeout_ms")
+  requestedAt     DateTime      @default(now()) @map("requested_at") @db.Timestamptz(6)
+  decidedAt       DateTime?     @map("decided_at") @db.Timestamptz(6)
+  session         AgentSession  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  conversation    Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId], map: "ix_agent_approvals_session_id")
+  @@index([status], map: "ix_agent_approvals_status")
+  @@map("agent_approvals")
+}
+
+model SatisfactionRating {
+  id             String       @id @db.VarChar(36)
+  conversationId String       @map("conversation_id") @db.VarChar(36)
+  messageId      String?      @map("message_id") @db.VarChar(36)
+  rating         String       @db.VarChar(20)
+  comment        String?
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId], map: "ix_satisfaction_ratings_conversation_id")
+  @@index([createdAt], map: "ix_satisfaction_ratings_created_at")
+  @@index([rating], map: "ix_satisfaction_ratings_rating")
+  @@map("satisfaction_ratings")
+}
+
+model ConversationMemory {
+  id                     String   @id @db.VarChar(36)
+  conversationId         String   @map("conversation_id") @db.VarChar(36)
+  summary                String?  @db.Text
+  coveredUntilMessageId  String?  @map("covered_until_message_id") @db.VarChar(36)
+  tokenCount             Int      @default(0) @map("token_count")
+  memoryType             String   @default("summary") @map("memory_type") @db.VarChar(20)
+  createdAt              DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  conversation           Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@unique([conversationId], map: "ix_conversation_memory_conv_id")
+  @@index([memoryType], map: "ix_conversation_memory_type")
+  @@map("conversation_memory")
+}
+
+model Workflow {
+  id          String   @id @db.VarChar(36)
+  userId      String   @map("user_id") @db.VarChar(36)
+  name        String   @db.VarChar(200)
+  description String?
+  definition  Json
+  version     Int      @default(1)
+  status      String   @default("draft") @db.VarChar(20)
+  tags        String[] @default([])
+  runCount    Int      @default(0) @map("run_count")
+  lastRunAt   DateTime? @map("last_run_at") @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  runs        WorkflowRun[]
+
+  @@index([userId, status], map: "ix_workflows_user_status")
+  @@index([userId], map: "ix_workflows_user_id")
+  @@map("workflows")
+}
+
+model WorkflowRun {
+  id            String    @id @db.VarChar(36)
+  workflowId    String    @map("workflow_id") @db.VarChar(36)
+  userId        String    @map("user_id") @db.VarChar(36)
+  status        String    @default("running") @db.VarChar(20)
+  input         Json      @default("{}")
+  output        Json?
+  checkpoint    Json?
+  currentStepId String?   @map("current_step_id") @db.VarChar(100)
+  progress      Json      @default("{}")
+  error         String?
+  durationMs    Int?      @map("duration_ms")
+  startedAt     DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt   DateTime? @map("completed_at") @db.Timestamptz(6)
+  workflow      Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  user          User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  stepLogs      WorkflowStepLog[]
+
+  @@index([workflowId], map: "ix_workflow_runs_workflow")
+  @@index([userId, status], map: "ix_workflow_runs_user_status")
+  @@index([startedAt], map: "ix_workflow_runs_started")
+  @@map("workflow_runs")
+}
+
+model WorkflowStepLog {
+  id          String    @id @db.VarChar(36)
+  runId       String    @map("run_id") @db.VarChar(36)
+  stepId      String    @map("step_id") @db.VarChar(100)
+  stepType    String    @map("step_type") @db.VarChar(50)
+  status      String    @default("pending") @db.VarChar(20)
+  input       Json?
+  output      Json?
+  error       String?
+  retryCount  Int       @default(0) @map("retry_count")
+  durationMs  Int?      @map("duration_ms")
+  tokensUsed  Int       @default(0) @map("tokens_used")
+  events      Json      @default("[]")
+  startedAt   DateTime? @map("started_at") @db.Timestamptz(6)
+  completedAt DateTime? @map("completed_at") @db.Timestamptz(6)
+  run         WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId], map: "ix_workflow_step_logs_run")
+  @@index([runId, stepId], map: "ix_workflow_step_logs_run_step")
+  @@map("workflow_step_logs")
+}
+
+model AgentTeam {
+  id          String   @id @db.VarChar(36)
+  userId      String   @map("user_id") @db.VarChar(36)
+  name        String   @db.VarChar(200)
+  description String?
+  definition  Json
+  tags        Json     @default("[]")
+  status      String   @default("draft") @db.VarChar(20)
+  version     Int      @default(1)
+  runCount    Int      @default(0) @map("run_count")
+  lastRunAt   DateTime? @map("last_run_at") @db.Timestamptz(6)
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  runs        AgentTeamRun[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([updatedAt])
+  @@map("agent_teams")
+}
+
+model AgentTeamRun {
+  id             String    @id @db.VarChar(36)
+  teamId         String    @map("team_id") @db.VarChar(36)
+  userId         String    @map("user_id") @db.VarChar(36)
+  conversationId String?   @map("conversation_id") @db.VarChar(36)
+  task           String    @db.Text
+  status         String    @default("running") @db.VarChar(20)
+  mode           String    @db.VarChar(20)
+  messages       Json      @default("[]")
+  blackboard     Json      @default("{}")
+  checkpoint     Json?
+  output         Json?
+  error          String?   @db.Text
+  roundsCount    Int       @default(0) @map("rounds_count")
+  durationMs     Int?      @map("duration_ms")
+  startedAt      DateTime  @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz(6)
+  team           AgentTeam @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  user           User      @relation(fields: [userId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+
+  @@index([teamId])
+  @@index([userId])
+  @@index([status])
+  @@index([startedAt])
+  @@map("agent_team_runs")
+}
+
+model AppProject {
+  id          String   @id @db.VarChar(36)
+  userId      String   @map("user_id") @db.VarChar(36)
+  name        String   @db.VarChar(255)
+  description String?
+  status      String   @default("draft") @db.VarChar(32) // draft, generating, previewing, deployed, archived
+  type        String   @default("frontend") @db.VarChar(32) // frontend, fullstack
+  framework   String   @default("react") @db.VarChar(32) // react, vue, html, nextjs
+  previewUrl  String?  @map("preview_url") @db.VarChar(500)
+  deployUrl   String?  @map("deploy_url") @db.VarChar(500)
+  metadata    Json     @default("{}")
+  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  files       ProjectFile[]
+  runs        AppGenRun[]
+
+  @@index([userId, updatedAt])
+  @@map("app_projects")
+}
+
+model ProjectFile {
+  id        String   @id @db.VarChar(36)
+  projectId String   @map("project_id") @db.VarChar(36)
+  path      String   @db.VarChar(500)
+  content   String   @db.Text
+  language  String   @db.VarChar(32) // tsx, ts, css, html, json, py
+  size      Int      @default(0)
+  version   Int      @default(1)
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+  project   AppProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@unique([projectId, path])
+  @@index([projectId])
+  @@map("project_files")
+}
+
+model AppGenRun {
+  id             String   @id @db.VarChar(36)
+  projectId      String   @map("project_id") @db.VarChar(36)
+  prompt         String   @db.Text
+  status         String   @default("running") @db.VarChar(32) // running, completed, failed
+  result         Json?    // { files_created: string[], tokens_used: number, errors: string[] }
+  agentSessionId String?  @map("agent_session_id") @db.VarChar(36)
+  startedAt      DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
+  completedAt    DateTime? @map("completed_at") @db.Timestamptz(6)
+  project        AppProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+  @@map("app_gen_runs")
+}
+
+model alembic_version {
+  version_num String @id(map: "alembic_version_pkc") @db.VarChar(32)
 }

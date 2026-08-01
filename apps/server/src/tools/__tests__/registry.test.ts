@@ -1,16 +1,28 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { toolRegistry } from "../registry.js";
+import { createRunContext } from "../../runtime/context.js";
+import { executionResultToContent } from "../../runtime/results.js";
+
+// Shared test context for tool execution
+const testCtx = createRunContext(new AbortController().signal);
 
 describe("ToolRegistry", () => {
   // ToolRegistry is a singleton — tests use the real instance
   // but the init() method is idempotent so it's safe
 
-  it("should register built-in tools on init", () => {
+  it("should register all built-in tools on init", () => {
     const names = toolRegistry.listNames();
     expect(names).toContain("get_current_time");
     expect(names).toContain("calculator");
     expect(names).toContain("web_search");
-    expect(names.length).toBeGreaterThanOrEqual(3);
+    expect(names).toContain("http_request");
+    expect(names).toContain("file_read");
+    expect(names).toContain("file_write");
+    expect(names).toContain("file_search");
+    // New P1-6 tools
+    expect(names).toContain("db_query");
+    expect(names).toContain("web_fetch");
+    expect(names.length).toBeGreaterThanOrEqual(10);
   });
 
   it("should get definitions for enabled tools only", () => {
@@ -21,7 +33,7 @@ describe("ToolRegistry", () => {
 
   it("should get all definitions when no filter provided", () => {
     const defs = toolRegistry.getDefinitions();
-    expect(defs.length).toBeGreaterThanOrEqual(3);
+    expect(defs.length).toBeGreaterThanOrEqual(10);
   });
 
   it("should return empty array for unknown tool", () => {
@@ -32,38 +44,39 @@ describe("ToolRegistry", () => {
   it("should execute calculator tool correctly", async () => {
     const result = await toolRegistry.execute("calculator", {
       expression: "2 + 3 * 4",
-    });
-    expect(result).toBe("14");
+    }, testCtx);
+    expect(result.status).toBe("success");
+    expect(executionResultToContent(result)).toBe("14");
   });
 
   it("should execute get_current_time tool", async () => {
     const result = await toolRegistry.execute("get_current_time", {
       timezone: "UTC",
-    });
-    expect(result).toBeTruthy();
-    expect(typeof result).toBe("string");
-    expect(result.length).toBeGreaterThan(5);
+    }, testCtx);
+    expect(result.status).toBe("success");
+    expect(executionResultToContent(result).length).toBeGreaterThan(5);
   });
 
   it("should execute web_search (stub)", async () => {
     const result = await toolRegistry.execute("web_search", {
       query: "test",
-    });
-    expect(result).toContain("test");
-    expect(result).toContain("query");
+    }, testCtx);
+    const content = executionResultToContent(result);
+    expect(content).toContain("test");
+    expect(content).toContain("query");
   });
 
   it("should return error for unknown tool", async () => {
-    const result = await toolRegistry.execute("unknown_tool", {});
-    expect(result).toContain("Error");
-    expect(result).toContain("unknown tool");
+    const result = await toolRegistry.execute("unknown_tool", {}, testCtx);
+    expect(result.status).toBe("failed");
+    expect(executionResultToContent(result).toLowerCase()).toContain("unknown tool");
   });
 
   it("should return error for calculator with invalid expression", async () => {
     const result = await toolRegistry.execute("calculator", {
       expression: "foo + bar",
-    });
-    expect(result).toContain("Error");
+    }, testCtx);
+    expect(result.status).toBe("failed");
   });
 
   it("should list all registered tool names", () => {
@@ -74,11 +87,20 @@ describe("ToolRegistry", () => {
 
   it("should get all registered tools via getAll", () => {
     const all = toolRegistry.getAll();
-    expect(all.length).toBeGreaterThanOrEqual(3);
+    expect(all.length).toBeGreaterThanOrEqual(10);
     all.forEach((t) => {
       expect(t.definition).toBeDefined();
       expect(t.definition.function.name).toBeTruthy();
       expect(typeof t.execute).toBe("function");
     });
+  });
+
+  it("should have correct metadata on db_query tool", () => {
+    const all = toolRegistry.getAll();
+    const dbQuery = all.find((t) => t.definition.function.name === "db_query");
+    expect(dbQuery).toBeDefined();
+    expect(dbQuery!.riskLevel).toBe("read_only");
+    expect(dbQuery!.category).toBe("database");
+    expect(dbQuery!.requireApproval).toBe(false);
   });
 });

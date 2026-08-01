@@ -42,7 +42,7 @@ export interface ApiKeyDTO {
 }
 
 export interface CreateApiKeyResponse {
-  key: string;          // 原始 API key（只返回一次）
+  key: string; // 原始 API key（只返回一次）
   id: string;
   name: string;
 }

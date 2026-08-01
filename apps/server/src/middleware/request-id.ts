@@ -6,7 +6,9 @@ import { runWithRequestContext } from "@agentforge/logger";
 import { logger } from "@agentforge/logger";
 import type { AppVariables } from "../app.js";
 
-export const requestIdMiddleware: MiddlewareHandler<{ Variables: AppVariables }> = async (c, next) => {
+export const requestIdMiddleware: MiddlewareHandler<{
+  Variables: AppVariables;
+}> = async (c, next) => {
   const requestId = c.req.header("X-Request-ID") || randomUUID();
   c.set("requestId", requestId);
   c.header("X-Request-ID", requestId);
@@ -19,6 +21,9 @@ export const requestIdMiddleware: MiddlewareHandler<{ Variables: AppVariables }>
     logger.info({ method, path }, "--> request");
     await next();
     const duration = Date.now() - start;
-    logger.info({ method, path, status: c.res.status, durationMs: duration }, "<-- response");
+    logger.info(
+      { method, path, status: c.res.status, durationMs: duration },
+      "<-- response",
+    );
   });
 };

@@ -1,11 +1,19 @@
 import { PrismaClient } from "@prisma/client";
+import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
 const DEFAULT_USER_ID = "00000000-0000-0000-0000-000000000001";
 const CUSTOMER_USER_ID = "00000000-0000-0000-0000-000000000002";
+const DEFAULT_PASSWORD = "agentforge";
+
+function hashPassword(password: string): string {
+  return bcrypt.hashSync(password, 12);
+}
 
 async function main() {
+  const passwordHash = hashPassword(DEFAULT_PASSWORD);
+
   // Seed default user
   const defaultUser = await prisma.user.findUnique({
     where: { id: DEFAULT_USER_ID },
@@ -15,11 +23,16 @@ async function main() {
       data: {
         id: DEFAULT_USER_ID,
         email: "default@agentforge.local",
+        passwordHash,
       },
     });
     console.log("Created default user:", DEFAULT_USER_ID);
   } else {
-    console.log("Default user already exists");
+    await prisma.user.update({
+      where: { id: DEFAULT_USER_ID },
+      data: { passwordHash },
+    });
+    console.log("Default user already exists, password hash updated");
   }
 
   // Seed customer user
@@ -31,11 +44,16 @@ async function main() {
       data: {
         id: CUSTOMER_USER_ID,
         email: "customer@agentforge.local",
+        passwordHash,
       },
     });
     console.log("Created customer user:", CUSTOMER_USER_ID);
   } else {
-    console.log("Customer user already exists");
+    await prisma.user.update({
+      where: { id: CUSTOMER_USER_ID },
+      data: { passwordHash },
+    });
+    console.log("Customer user already exists, password hash updated");
   }
 }
 

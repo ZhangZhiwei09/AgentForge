@@ -11,6 +11,7 @@ args: <file_path> [description]
 ## 输入
 
 用户提供：
+
 - `<file_path>`：必填，要分析的源文件绝对路径或相对路径
 - `[description]`：可选，文件的简要描述（如"客服聊天服务"），不提供则从代码中推断
 
@@ -45,6 +46,7 @@ args: <file_path> [description]
 3. **为什么**：设计决策的理由
 
 示例格式：
+
 ```
 ### 步骤 1：获取或创建会话
 **入参：** `sessionId: string | null`

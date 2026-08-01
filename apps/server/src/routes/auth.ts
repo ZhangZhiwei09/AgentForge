@@ -25,40 +25,52 @@ const apiKeySchema = z.object({
 });
 
 // POST /api/auth/signup
-authRoutes.post("/api/auth/signup", zValidator("json", signUpSchema), async (c) => {
-  try {
-    const { email, password } = c.req.valid("json");
-    const result = await authService.signUp(email, password);
-    return c.json(result, 201);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return c.json({ detail: msg }, 400);
-  }
-});
+authRoutes.post(
+  "/api/auth/signup",
+  zValidator("json", signUpSchema),
+  async (c) => {
+    try {
+      const { email, password } = c.req.valid("json");
+      const result = await authService.signUp(email, password);
+      return c.json(result, 201);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      return c.json({ detail: msg }, 400);
+    }
+  },
+);
 
 // POST /api/auth/signin
-authRoutes.post("/api/auth/signin", zValidator("json", signInSchema), async (c) => {
-  try {
-    const { email, password } = c.req.valid("json");
-    const result = await authService.signIn(email, password);
-    return c.json(result);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return c.json({ detail: msg }, 401);
-  }
-});
+authRoutes.post(
+  "/api/auth/signin",
+  zValidator("json", signInSchema),
+  async (c) => {
+    try {
+      const { email, password } = c.req.valid("json");
+      const result = await authService.signIn(email, password);
+      return c.json(result);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      return c.json({ detail: msg }, 401);
+    }
+  },
+);
 
 // POST /api/auth/refresh
-authRoutes.post("/api/auth/refresh", zValidator("json", refreshSchema), async (c) => {
-  try {
-    const { refresh_token } = c.req.valid("json");
-    const result = await authService.refreshAccessToken(refresh_token);
-    return c.json(result);
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Unknown error";
-    return c.json({ detail: msg }, 401);
-  }
-});
+authRoutes.post(
+  "/api/auth/refresh",
+  zValidator("json", refreshSchema),
+  async (c) => {
+    try {
+      const { refresh_token } = c.req.valid("json");
+      const result = await authService.refreshAccessToken(refresh_token);
+      return c.json(result);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      return c.json({ detail: msg }, 401);
+    }
+  },
+);
 
 // POST /api/auth/signout
 authRoutes.post("/api/auth/signout", async (c) => {
@@ -77,14 +89,18 @@ authRoutes.get("/api/auth/me", async (c) => {
 });
 
 // POST /api/auth/api-keys — create API key
-authRoutes.post("/api/auth/api-keys", zValidator("json", apiKeySchema), async (c) => {
-  const user = c.get("user");
-  if (!user) return c.json({ detail: "Unauthorized" }, 401);
+authRoutes.post(
+  "/api/auth/api-keys",
+  zValidator("json", apiKeySchema),
+  async (c) => {
+    const user = c.get("user");
+    if (!user) return c.json({ detail: "Unauthorized" }, 401);
 
-  const { name } = c.req.valid("json");
-  const result = await authService.createApiKey(user.id, name);
-  return c.json(result, 201);
-});
+    const { name } = c.req.valid("json");
+    const result = await authService.createApiKey(user.id, name);
+    return c.json(result, 201);
+  },
+);
 
 // GET /api/auth/api-keys — list API keys
 authRoutes.get("/api/auth/api-keys", async (c) => {

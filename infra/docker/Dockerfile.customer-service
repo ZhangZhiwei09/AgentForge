@@ -1,0 +1,48 @@
+# ── AgentForge 客服前端生产镜像 ──
+# 构建：docker build -f infra/docker/Dockerfile.customer-service -t agentforge-customer-service:latest .
+# 运行：docker run -p 80:80 -e SERVER_API_URL=http://server:8000 agentforge-customer-service:latest
+
+FROM node:20-alpine AS base
+WORKDIR /app
+
+# 安装 pnpm
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+
+# ── 依赖安装层 ──
+FROM base AS deps
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json ./
+COPY packages/shared-types ./packages/shared-types
+COPY packages/sdk ./packages/sdk
+COPY packages/ui ./packages/ui
+COPY packages/cui ./packages/cui
+COPY apps/customer-service ./apps/customer-service
+
+RUN pnpm install --frozen-lockfile
+
+# ── 构建层 ──
+FROM deps AS builder
+WORKDIR /app
+
+# 构建客服前端（Turbo 会自动处理 workspace 依赖）
+RUN pnpm turbo build --filter=@agentforge/customer-service
+
+# ── 生产运行层 ──
+FROM nginx:alpine AS runner
+
+# 复制构建产物
+COPY --from=builder /app/apps/customer-service/dist /usr/share/nginx/html
+
+# Nginx SPA 配置（模板）
+COPY infra/docker/nginx-customer-service.conf /etc/nginx/templates/default.conf.template
+
+# 启动脚本：用 envsubst 替换环境变量后启动 nginx
+COPY infra/docker/nginx-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
+EXPOSE 80
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget -qO- http://localhost:80/health || exit 1
+
+ENTRYPOINT ["/docker-entrypoint.sh"]
+CMD ["nginx", "-g", "daemon off;"]
