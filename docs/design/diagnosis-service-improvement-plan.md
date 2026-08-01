@@ -2,6 +2,8 @@
 
 > 日期: 2026-07-05 | 作者: Claude (Agent Interviewer)
 > 背景: 对已落地的 Diagnosis Service 和规划中的 Runtime 迁移做了交叉审查，发现架构判断偏差
+>
+> **⚠️ 状态更新（2026-08）**: Phase B 建议已实现 — DIAGNOSIS 现在是 Agent Runtime 的第 5 条路由。LangGraph 已按 ADR-001 从 TS Server 移除，Phase C（Runtime ReAct Loop 的 LangGraph 迁移）不再适用。Phase A 加固项待确认。
 
 ---
 

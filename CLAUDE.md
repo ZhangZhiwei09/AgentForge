@@ -4,7 +4,7 @@
 
 ## Architecture
 
-Agent Runtime 是系统核心。统一 `AgentExecutor`（ReAct），4-route 分类器（SAFETY/CHAT/TASK/HUMAN）。新增能力必须复用现有 Runtime，禁止绕过 Agent Runtime 创建平行执行链路。
+Agent Runtime 是系统核心。统一 `AgentExecutor`（ReAct），5-route 分类器（SAFETY/CHAT/TASK/HUMAN/DIAGNOSIS）。新增能力必须复用现有 Runtime，禁止绕过 Agent Runtime 创建平行执行链路。
 
 ## Type Safety
 
@@ -52,15 +52,23 @@ P0 问题禁止进入下一阶段。
 仅在当前任务需要时读取对应文档，禁止一次性加载全部文档。
 
 Architecture:
-  docs/runtime/execution-runtime-v1.md
   docs/architecture/overview.md
+  docs/architecture/routing.md
+  docs/architecture/knowledge-hybrid-retrieval.md
+  docs/runtime/execution-runtime-v1.md
+  docs/agent-runtime.md
 
 Engineering:
   docs/engineering/type-safety.md
   docs/engineering/chinese-prompts.md
+
+Decisions:
+  docs/decisions/adr-001-remove-langgraph.md
 
 Process:
   docs/agents/pipeline.md
 
 Project:
   docs/operations/development.md
+  docs/operations/backup-restore.md
+  docs/operations/deployment.md

@@ -1,5 +1,7 @@
 # AgentForge Python V1 核心能力升级方案
 
+> **✅ 状态更新（2026-08）**: Phase A（LangChain ReAct 适配）已完成 — `langchain_adapter.py` 已存在。Phase B（PGVector RAG）已完成 — `rag/` 目录（embeddings, ingestion, pgvector, splitter）已就位。Phase C（Langfuse 可观测性）已完成 — `observability/` 目录已存在。Python 后端的 LangGraph/LangChain 使用独立于 TS Server 的 ADR-001 决策。
+
 ## Context
 
 Python 后端 (`apps/server-py`) 核心链路已打通（路由 → ReAct → SSE），但三个关键能力缺失：

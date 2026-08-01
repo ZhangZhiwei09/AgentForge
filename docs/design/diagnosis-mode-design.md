@@ -3,6 +3,8 @@
 > 版本: v1.0 | 日期: 2026-07-05 | 作者: Architect
 > 状态: Draft，待 Review
 > 依赖: Teams 系统（Blackboard + MessageBus + TeamExecutor）
+>
+> **⚠️ 架构变更（2026-07）**: Orchestrator / Peer / Debate 模式已移除（见 `docs/decisions/adr-001-remove-langgraph.md` 和 `docs/design/platform-service-split-plan.md` 决策 #3）。Diagnosis 实际实现已改为 Agent Runtime 第 5 条路由（`DiagnosisRouteAgent`），而非 Teams 系统中的独立 Mode。本文档中的模式对比表和集成方案已过时，保留作为原始设计参考。
 
 ---
 
