@@ -21,15 +21,12 @@ Graph 结构:
 """
 
 import asyncio
-import json as _json
 import logging
 from collections.abc import AsyncIterator
 
-from langgraph.graph import END, StateGraph
-
 from src.agent.checkpoint import get_checkpointer
 from src.agent.langchain_adapter import ProviderChatModel, _coerce_to_str
-from src.agent.state import AgentState
+from src.agent.react_graph import build_react_graph
 from src.agent.tools.registry import ToolRegistry, tool_registry
 from src.agent.types import (
     RouteContext,
@@ -140,12 +137,14 @@ class AgentExecutor:
             checkpointer = await get_checkpointer()
 
             # ── 构建 LangGraph StateGraph ──
-            graph = self._build_graph(
+            graph = build_react_graph(
                 model=model,
                 tool_defs=tool_defs,
-                conversation_id=context.conversation_id,
                 system_prompt=effective_system_prompt,
+                registry=self._registry,
+                conversation_id=context.conversation_id,
                 checkpointer=checkpointer,
+                max_iterations=MAX_ITERATIONS,
             )
 
             # ── 初始状态 ──
@@ -237,149 +236,6 @@ class AgentExecutor:
                 route=self.route.value,
                 fallback_used=True,
             )
-
-    # ── Graph 构建 ─────────────────────────────────────────
-
-    def _build_graph(
-        self,
-        model: ProviderChatModel,
-        tool_defs: list[dict],
-        conversation_id: str,
-        system_prompt: str,
-        checkpointer=None,
-    ) -> StateGraph:
-        """构建 LangGraph StateGraph。
-
-        Graph 结构:
-            START → agent → (has tool_calls?) → tools → agent
-                            → (no tool_calls?) → END
-        """
-        registry = self._registry
-
-        # ── 节点定义 ──
-
-        async def call_model(state: AgentState) -> dict:
-            """Agent 节点：调用 LLM 模型（带工具定义）。
-
-            使用 astream() 确保 on_chat_model_stream 事件被触发，
-            实现实时 token 流式输出到前端。
-
-            Phase C: 每次 LLM 调用包裹在 Langfuse Generation 中。
-            """
-            from langchain_core.messages import AIMessage as LCAIMessage
-
-            from src.observability import get_observability
-
-            iteration = state.get("iteration_count", 0)
-            gen_name = f"agent-reAct-{iteration + 1}"
-
-            content_parts: list[str] = []
-            tool_calls: list[dict] = []
-
-            obs = get_observability()
-            gen_span = obs.create_generation(
-                name=gen_name,
-                model=model.model_name,
-                input={"messages": str(state["messages"][-2:])},
-            )
-
-            try:
-                async for chunk in model.astream(
-                    state["messages"],
-                    tools=tool_defs,
-                ):
-                    if chunk.content:
-                        content_parts.append(_coerce_to_str(chunk.content))
-                    if chunk.tool_calls:
-                        tool_calls = list(chunk.tool_calls)
-
-                final_content = "".join(content_parts)
-
-                gen_span.end(
-                    output=final_content if not tool_calls else None,
-                    metadata={
-                        "tool_calls": [tc.get("name", "") for tc in tool_calls],
-                    } if tool_calls else None,
-                )
-            except Exception:
-                gen_span.end(output=None)
-                raise
-
-            response = LCAIMessage(
-                content=final_content,
-                tool_calls=tool_calls if tool_calls else None,
-            )
-
-            return {
-                "messages": [response],
-                "iteration_count": iteration + 1,
-            }
-
-        async def call_tools(state: AgentState) -> dict:
-            """工具节点：执行 AIMessage 中的 tool_calls，委托给 ToolRegistry。"""
-            from langchain_core.messages import ToolMessage
-
-            messages = state["messages"]
-            if not messages:
-                return {"messages": []}
-
-            last_message = messages[-1]
-            tc_list = getattr(last_message, "tool_calls", None) or []
-            if not tc_list:
-                return {"messages": []}
-
-            tool_messages: list[ToolMessage] = []
-            for tc in tc_list:
-                tc_name = tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
-                tc_args = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {})
-                tc_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
-
-                try:
-                    result = await registry.execute(
-                        tc_name, tc_args, conversation_id
-                    )
-                except Exception as exc:
-                    logger.error("Tool %s execution error: %s", tc_name, exc)
-                    result = {"status": "failed", "error": str(exc)}
-
-                tool_messages.append(ToolMessage(
-                    content=_json.dumps(result, ensure_ascii=False),
-                    tool_call_id=tc_id,
-                    name=tc_name,
-                ))
-
-            return {"messages": tool_messages}
-
-        # ── 条件边 ──
-
-        def should_continue(state: AgentState) -> str:
-            """条件边：判断是否继续到工具节点。"""
-            messages = state["messages"]
-            if not messages:
-                return END
-
-            last_message = messages[-1]
-            tc_list = getattr(last_message, "tool_calls", None) or []
-            iteration = state.get("iteration_count", 0)
-
-            if tc_list and iteration < MAX_ITERATIONS:
-                return "tools"
-            return END
-
-        # ── 组装 Graph ──
-
-        workflow = StateGraph(AgentState)
-        workflow.add_node("agent", call_model)
-        workflow.add_node("tools", call_tools)
-        workflow.set_entry_point("agent")
-        workflow.add_conditional_edges(
-            "agent",
-            should_continue,
-            {"tools": "tools", END: END},
-        )
-        workflow.add_edge("tools", "agent")
-
-        return workflow.compile(checkpointer=checkpointer)
 
     # ── 工具方法 ──────────────────────────────────────────
 

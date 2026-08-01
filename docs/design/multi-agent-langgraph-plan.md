@@ -1,6 +1,6 @@
 # Multi-Agent 编排 LangGraph 化方案
 
-> 状态：**定稿（Plan）** — 已通过架构评审（v2，2026-08-01），待进入 Implementation
+> 状态：**实施中** — Phase 0 ✅（2026-08-01），Phase 1-2 待实施，Phase 3 待评估
 > 范围：`apps/server-py` 的 DIAGNOSIS 路由 Multi-Agent 编排
 > 关联：`docs/design/python-core-upgrade-plan.md` 的 **G5**（多 Agent 编排）与 **T1**（DiagnosisMode 重构为 LangGraph Subgraph）
 > 评审记录：本版已回应 CHANGES_REQUIRED 的 3 个阻断项（见 §3.2 实证与设计决策、§3.3 状态、§3.5 事件映射）
@@ -235,7 +235,7 @@ LangGraph 节点是普通 async 函数。`check_rule_escalation`、`resolve_diag
 
 > 遵循项目记忆：**先完成规划，再进入 Implementation**；每阶段向后兼容。
 
-### Phase 0 — 抽取 ReAct 工厂（无行为变化）
+### ✅ Phase 0 — 抽取 ReAct 工厂（无行为变化）
 
 - 从 `executor.py::_build_graph` 抽出工厂，**完整签名必须显式传参**（现状经闭包隐式捕获 `self._registry` 与 `conversation_id`）：
 
@@ -254,7 +254,7 @@ LangGraph 节点是普通 async 函数。`check_rule_escalation`、`resolve_diag
 - `AgentExecutor` 改为调用该工厂，行为不变。
 - **验收**：现有 `tests/test_agent.py` 全绿；TASK 行为不变。
 
-### Phase 1 — 新增 LangGraph 版 DiagnosisMode（Feature Flag 默认关）
+### ⬜ Phase 1 — 新增 LangGraph 版 DiagnosisMode（Feature Flag 默认关）
 
 文件变更：
 
@@ -269,14 +269,14 @@ LangGraph 节点是普通 async 函数。`check_rule_escalation`、`resolve_diag
 
 - **验收**：双路径下 `TeamStreamEvent` 序列一致；新旧各跑一组端到端（`test_agent.py` + 手 curl）。
 
-### Phase 2 — 默认开启 + 团队级 Checkpointing
+### ⬜ Phase 2 — 默认开启 + 团队级 Checkpointing
 
 - flag 默认 `True`；图顶层挂 `AsyncPostgresSaver`（`thread_id = team_run_id`），验证断点恢复（先跑 §7 的 `test_nested_checkpoint` 实验测试）。
 - 灰度验证后**删除旧顺序编排主体**（保留全部纯函数与 prompt builder）。
 - 同步更新 `python-core-upgrade-plan.md`：T1 标记完成、G5 拆分为"基础版已完成 / Supervisor 动态委派待评估"。
 - **验收**：DIAGNOSIS 回归通过；`mode.py` 编排主体移除。
 
-### Phase 3 — 独立增强（各有触发条件，不阻塞）
+### ⬜ Phase 3 — 独立增强（各有触发条件，不阻塞）
 
 | 项 | 内容 | 触发条件 |
 |---|---|---|
