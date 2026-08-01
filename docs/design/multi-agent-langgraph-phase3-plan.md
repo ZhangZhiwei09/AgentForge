@@ -278,6 +278,28 @@ if settings.langgraph_diagnosis_structured_output:
 - 开关开 + 结构化调用抛异常 → 回落 `parse_*` 正常降级，不抛错。
 - PoC 实证记录：`docs/design/` 追加一节或在 §3 标注验证结果。
 
+### 3.6 PoC 实证结果（2026-08-01）—— ❌ 不实施
+
+**结论：PoC 不过，Phase 3c 不实施，维持 `parse_*` 兜底。**
+
+在 `apps/server-py/.venv`（Python 3.12.10，langchain_core 1.5.1）实证：
+
+1. `model.with_structured_output(Schema)` → **同步抛 `NotImplementedError`**
+   （在发起任何 LLM 调用之前）。原因：`ProviderChatModel` 未覆写 `bind_tools`，
+   langchain_core 1.5.1 默认实现首行检查
+   `type(self).bind_tools is BaseChatModel.bind_tools` → 成立即抛错。
+   该失败与 provider / 模型无关，是适配器层面的确定性失败。
+2. `method="function_calling"` 逃生通道 → **在该版本无效**：默认实现
+   `with_structured_output` 用 `kwargs.pop("method", None)` **丢弃** 该参数，
+   仍走 `bind_tools` + tool-call 解析，依旧抛 `NotImplementedError`。
+   现有 tool-call 通道本身可用（ReAct 已在经 `bind_tools` 透传 tools），但
+   `with_structured_output` 无法经此通道触达 —— 需要给共享适配器
+   `langchain_adapter.py::ProviderChatModel` 补 `bind_tools` 覆写，
+   超出 §3.4 文件范围且影响 TASK 路由，不采纳。
+
+若后续要启用：需先给 `ProviderChatModel` 增加最小 `bind_tools` 覆写并回归
+TASK 路由，再回到 §3.2 设计重新验证。
+
 ---
 
 ## 4. 测试策略
