@@ -40,6 +40,18 @@ HUMAN_KEYWORDS: list[re.Pattern] = [
     re.compile(r"叫.*(经理|领导|负责人)"),
 ]
 
+CHAT_KEYWORDS: list[re.Pattern] = [
+    # 问候 / 寒暄
+    re.compile(r"^(你好|hi|hello|嗨|早上好|下午好|晚上好|午安|晚安)[\s!！。.,，]*$", re.IGNORECASE),
+    re.compile(r"^(谢谢|多谢|感谢|thank|thanks|thx|3q|3Q)[\s!！。.,，]*$", re.IGNORECASE),
+    re.compile(r"^(再见|拜拜|bye|回头见|下次见|88)[\s!！。.,，]*$", re.IGNORECASE),
+    # 自我介绍 / 能力询问
+    re.compile(r"(你是谁|你叫什么|你能做什么|你有什么功能|你会什么|介绍一下自己|你是什么模型)"),
+    # 闲聊话题
+    re.compile(r"^(今天天气|讲个笑话|聊聊天|随便聊聊|陪我聊天|好无聊|你在干嘛)"),
+    re.compile(r"(心情不好|安慰我|鼓励我|夸我)"),
+]
+
 DIAGNOSIS_KEYWORDS: list[re.Pattern] = [
     # 强信号：错误码 + traceId
     re.compile(r"traceId\s*[:：]\s*\w+", re.IGNORECASE),
@@ -104,6 +116,15 @@ def quick_route_scan(message: str) -> RouterDecision | None:
                 route=RouteName.DIAGNOSIS,
                 confidence=0.85,
                 reasoning="诊断关键词命中",
+            )
+
+    # CHAT —— 寒暄/问候/自我介绍（低优先级，避免误拦 TASK）
+    for pattern in CHAT_KEYWORDS:
+        if pattern.search(message):
+            return RouterDecision(
+                route=RouteName.CHAT,
+                confidence=0.9,
+                reasoning='闲聊关键词命中',
             )
 
     return None  # → 默认走 TASK

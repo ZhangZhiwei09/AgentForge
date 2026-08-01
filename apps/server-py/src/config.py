@@ -44,6 +44,9 @@ class Settings(BaseSettings):
     langfuse_secret_key: str = Field(default="")
     langfuse_base_url: str = Field(default="https://cloud.langfuse.com")
 
+    # ── LangGraph Checkpoint ─────────────────────────
+    langgraph_checkpoint_enabled: bool = Field(default=False)
+
     # ── Server ──────────────────────────────────────────
     port: int = Field(default=8000)
     debug: bool = Field(default=False)

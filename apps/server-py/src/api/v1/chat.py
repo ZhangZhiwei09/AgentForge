@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field as PydField
 from sqlalchemy import and_, func, select, text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.agent.chat_agent import ChatAgent
 from src.agent.executor import AgentExecutor
 from src.agent.router.pipeline import QueryRouter
 from src.agent.diagnosis.route_agent import DiagnosisRouteAgent
@@ -54,6 +55,7 @@ router = APIRouter(prefix="/api/v1", tags=["chat"])
 # ── 模块级单例 ──
 _router: QueryRouter | None = None
 _executor: AgentExecutor | None = None
+_chat_agent: ChatAgent | None = None
 _diagnosis_agent: DiagnosisRouteAgent | None = None
 
 # ── 会话级并发控制 ──
@@ -72,6 +74,13 @@ def _get_executor() -> AgentExecutor:
     if _executor is None:
         _executor = AgentExecutor()
     return _executor
+
+
+def _get_chat_agent() -> ChatAgent:
+    global _chat_agent
+    if _chat_agent is None:
+        _chat_agent = ChatAgent()
+    return _chat_agent
 
 
 def _get_diagnosis_agent() -> DiagnosisRouteAgent:
@@ -303,6 +312,18 @@ async def _handle_chat(
                 events = _stream_safety(assistant_msg_id)
             elif decision.route == RouteName.HUMAN:
                 events = _stream_human(assistant_msg_id)
+            elif decision.route == RouteName.CHAT:
+                chat_context = RouteContext(
+                    conversation_id=actual_conv_id,
+                    user_message=message,
+                    prebuilt_messages=ctx_result.messages,
+                    resolved_model=resolved["model_id"],
+                    provider_name=resolved["provider_name"],
+                    assistant_msg_id=assistant_msg_id,
+                    intent="chat",
+                )
+                chat_agent = _get_chat_agent()
+                events = chat_agent.execute(chat_context)
             elif decision.route == RouteName.DIAGNOSIS:
                 diagnosis_ctx = RouteContext(
                     conversation_id=actual_conv_id,

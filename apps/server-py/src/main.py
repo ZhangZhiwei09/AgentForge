@@ -2,6 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from src.agent.checkpoint import close_checkpointer, get_checkpointer
 from src.api.v1.auth import router as auth_router
 from src.api.v1.chat import agent_router, conversations_router, router as chat_router
 from src.api.v1.dev import router as dev_router
@@ -12,9 +13,11 @@ from src.observability import init_observability, shutdown_observability
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """应用生命周期：启动时初始化可观测性，关闭时 flush。"""
+    """应用生命周期：启动时初始化可观测性和 checkpointer，关闭时清理。"""
     init_observability()
+    await get_checkpointer()  # 预热 checkpointer（非阻塞，config 关闭时立即返回 None）
     yield
+    await close_checkpointer()
     await shutdown_observability()
 
 

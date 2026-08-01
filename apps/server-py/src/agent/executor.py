@@ -27,6 +27,7 @@ from collections.abc import AsyncIterator
 
 from langgraph.graph import END, StateGraph
 
+from src.agent.checkpoint import get_checkpointer
 from src.agent.langchain_adapter import ProviderChatModel, _coerce_to_str
 from src.agent.state import AgentState
 from src.agent.tools.registry import ToolRegistry, tool_registry
@@ -135,12 +136,16 @@ class AgentExecutor:
                 system_prompt if system_prompt else REACT_SYSTEM_PROMPT
             )
 
+            # ── 获取 Checkpointer ──
+            checkpointer = await get_checkpointer()
+
             # ── 构建 LangGraph StateGraph ──
             graph = self._build_graph(
                 model=model,
                 tool_defs=tool_defs,
                 conversation_id=context.conversation_id,
                 system_prompt=effective_system_prompt,
+                checkpointer=checkpointer,
             )
 
             # ── 初始状态 ──
@@ -166,7 +171,13 @@ class AgentExecutor:
             final_answer = ""
             final_answer_collected = False
 
-            async for event in graph.astream_events(initial_state, version="v2"):
+            config = {"configurable": {"thread_id": context.conversation_id}}
+
+            async for event in graph.astream_events(
+                initial_state,
+                config=config,
+                version="v2",
+            ):
                 kind = event["event"]
 
                 if kind == "on_chat_model_stream":
@@ -235,6 +246,7 @@ class AgentExecutor:
         tool_defs: list[dict],
         conversation_id: str,
         system_prompt: str,
+        checkpointer=None,
     ) -> StateGraph:
         """构建 LangGraph StateGraph。
 
@@ -367,7 +379,7 @@ class AgentExecutor:
         )
         workflow.add_edge("tools", "agent")
 
-        return workflow.compile()
+        return workflow.compile(checkpointer=checkpointer)
 
     # ── 工具方法 ──────────────────────────────────────────
 

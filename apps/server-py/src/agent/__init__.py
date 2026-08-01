@@ -7,6 +7,7 @@
 Phase A: AgentExecutor 已迁移至 LangGraph StateGraph 驱动。
 """
 
+from src.agent.chat_agent import ChatAgent
 from src.agent.executor import AgentExecutor
 from src.agent.langchain_adapter import ProviderChatModel
 from src.agent.router.pipeline import QueryRouter, quick_route_scan
@@ -39,6 +40,8 @@ __all__ = [
     "quick_route_scan",
     # executor
     "AgentExecutor",
+    # chat
+    "ChatAgent",
     # adapter
     "ProviderChatModel",
 ]
