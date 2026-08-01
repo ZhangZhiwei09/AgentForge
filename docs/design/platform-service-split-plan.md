@@ -328,6 +328,6 @@ pnpm dev:all              # 所有服务
 
 ## 八、与现有文档的关系
 
-- 本方案是 `docs/architecture/overview.md` 中架构图的演进版本
+- 本方案是 `docs/architecture/routing.md` 所述 Agent Runtime 路由架构之上的演进版本
 - 不影响 `docs/architecture/routing.md` 中描述的路由架构（Core 不动）
 - 涉及 P0-P1 平台基础（Auth、Logging、Testing、CI/CD、Security、Jobs、Observability）— 均已完成

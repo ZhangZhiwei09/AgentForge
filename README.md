@@ -169,7 +169,7 @@ pnpm build                # 全量生产构建
 
 | 文档 | 说明 |
 |------|------|
-| [架构概览](docs/architecture/overview.md) | 数据流、包布局、版本路线图 |
+| [架构与路由](docs/architecture/routing.md) | 数据流、5-路由分类、Agent 分发 |
 | [Agent Runtime](docs/runtime/execution-runtime-v1.md) | AgentExecutor、Router、KnowledgeContextBuilder |
 | [类型安全规范](docs/engineering/type-safety.md) | Zod 校验、Prisma 类型推导、禁止 `any` |
 | [中文 Prompt 规范](docs/engineering/chinese-prompts.md) | 所有 LLM 对话 Prompt 使用中文 |

@@ -341,5 +341,4 @@ type RouteStreamEvent =
 
 - `docs/agent-runtime.md` — Agent Runtime 状态模型（三维状态机、事件协议）
 - `docs/runtime/execution-runtime-v1.md` — 执行运行时详细设计
-- `docs/architecture/overview.md` — 系统架构总览
 - `docs/decisions/adr-001-remove-langgraph.md` — ADR：移除 LangGraph 决策记录

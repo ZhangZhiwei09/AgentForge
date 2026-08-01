@@ -52,7 +52,6 @@ P0 问题禁止进入下一阶段。
 仅在当前任务需要时读取对应文档，禁止一次性加载全部文档。
 
 Architecture:
-  docs/architecture/overview.md
   docs/architecture/routing.md
   docs/architecture/knowledge-hybrid-retrieval.md
   docs/runtime/execution-runtime-v1.md
