@@ -384,8 +384,12 @@ class DiagnosisRouteAgent:
         message_id = context.assistant_msg_id
 
         # 1. Send meta event
+        # conversation_id 必须带上 —— 前端靠 meta 事件持久化会话（localStorage
+        # agent_chat_conversation_id），缺失会导致每次诊断都新建会话、UI 不连续。
+        # 对应 TS: diagnosis-agent.ts meta 事件带 conversationId/sessionId。
         yield StreamMeta(
             message_id=message_id,
+            conversation_id=context.conversation_id,
             session_id=context.session_id,
             model=context.resolved_model,
             provider=context.provider_name,
