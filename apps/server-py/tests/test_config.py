@@ -21,7 +21,9 @@ class TestSettings:
         saved = {k: os.environ.pop(k, None) for k in env_vars}
 
         try:
-            settings = Settings()
+            # _env_file=None：仅验证代码默认值，排除 .env 覆盖
+            # （否则 .env 的 DEFAULT_MODEL=deepseek-v4-pro 会遮蔽代码默认）
+            settings = Settings(_env_file=None)
             assert "postgresql+asyncpg" in settings.database_url
             assert "redis://" in settings.redis_url
             assert len(settings.jwt_secret) > 0
