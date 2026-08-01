@@ -7,6 +7,7 @@
 
 import asyncio
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -302,3 +303,94 @@ class TestDiagnosisModeGraphPath:
             events.append(ev)
         assert len(events) == 1
         assert isinstance(events[0], TeamFailed)
+
+
+class TestDiagnosisGraphStageTimeout:
+    """Phase 3a：每阶段超时下沉 + 局部重试（multi-agent-langgraph-phase3-plan.md §1）。
+
+    §1.4 验收：
+    - 慢 runner（sleep 超 stage_timeout）→ TeamStarted → AgentStarted →
+      AgentError → TeamFailed，无 TeamCompleted。
+    - 首次超时、第二次成功（重试上限 1）→ 正常 AgentCompleted。
+    - frontend 失败 → TeamFailed（回归 §0.4，不再无声 frontend_only）。
+    - stage_timeout_ms=0（默认）→ 行为与现状一致。
+    """
+
+    @pytest.fixture(autouse=True)
+    def _reset_stage_timeout(self, monkeypatch):
+        """每个用例显式配置阶段超时开关，避免用例间串扰。"""
+        monkeypatch.setattr(settings, "langgraph_diagnosis_stage_timeout_ms", 0)
+        monkeypatch.setattr(settings, "langgraph_diagnosis_stage_max_retries", 1)
+
+    @pytest.mark.asyncio
+    async def test_stage_timeout_aborts(self, monkeypatch):
+        """慢 runner → 超时重试耗尽 → AgentError + TeamFailed，无 TeamCompleted。"""
+        monkeypatch.setattr(settings, "langgraph_diagnosis_stage_timeout_ms", 50)
+
+        async def slow_runner(role, task_prompt, conversation_id, registry, cancel_event):
+            await asyncio.sleep(5)  # 远超 50ms 阶段超时
+            return FRONTEND_NO_ESC
+
+        events = await _collect(_roles(), slow_runner)
+        seq = [type(ev).__name__ for ev in events]
+        assert seq == ["TeamStarted", "AgentStarted", "AgentError", "TeamFailed"]
+        assert not any(isinstance(ev, TeamCompleted) for ev in events)
+
+    @pytest.mark.asyncio
+    async def test_stage_timeout_retry_once(self, monkeypatch):
+        """首次超时、第二次成功（重试上限 1）→ AgentCompleted，静默重试。"""
+        monkeypatch.setattr(settings, "langgraph_diagnosis_stage_timeout_ms", 50)
+        calls = {"n": 0}
+
+        async def flaky_runner(role, task_prompt, conversation_id, registry, cancel_event):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                await asyncio.sleep(5)  # 首次超时
+            return FRONTEND_NO_ESC
+
+        events = await _collect(_roles(), flaky_runner)
+        assert calls["n"] == 2  # 恰好重试一次
+        # 只发射一次 AgentStarted（重试不重开前端阶段号）
+        assert sum(isinstance(ev, AgentStarted) for ev in events) == 1
+        seq = [type(ev).__name__ for ev in events]
+        assert seq == ["TeamStarted", "AgentStarted", "AgentCompleted", "TeamCompleted"]
+
+    @pytest.mark.asyncio
+    async def test_frontend_failure_no_silent_fasttrack(self):
+        """回归 §0.4：frontend 阶段异常 → TeamFailed，不再误判为 fast_track。"""
+        async def failing_runner(role, task_prompt, conversation_id, registry, cancel_event):
+            raise RuntimeError("frontend boom")
+
+        events = await _collect(_roles(), failing_runner)
+        seq = [type(ev).__name__ for ev in events]
+        assert seq == ["TeamStarted", "AgentStarted", "AgentError", "TeamFailed"]
+        assert not any(isinstance(ev, TeamCompleted) for ev in events)
+
+    @pytest.mark.asyncio
+    async def test_stage_timeout_disabled_by_default(self):
+        """stage_timeout_ms=0（默认）→ 不施加阶段超时，慢 runner 正常完成。"""
+        async def slow_runner(role, task_prompt, conversation_id, registry, cancel_event):
+            await asyncio.sleep(0.05)
+            return FRONTEND_NO_ESC
+
+        events = await _collect(_roles(), slow_runner)
+        assert isinstance(events[-1], TeamCompleted)
+        assert not any(isinstance(ev, TeamFailed) for ev in events)
+
+    @pytest.mark.asyncio
+    async def test_role_timeout_override(self, monkeypatch):
+        """AgentRole.timeout_ms 覆盖全局配置（role 指定则全局不生效）。"""
+        monkeypatch.setattr(settings, "langgraph_diagnosis_stage_timeout_ms", 20)
+        monkeypatch.setattr(settings, "langgraph_diagnosis_stage_max_retries", 0)
+        roles = _roles()
+        roles["frontend_agent"] = replace(
+            roles["frontend_agent"], timeout_ms=5000
+        )
+
+        async def slow_runner(role, task_prompt, conversation_id, registry, cancel_event):
+            await asyncio.sleep(0.05)  # 50ms > 20ms 全局，但 < 5000ms role 覆盖
+            return FRONTEND_NO_ESC
+
+        events = await _collect(roles, slow_runner)
+        assert isinstance(events[-1], TeamCompleted)
+        assert not any(isinstance(ev, TeamFailed) for ev in events)

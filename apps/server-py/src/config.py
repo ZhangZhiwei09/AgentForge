@@ -58,6 +58,10 @@ class Settings(BaseSettings):
     # 与 langgraph_checkpoint_enabled 独立 —— 仅诊断父图启用，不影响 TASK/内层 ReAct。
     # 开启时父图 checkpoint 中间态；DB 不可用时会降级为无状态执行（见 graph.py）。
     langgraph_diagnosis_checkpoint_enabled: bool = Field(default=True)
+    # Phase 3a：每阶段超时（毫秒）。0 = 禁用（保持外层整体 180s 超时）。
+    langgraph_diagnosis_stage_timeout_ms: int = Field(default=0)
+    # 阶段超时后的重试次数（仅超时触发重试，异常不重试）。
+    langgraph_diagnosis_stage_max_retries: int = Field(default=1)
 
     # ── Server ──────────────────────────────────────────
     port: int = Field(default=8000)

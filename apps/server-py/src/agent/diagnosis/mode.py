@@ -57,8 +57,6 @@ BACKEND_ABNORMAL_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-DIAGNOSIS_TIMEOUT_MS = 60_000
-
 # ── Internal Types ─────────────────────────────────────────
 
 
@@ -162,6 +160,9 @@ class AgentRole:
     tools: list[str] = field(default_factory=list)
     max_iterations: int = 5
     priority: int = 5
+    # Phase 3a：每阶段超时（毫秒）覆盖。None → 回落全局
+    # langgraph_diagnosis_stage_timeout_ms。
+    timeout_ms: int | None = None
 
 
 # ═══════════════════════════════════════════════════════════

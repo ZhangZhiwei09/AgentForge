@@ -68,6 +68,16 @@ logger = logging.getLogger(__name__)
 _PROMPT_BUILDER = DiagnosisMode()
 
 
+class _StageAbort(Exception):
+    """阶段失败中止哨兵（Phase 3a）。
+
+    节点内 `_emit_agent_run` 返回 errored=True 时，节点把 TeamFailed 推入
+    queue 后抛此异常中断 ainvoke；`run_langgraph_diagnosis` 的 driver finally
+    识别并吞掉（TeamFailed 已进队列、已 yield），避免被 route_agent 当普通
+    异常转成通用 StreamError。
+    """
+
+
 # ═══════════════════════════════════════════════════════════
 # 阶段 Agent 驱动器（真实 runner）
 # ═══════════════════════════════════════════════════════════
@@ -160,6 +170,11 @@ def build_diagnosis_graph(
     ) -> tuple[str, bool]:
         """驱动单个 Agent 并推送 AgentStarted/AgentCompleted/AgentError。
 
+        Phase 3a 超时下沉：stage_timeout_ms > 0 时用 asyncio.wait_for 包 runner。
+        - 仅 asyncio.TimeoutError 触发静默重试（不重复发射 AgentStarted，
+          避免前端阶段号重开）；重试仍失败 → AgentError（超时文案）+ errored=True。
+        - 非超时异常不重试，直接 AgentError + errored=True。
+
         Returns:
             (output, errored): output 为累积 token 文本；errored 表示发生异常。
         """
@@ -168,29 +183,89 @@ def build_diagnosis_graph(
             role=role.display_name,
             task=task_prompt,
         ))
-        try:
-            output = await runner(
-                role, task_prompt, conversation_id, tools_registry, cancel_event
-            )
-        except Exception as exc:
-            logger.error(
-                "LangGraph diagnosis: agent %s failed: %s", role.name, exc
-            )
-            await queue.put(AgentError(agent_name=role.name, error=str(exc)))
-            return "", True
-        await queue.put(AgentCompleted(
-            agent_name=role.name,
-            output=output or "",
-            duration_ms=0,
+
+        stage_timeout_ms = (
+            role.timeout_ms
+            if role.timeout_ms
+            else settings.langgraph_diagnosis_stage_timeout_ms
+        )
+        max_retries = max(0, settings.langgraph_diagnosis_stage_max_retries)
+        attempts = 1 + max_retries
+
+        for attempt in range(attempts):
+            try:
+                if stage_timeout_ms > 0:
+                    output = await asyncio.wait_for(
+                        runner(
+                            role, task_prompt, conversation_id,
+                            tools_registry, cancel_event,
+                        ),
+                        timeout=stage_timeout_ms / 1000,
+                    )
+                else:
+                    output = await runner(
+                        role, task_prompt, conversation_id,
+                        tools_registry, cancel_event,
+                    )
+            except asyncio.TimeoutError:
+                retries_left = attempts - attempt - 1
+                if retries_left > 0:
+                    logger.warning(
+                        "LangGraph diagnosis: agent %s stage timeout "
+                        "(%dms), retry %d/%d",
+                        role.name, stage_timeout_ms,
+                        attempts - retries_left, attempts,
+                    )
+                    continue
+                logger.error(
+                    "LangGraph diagnosis: agent %s exhausted stage timeout "
+                    "retries after %dms x %d",
+                    role.name, stage_timeout_ms, attempts,
+                )
+                await queue.put(AgentError(
+                    agent_name=role.name,
+                    error=(
+                        f"阶段「{role.display_name}」执行超时"
+                        f"（>{stage_timeout_ms}ms），诊断中止。"
+                    ),
+                ))
+                return "", True
+            except Exception as exc:
+                logger.error(
+                    "LangGraph diagnosis: agent %s failed: %s", role.name, exc
+                )
+                await queue.put(AgentError(agent_name=role.name, error=str(exc)))
+                return "", True
+
+            await queue.put(AgentCompleted(
+                agent_name=role.name,
+                output=output or "",
+                duration_ms=0,
+            ))
+            return output or "", False
+
+        # 理论不可达（attempts >= 1，循环内必然 return）
+        return "", True
+
+    async def _abort_team(role: AgentRole) -> None:
+        """阶段失败（errored）→ 推送 TeamFailed 并中止整场诊断。
+
+        TeamFailed 已进队列后抛 _StageAbort 中断 ainvoke（修复 §0.4：
+        阶段失败不再被当作正常输出继续后续阶段）。
+        """
+        await queue.put(TeamFailed(
+            error=f"阶段「{role.display_name}」执行失败，诊断中止。",
         ))
-        return output or "", False
+        raise _StageAbort()
 
     # ── 节点 ──────────────────────────────────────────────
 
     async def frontend_node(state: DiagnosisState) -> dict:
         role = roles["frontend_agent"]
         task_prompt = _PROMPT_BUILDER._build_frontend_task(role, state["task"], bb)
-        output, _ = await _emit_agent_run(role, task_prompt)
+        output, errored = await _emit_agent_run(role, task_prompt)
+        if errored:
+            await _abort_team(role)
 
         fe = parse_frontend_output(output)
 
@@ -239,7 +314,9 @@ def build_diagnosis_graph(
         task_prompt = _PROMPT_BUILDER._build_backend_task(
             role, state["task"], context_for_backend, bb
         )
-        output, _ = await _emit_agent_run(role, task_prompt)
+        output, errored = await _emit_agent_run(role, task_prompt)
+        if errored:
+            await _abort_team(role)
 
         be = parse_backend_output(output)
 
@@ -268,7 +345,9 @@ def build_diagnosis_graph(
             return {"scoring": sc, "blackboard": bb.serialize()}
 
         task_prompt = _PROMPT_BUILDER._build_leader_task(role, state["task"], fe, be, bb)
-        output, _ = await _emit_agent_run(role, task_prompt)
+        output, errored = await _emit_agent_run(role, task_prompt)
+        if errored:
+            await _abort_team(role)
 
         sc = parse_scoring_output(output)
 
@@ -489,7 +568,7 @@ async def run_langgraph_diagnosis(
                 pass
         elif not driver.cancelled():
             exc = driver.exception()
-            if exc is not None:
+            if exc is not None and not isinstance(exc, _StageAbort):
                 raise exc
 
     # 图正常结束时，若取消在 TeamCompleted 派生前被触发，同样转 TeamFailed
