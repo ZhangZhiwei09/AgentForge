@@ -30,6 +30,7 @@ from src.agent.executor import AgentExecutor
 from src.agent.router.pipeline import QueryRouter
 from src.agent.diagnosis.route_agent import DiagnosisRouteAgent
 from src.agent.context_builder import ContextBuilder
+from src.agent.redis_memory import mirror_message
 from src.agent.tools.registry import tool_registry
 from src.agent.types import (
     ClarificationNeeded,
@@ -306,6 +307,9 @@ async def _handle_chat(
             db.add(user_msg)
             await db.commit()
 
+            # 镜像到 Redis 短期记忆窗口（尽力而为，失败零影响）
+            await mirror_message(db, actual_conv_id, user_msg)
+
             # ── 更新会话 updated_at ──
             conv.updated_at = datetime.now(timezone.utc)
             db.add(conv)
@@ -387,6 +391,9 @@ async def _handle_chat(
                 )
                 db.add(assistant_msg)
                 await db.commit()
+
+                # 镜像到 Redis 短期记忆窗口（尽力而为，失败零影响）
+                await mirror_message(db, actual_conv_id, assistant_msg)
 
             # ── 7. 异步压缩检查（非阻塞，失败不影响主流程）──
             try:

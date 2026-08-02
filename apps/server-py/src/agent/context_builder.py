@@ -10,6 +10,10 @@ Pipeline:
     1. Token 预算管理 —— 不是按条数，而是按 token 数截断
     2. 滑动窗口 —— 最近 N 条保持原始，旧消息用摘要替代
     3. 摘要注入 —— 摘要放入 SystemMessage（背景知识），而非对话消息
+
+短期记忆（Redis）:
+    摘要与消息窗口优先读 Redis 短期记忆存储层，miss/异常自动回退 PG。
+    PG 始终是事实源；返回结构（ContextResult）与纯 PG 路径完全一致。
 """
 
 import logging
@@ -19,7 +23,9 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.chat import Conversation, ConversationMemory, Message
+from src.agent.redis_memory import RedisMemoryStore, StoredMessage, StoredSummary, get_memory_store
+from src.config import settings
+from src.models.chat import ConversationMemory, Message
 
 logger = logging.getLogger(__name__)
 
@@ -76,11 +82,21 @@ class ContextBuilder:
         max_context_tokens: int = MAX_CONTEXT_TOKENS,
         raw_window: int = RAW_WINDOW,
         system_prompt: str | None = None,
+        memory_store: RedisMemoryStore | None = None,
+        verify_latest_id: bool | None = None,
     ) -> None:
         self._db = db
         self._max_context_tokens = max_context_tokens
         self._raw_window = raw_window
         self._system_prompt = system_prompt or SYSTEM_PROMPT
+        # 短期记忆存储：显式传入优先；否则解析共享单例（未启用时返回 None → 纯 PG）
+        self._memory_store = memory_store if memory_store is not None else get_memory_store()
+        # 窗口新鲜度核对开关：显式传入优先；默认取配置（生产默认 false = 纯 Redis 读）
+        self._verify_latest_id = (
+            settings.redis_memory_verify_latest_id
+            if verify_latest_id is None
+            else verify_latest_id
+        )
 
     async def build(
         self, conversation_id: str, user_message: str
@@ -94,12 +110,11 @@ class ContextBuilder:
         Returns:
             ContextResult: 包含组装好的 messages 列表和元信息
         """
-        # ── 1. 加载 Conversation + Memory ──
-        conv = await self._load_conversation(conversation_id)
-        memory = await self._load_memory(conversation_id)
+        # ── 1. 加载记忆（Redis 摘要优先，miss/异常 → PG）──
+        memory = await self._load_memory_or_redis(conversation_id)
 
-        # ── 2. 加载最近消息 ──
-        recent_messages = await self._load_recent_messages(conversation_id)
+        # ── 2. 加载最近消息（Redis 窗口优先，miss/stale/异常 → PG）──
+        recent_messages = await self._load_recent_messages_or_redis(conversation_id)
 
         # ── 3. 构建 System Prompt ──
         system_content = self._system_prompt
@@ -114,7 +129,7 @@ class ContextBuilder:
         budget = self._max_context_tokens - _estimate_tokens(user_message)
 
         # 从最近的消息倒序取，直到 budget 用完
-        selected: list[Message] = []
+        selected: list[Message | StoredMessage] = []
         for msg in reversed(recent_messages):
             tokens = _estimate_tokens(msg.content)
             if budget - tokens < 0:
@@ -144,17 +159,62 @@ class ContextBuilder:
             estimated_tokens=total_tokens,
         )
 
-    async def _load_conversation(self, conversation_id: str) -> Conversation | None:
-        result = await self._db.execute(
-            select(Conversation).where(Conversation.id == conversation_id)
-        )
-        return result.scalar_one_or_none()
-
     async def _load_memory(self, conversation_id: str) -> ConversationMemory | None:
         result = await self._db.execute(
             select(ConversationMemory).where(
                 ConversationMemory.conversation_id == conversation_id
             )
+        )
+        return result.scalar_one_or_none()
+
+    async def _load_memory_or_redis(
+        self, conversation_id: str
+    ) -> StoredSummary | ConversationMemory | None:
+        """摘要优先读 Redis；miss/异常 → 回退 PG ConversationMemory。"""
+        if self._memory_store is not None:
+            cached = await self._memory_store.get_summary(conversation_id)
+            if cached is not None:
+                return cached
+        return await self._load_memory(conversation_id)
+
+    async def _load_recent_messages_or_redis(
+        self, conversation_id: str
+    ) -> list[Message | StoredMessage]:
+        """最近消息窗口优先读 Redis；miss/stale/异常 → 回退 PG。"""
+        if self._memory_store is not None:
+            window = await self._memory_store.get_window(conversation_id)
+            if window is not None and await self._is_window_fresh(
+                conversation_id, window
+            ):
+                return window
+        return await self._load_recent_messages(conversation_id)
+
+    async def _is_window_fresh(
+        self, conversation_id: str, window: list[StoredMessage]
+    ) -> bool:
+        """窗口新鲜度核对。
+
+        verify 关闭（生产默认）时直接信任窗口 —— 消息由写入路径同步镜像，
+        响应返回时窗口必含该轮消息；verify 开启时对 PG 做单行 last-id 核对，
+        不一致视为 stale → 回退 PG。
+        """
+        if not self._verify_latest_id:
+            return True
+        if not window:
+            return False
+        latest_id = await self._latest_message_id(conversation_id)
+        if latest_id is None:
+            # PG 不可用：信任 Redis 窗口兜底（比无历史可用更可取）
+            return True
+        return window[-1].id == latest_id
+
+    async def _latest_message_id(self, conversation_id: str) -> str | None:
+        """PG 最新消息 id（轻量单行核对）。"""
+        result = await self._db.execute(
+            select(Message.id)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.created_at.desc())
+            .limit(1)
         )
         return result.scalar_one_or_none()
 
