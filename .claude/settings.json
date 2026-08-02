@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if ! pnpm typecheck 1>&2; then echo '{\"continue\":false,\"systemMessage\":\"Typecheck failed\",\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Typecheck failed. Fix type errors before committing.\"}}'; exit 0; fi; if ! pnpm test 1>&2; then echo '{\"systemMessage\":\"Tests failed — please review before pushing\"}'; fi; exit 0",
+            "command": "if ! (cd \"$(git rev-parse --show-toplevel)\" && pnpm typecheck) 1>&2; then echo '{\"continue\":false,\"systemMessage\":\"Typecheck failed\",\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Typecheck failed. Fix type errors before committing.\"}}'; exit 0; fi; if ! (cd \"$(git rev-parse --show-toplevel)\" && pnpm test) 1>&2; then echo '{\"systemMessage\":\"Tests failed — please review before pushing\"}'; fi; exit 0",
             "if": "Bash(git commit *)",
             "timeout": 180,
             "statusMessage": "Running pre-commit checks (typecheck + test)..."
