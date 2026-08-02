@@ -19,6 +19,15 @@ class Settings(BaseSettings):
     # ── Redis ───────────────────────────────────────────
     redis_url: str = Field(default="redis://localhost:6379")
 
+    # ── Redis 短期记忆（短期记忆存储层）──────────────────
+    # 最近消息滑动窗口 + 摘要镜像到 Redis，PG 始终是事实源。
+    # Redis 不可用时自动降级读 PG；写入失败只记结构化日志、零影响主流程。
+    redis_memory_enabled: bool = Field(default=True)             # 总开关，False 时全走 PG（等价现状）
+    redis_memory_window_size: int = Field(default=20)            # 窗口原始消息条数 = RAW_WINDOW(10) * 2
+    redis_memory_message_ttl_seconds: int = Field(default=604800)  # 消息窗口 TTL（7 天），滑动刷新
+    redis_memory_summary_ttl_seconds: int = Field(default=2592000) # 摘要 TTL（30 天），滑动刷新
+    redis_memory_verify_latest_id: bool = Field(default=False)     # 读窗口时对 PG 做 last-id 新鲜度核对；生产默认关（纯 Redis 读）
+
     # ── Auth ────────────────────────────────────────────
     # 与 TS 端共享同一个 JWT_SECRET，用于验证 TS 签发的 Token
     jwt_secret: str = Field(default="agentforge-dev-secret-change-in-production")

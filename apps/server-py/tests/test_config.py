@@ -36,6 +36,27 @@ class TestSettings:
                 if v is not None:
                     os.environ[k] = v
 
+    def test_redis_memory_defaults(self):
+        """Redis 短期记忆配置应有纯代码默认值（排除 .env 与环境变量）。"""
+        env_vars = [
+            "REDIS_MEMORY_ENABLED", "REDIS_MEMORY_WINDOW_SIZE",
+            "REDIS_MEMORY_MESSAGE_TTL_SECONDS", "REDIS_MEMORY_SUMMARY_TTL_SECONDS",
+            "REDIS_MEMORY_VERIFY_LATEST_ID",
+        ]
+        saved = {k: os.environ.pop(k, None) for k in env_vars}
+
+        try:
+            settings = Settings(_env_file=None)
+            assert settings.redis_memory_enabled is True
+            assert settings.redis_memory_window_size == 20
+            assert settings.redis_memory_message_ttl_seconds == 604800
+            assert settings.redis_memory_summary_ttl_seconds == 2592000
+            assert settings.redis_memory_verify_latest_id is False
+        finally:
+            for k, v in saved.items():
+                if v is not None:
+                    os.environ[k] = v
+
     def test_port_is_int(self):
         """PORT 应为 int 类型。"""
         settings = Settings()

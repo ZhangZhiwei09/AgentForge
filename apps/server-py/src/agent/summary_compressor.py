@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.agent.redis_memory import RedisMemoryStore, get_memory_store
 from src.models.chat import ConversationMemory, Message
 from src.providers.registry import get_provider, resolve_model
 from src.schemas.chat import ChatMessage
@@ -63,8 +64,15 @@ class SummaryCompressor:
         await compressor.compress(conversation_id)
     """
 
-    def __init__(self, db: AsyncSession) -> None:
+    def __init__(
+        self,
+        db: AsyncSession,
+        *,
+        memory_store: RedisMemoryStore | None = None,
+    ) -> None:
         self._db = db
+        # 摘要镜像存储：显式传入优先；否则解析共享单例（未启用时返回 None → 不镜像）
+        self._memory_store = memory_store if memory_store is not None else get_memory_store()
 
     async def compress(self, conversation_id: str) -> None:
         """检查并执行压缩。
@@ -239,6 +247,15 @@ class SummaryCompressor:
             self._db.add(mem)
 
         await self._db.commit()
+
+        # 镜像摘要到 Redis 短期记忆（尽力而为，失败零影响；压缩逻辑仍以 PG 为准）
+        if self._memory_store is not None:
+            await self._memory_store.set_summary(
+                conversation_id,
+                summary=summary,
+                covered_until_message_id=covered_until_message_id,
+                token_count=token_count,
+            )
 
     async def _call_llm(self, prompt: str) -> str | None:
         """调用 LLM 生成摘要。非流式，返回完整结果。"""
