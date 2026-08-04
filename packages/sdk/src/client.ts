@@ -31,6 +31,8 @@ import type {
   KnowledgeRegressionCaseDTO,
   CreateKnowledgeRegressionCaseRequest,
   CreateKnowledgeRegressionTestSetRequest,
+  KnowledgeRegressionMetricsDTO,
+  KnowledgeRegressionMetricsQuery,
 } from "@agentforge/shared-types";
 export interface AgentForgeConfig {
   baseUrl: string;
@@ -483,6 +485,19 @@ export class AgentForgeClient {
       : "";
     return this.request<KnowledgeRegressionRunDTO[]>(
       `/api/knowledge/bases/${encodeURIComponent(kbId)}/regression/runs${suffix}`,
+    );
+  }
+
+  async getKnowledgeRegressionMetrics(
+    kbId: string,
+    opts?: KnowledgeRegressionMetricsQuery,
+  ): Promise<KnowledgeRegressionMetricsDTO> {
+    const params = new URLSearchParams();
+    if (opts?.testSetId) params.set("testSetId", opts.testSetId);
+    if (opts?.limit != null) params.set("limit", String(opts.limit));
+    const qs = params.toString();
+    return this.request<KnowledgeRegressionMetricsDTO>(
+      `/api/knowledge/bases/${encodeURIComponent(kbId)}/regression/metrics${qs ? `?${qs}` : ""}`,
     );
   }
 

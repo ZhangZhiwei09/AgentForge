@@ -137,3 +137,23 @@ knowledgeRegressionRoutes.get(
     return c.json(runs);
   },
 );
+
+const metricsQuerySchema = z.object({
+  testSetId: z.string().min(1).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(30).optional(),
+});
+
+knowledgeRegressionRoutes.get(
+  "/api/knowledge/bases/:kbId/regression/metrics",
+  zValidator("query", metricsQuerySchema),
+  async (c) => {
+    const kbId = c.req.param("kbId");
+    const kb = await requireKnowledgeBase(kbId);
+    if (!kb) return c.json({ detail: "知识库不存在" }, 404);
+
+    const { testSetId, limit } = c.req.valid("query");
+    const service = new KnowledgeRegressionService();
+    const metrics = await service.getRegressionMetrics(kbId, testSetId, limit);
+    return c.json(metrics);
+  },
+);

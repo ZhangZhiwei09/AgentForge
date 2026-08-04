@@ -342,3 +342,66 @@ export interface KnowledgeRegressionRunDTO {
   completedAt: string | null;
   items: KnowledgeRegressionRunItemDTO[];
 }
+
+// ── 回归评测指标 ──
+
+export interface KnowledgeRegressionRunMetricsDTO {
+  runId: string;
+  testSetId: string;
+  createdAt: string;
+  totalCases: number;
+  hitRate: number;
+  mrr: number;
+  recallAtK: number;
+  precisionAtK: number;
+  ndcgAtK: number;
+  averageRank: number | null;
+  averageElapsedMs: number | null;
+}
+
+export interface KnowledgeRegressionAverageMetricsDTO {
+  hitRate: number;
+  mrr: number;
+  recallAtK: number;
+  precisionAtK: number;
+  ndcgAtK: number;
+  averageRank: number | null;
+  averageElapsedMs: number | null;
+}
+
+export interface KnowledgeRegressionMetricsSummaryDTO {
+  runCount: number;
+  totalCases: number;
+  latest: KnowledgeRegressionRunMetricsDTO | null;
+  average: KnowledgeRegressionAverageMetricsDTO | null;
+}
+
+export interface KnowledgeRegressionQueryMetricDTO {
+  caseId: string;
+  caseName: string;
+  query: string;
+  passed: boolean;
+  rank: number | null;
+  reciprocalRank: number;
+  relevant: boolean;
+  precisionAtK: number;
+  ndcgAtK: number;
+  matchedDocId: string | null;
+  failureReason: string | null;
+  elapsedMs: number;
+  relevantRanks: number[];
+  resultsSnapshot: KnowledgeRegressionResultSnapshotDTO[];
+}
+
+export interface KnowledgeRegressionMetricsDTO {
+  kbId: string;
+  testSetId: string | null;
+  summary: KnowledgeRegressionMetricsSummaryDTO | null;
+  trend: KnowledgeRegressionRunMetricsDTO[];
+  queries: KnowledgeRegressionQueryMetricDTO[];
+}
+
+export interface KnowledgeRegressionMetricsQuery {
+  testSetId?: string;
+  limit?: number;
+}

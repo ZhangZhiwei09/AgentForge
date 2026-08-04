@@ -198,4 +198,10 @@ export type {
   KnowledgeRegressionResultSnapshotDTO,
   KnowledgeRegressionRunItemDTO,
   KnowledgeRegressionRunDTO,
+  KnowledgeRegressionRunMetricsDTO,
+  KnowledgeRegressionAverageMetricsDTO,
+  KnowledgeRegressionMetricsSummaryDTO,
+  KnowledgeRegressionQueryMetricDTO,
+  KnowledgeRegressionMetricsDTO,
+  KnowledgeRegressionMetricsQuery,
 } from "./knowledge";

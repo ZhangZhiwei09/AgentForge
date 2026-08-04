@@ -2,6 +2,14 @@ import { randomUUID } from "crypto";
 import { prisma } from "../db.js";
 import { getDefaultEmbeddingProvider } from "./embeddings.js";
 import { KnowledgeService, type HybridSearchResult } from "./knowledge.js";
+import {
+  computeMetricsSummary,
+  evaluateQueryMetric,
+  evaluateRun,
+  type MetricsSummary,
+  type QueryMetric,
+  type RunMetrics,
+} from "./knowledge-eval-metrics.js";
 
 export type RegressionSearchMethod = "hybrid" | "semantic" | "keyword";
 
@@ -598,7 +606,11 @@ export class KnowledgeRegressionService {
     return this.mapRun(runRows[0], items);
   }
 
-  async listRuns(kbId: string, testSetId?: string): Promise<RegressionRunDTO[]> {
+  async listRuns(
+    kbId: string,
+    testSetId?: string,
+    limit = 20,
+  ): Promise<RegressionRunDTO[]> {
     const rows = await prisma.$queryRawUnsafe<Array<{
       id: string;
       testSetId: string;
@@ -624,16 +636,47 @@ export class KnowledgeRegressionService {
         WHERE kb_id = $1
           AND ($2::varchar IS NULL OR test_set_id = $2::varchar)
         ORDER BY created_at DESC
-        LIMIT 20
+        LIMIT $3
       `,
       kbId,
       testSetId ?? null,
+      limit,
     );
 
     if (rows.length === 0) return [];
     const runIds = rows.map((row) => row.id);
     const items = await this.listRunItems(runIds);
     return rows.map((row) => this.mapRun(row, items.filter((item) => item.runId === row.id)));
+  }
+
+  /**
+   * 聚合回归评测指标：汇总（summary）+ 时间正序趋势（trend）+ 最新一次 run 的逐条召回明细（queries）。
+   * 指标由 knowledge-eval-metrics 的纯函数从已有 run / item / case 数据计算，不改 schema。
+   */
+  async getRegressionMetrics(
+    kbId: string,
+    testSetId?: string,
+    limit = 30,
+  ): Promise<{
+    kbId: string;
+    testSetId: string | null;
+    summary: MetricsSummary;
+    trend: RunMetrics[];
+    queries: QueryMetric[];
+  }> {
+    const runs = (await this.listRuns(kbId, testSetId, limit)).reverse();
+    const cases = await this.listCases(kbId, testSetId);
+    const casesById = new Map(cases.map((testCase) => [testCase.id, testCase]));
+    const trend = runs.map((run) => evaluateRun(run, casesById));
+    const summary = computeMetricsSummary(trend);
+    const latestRun = runs[runs.length - 1] ?? null;
+    const queries = latestRun
+      ? latestRun.items.map((item) =>
+          evaluateQueryMetric(item, casesById.get(item.caseId) ?? null),
+        )
+      : [];
+
+    return { kbId, testSetId: testSetId ?? null, summary, trend, queries };
   }
 
   private async listRunItems(runIds: string[]): Promise<RegressionRunItemDTO[]> {
