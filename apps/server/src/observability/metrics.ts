@@ -65,6 +65,30 @@ export const circuitBreakerState = new Gauge({
   registers: [registry],
 });
 
+// ---- MCP Monitoring Metrics (CR4) ----
+
+export const mcpCallTotal = new Counter({
+  name: "mcp_call_total",
+  help: "Total number of MCP monitoring service calls",
+  labelNames: ["tool_name", "status"], // status = success | error
+  registers: [registry],
+});
+
+export const mcpCallDurationMs = new Histogram({
+  name: "mcp_call_duration_ms",
+  help: "MCP monitoring service call duration in milliseconds",
+  labelNames: ["tool_name"],
+  buckets: [5, 20, 50, 100, 250, 500, 1000, 2000, 3000, 5000, 10000],
+  registers: [registry],
+});
+
+export const mcpCallError = new Counter({
+  name: "mcp_call_error_total",
+  help: "MCP monitoring service call errors",
+  labelNames: ["tool_name", "code"], // code = TIMEOUT | NETWORK_ERROR | API_ERROR | NOT_CONNECTED
+  registers: [registry],
+});
+
 // ---- Workflow Metrics (V6) ----
 
 export const workflowRunsTotal = new Counter({

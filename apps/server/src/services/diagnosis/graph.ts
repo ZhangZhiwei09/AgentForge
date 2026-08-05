@@ -16,7 +16,7 @@ import {
   type DiagnosisKnowledgeRetriever,
 } from "./nodes.js";
 import {
-  MockDiagnosisMonitoringTools,
+  McpDiagnosisMonitoringTools,
   type DiagnosisMonitoringTools,
 } from "./tools/monitoring-tools.js";
 
@@ -36,7 +36,7 @@ export class DiagnosisService {
 
   constructor(deps: DiagnosisServiceDeps = {}) {
     this.knowledgeRetriever = deps.knowledgeRetriever ?? new KnowledgeService();
-    this.monitoringTools = deps.monitoringTools ?? new MockDiagnosisMonitoringTools();
+    this.monitoringTools = deps.monitoringTools ?? new McpDiagnosisMonitoringTools();
   }
 
   async run(input: RunDiagnosisInput): Promise<DiagnosisResponse> {

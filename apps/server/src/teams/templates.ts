@@ -47,7 +47,6 @@ const identityDiagnosis: TeamTemplate = {
         ].join("\n"),
         tools: [
           "query_trace_log",
-          "query_merchant_metrics",
           "search_knowledge_base",
         ],
         maxIterations: 5,
@@ -80,8 +79,6 @@ const identityDiagnosis: TeamTemplate = {
         ].join("\n"),
         tools: [
           "query_trace_log",
-          "query_merchant_metrics",
-          "query_error_code_distribution",
           "search_knowledge_base",
         ],
         maxIterations: 5,

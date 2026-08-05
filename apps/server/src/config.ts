@@ -113,4 +113,14 @@ export const settings = {
   memorySummaryTrigger: parseInt(process.env.MEMORY_SUMMARY_TRIGGER || "30", 10),
   // 短期记忆 TTL（天），过期自动清理
   memoryTtlDays: parseInt(process.env.MEMORY_TTL_DAYS || "7", 10),
+
+  // ── MCP 模拟监控系统 ─────────────────────────────
+  // 生命周期由部署环境负责（dev 用脚本/turbo task，生产 docker-compose/k8s），
+  // 本服务不主动 spawn 该进程。URL 为 Streamable HTTP 端点。
+  mcpMonitoringUrl:
+    process.env.MCP_MONITORING_URL || "http://127.0.0.1:3100/mcp",
+  // 单次 MCP 调用的超时（毫秒），防 MCP server 卡死拖死 agent
+  mcpCallTimeoutMs: parseInt(process.env.MCP_CALL_TIMEOUT_MS || "3000", 10),
+  // 可选 API Key：设置了则请求携带 Authorization: Bearer <key>；开发环境留空关闭认证
+  mcpMonitoringApiKey: process.env.MCP_API_KEY || "",
 };
