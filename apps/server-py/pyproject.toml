@@ -22,6 +22,7 @@ dependencies = [
     "langgraph-checkpoint-postgres>=3.1.1",
     "psycopg-binary>=3.3.4",
     "redis>=5.0",
+    "mcp>=2.0.0",
 ]
 
 [build-system]
