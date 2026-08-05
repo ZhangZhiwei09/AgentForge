@@ -6,6 +6,7 @@ import { prisma } from "./db.js";
 import { logger } from "@agentforge/logger";
 import { authService } from "./services/auth.js";
 import { initTracing } from "./observability/tracing.js";
+import { monitoringMcpClient } from "./mcp/monitoring-client.js";
 import {
   initObservability,
   shutdownObservability,
@@ -64,6 +65,14 @@ async function main() {
   const httpServer = serve({
     fetch: app.fetch,
     port: settings.port,
+  });
+
+  // 初始化 MCP 监控客户端连接（best-effort：失败仅告警，不阻塞启动；
+  // 后续工具调用会惰性重连，监控工具降级返回 failedResult）
+  monitoringMcpClient.init().then((ok) => {
+    if (!ok) {
+      logger.warn("MCP 监控系统暂不可用，诊断监控工具将降级返回");
+    }
   });
 
   logger.info({ port: settings.port }, "Server listening");

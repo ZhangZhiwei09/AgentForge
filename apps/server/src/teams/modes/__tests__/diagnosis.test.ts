@@ -199,7 +199,7 @@ function makeTeamDefinition(overrides?: Partial<TeamDefinition>): TeamDefinition
         displayName: "后端排查专家",
         description: "后端排查",
         systemPrompt: "你是后端排查专家。",
-        tools: ["query_trace_log", "query_merchant_metrics"],
+        tools: ["query_trace_log", "search_knowledge_base"],
         maxIterations: 3,
         priority: 8,
         canDelegate: false,

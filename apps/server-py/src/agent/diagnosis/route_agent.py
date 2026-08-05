@@ -126,7 +126,6 @@ IDENTITY_DIAGNOSIS_ROLES: dict[str, AgentRole] = {
         ]),
         tools=[
             "query_trace_log",
-            "query_merchant_metrics",
             "search_knowledge_base",
         ],
         max_iterations=5,
@@ -158,8 +157,6 @@ IDENTITY_DIAGNOSIS_ROLES: dict[str, AgentRole] = {
         ]),
         tools=[
             "query_trace_log",
-            "query_merchant_metrics",
-            "query_error_code_distribution",
             "search_knowledge_base",
         ],
         max_iterations=5,

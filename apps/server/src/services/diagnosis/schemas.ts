@@ -66,7 +66,7 @@ export const DiagnosisKnowledgeEvidenceSchema = z.object({
 });
 
 export const DiagnosisToolCallSchema = z.object({
-  name: z.enum(["query_trace_log", "query_merchant_metrics"]),
+  name: z.enum(["query_trace_log"]),
   reason: z.string(),
   args: z.record(z.unknown()),
 });

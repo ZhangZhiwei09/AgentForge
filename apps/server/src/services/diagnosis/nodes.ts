@@ -162,17 +162,9 @@ export function buildToolPlan(intent: DiagnosisIntent, entities: DiagnosisEntiti
   }
 
   if (intent === "merchant_rate_drop") {
-    return [
-      {
-        name: "query_merchant_metrics",
-        reason: "商户通过率下降需要查询成功率、基线、错误分布和耗时指标。",
-        args: {
-          merchantId: entities.merchantId,
-          product: entities.product,
-          timeRange: entities.timeRange,
-        },
-      },
-    ];
+    // 商户维度指标工具已随 MCP 能力收缩退役（见 docs/design 监控 MCP 管线方案）。
+    // 该意图当前无可用监控工具，退回知识库 + 引导提供 traceId 走单笔链路诊断。
+    return [];
   }
 
   return [];
@@ -375,8 +367,11 @@ function buildConclusion(state: DiagnosisState): string {
   const firstTool = state.toolResults[0];
   const data = firstTool?.data ?? {};
 
-  if (state.intent === "merchant_rate_drop" && firstTool) {
-    return String(data.conclusion ?? firstTool.summary);
+  if (state.intent === "merchant_rate_drop") {
+    if (firstTool) {
+      return String(data.conclusion ?? firstTool.summary);
+    }
+    return "商户维度指标查询能力当前不可用，无法直接定位通过率下降原因。请提供 traceId 或 orderId，我会查询单笔链路继续定位；或联系人工结合商户后台指标进一步排查。";
   }
 
   if (state.intent === "single_trace_diagnosis" && firstTool) {
@@ -397,10 +392,9 @@ function buildConclusion(state: DiagnosisState): string {
 function renderNextSteps(state: DiagnosisState): string {
   if (state.intent === "merchant_rate_drop") {
     return [
-      "1. 对比指定时间段成功率和近 7 日基线。",
-      "2. 查看 top 错误码是否集中在超时、活体失败或网络异常。",
-      "3. 按端类型和 SDK 版本拆分，确认是否为客户端版本或环境问题。",
-      "4. 若服务端耗时升高，同步接口链路和告警状态。",
+      "1. 提供 traceId 或 orderId，我查询单笔链路定位失败阶段和错误码。",
+      "2. 对照错误码知识库确认原因和用户侧处理方式。",
+      "3. 若为批量失败，联系人工结合商户后台指标、告警和发布记录排查。",
     ].join("\n");
   }
 
@@ -426,7 +420,7 @@ function renderNextSteps(state: DiagnosisState): string {
 
 function renderReplyTemplate(state: DiagnosisState): string {
   if (state.intent === "merchant_rate_drop") {
-    return "已按商户维度查看指定时间段指标，当前建议优先关注错误分布最高的失败原因，并结合端类型 / SDK 版本继续拆分影响范围。";
+    return "当前无法直接查询商户维度指标，请提供 traceId 或 orderId 以便我定位单笔链路；如需商户批量数据，建议联系人工结合监控后台排查。";
   }
 
   if (state.intent === "single_trace_diagnosis") {
