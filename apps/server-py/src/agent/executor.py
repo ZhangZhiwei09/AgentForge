@@ -156,7 +156,6 @@ class AgentExecutor:
             graph = build_react_graph(
                 model=model,
                 tool_defs=tool_defs,
-                system_prompt=effective_system_prompt,
                 registry=self._registry,
                 conversation_id=context.conversation_id,
                 checkpointer=checkpointer,

@@ -32,7 +32,6 @@ DEFAULT_MAX_ITERATIONS = 5
 def build_react_graph(
     model: ProviderChatModel,
     tool_defs: list[dict],
-    system_prompt: str,
     registry: ToolRegistry,
     conversation_id: str,
     checkpointer=None,
@@ -43,8 +42,6 @@ def build_react_graph(
     Args:
         model: ProviderChatModel 适配器（包装现有 LLMProvider）。
         tool_defs: OpenAI function calling 格式的工具定义列表。
-        system_prompt: system prompt（保留参数；当前由初始 state 注入，
-            节点内不使用）。
         registry: ToolRegistry，工具节点执行委托对象。
         conversation_id: 会话 ID，透传给工具执行。
         checkpointer: 可选的 LangGraph checkpointer。

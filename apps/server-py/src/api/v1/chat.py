@@ -339,7 +339,6 @@ async def _handle_chat(
                 diagnosis_ctx = RouteContext(
                     conversation_id=actual_conv_id,
                     user_message=message,
-                    history=[{"role": m.__class__.__name__.replace("Message", "").lower(), "content": m.content} for m in ctx_result.messages],
                     resolved_model=resolved["model_id"],
                     provider_name=resolved["provider_name"],
                     assistant_msg_id=assistant_msg_id,

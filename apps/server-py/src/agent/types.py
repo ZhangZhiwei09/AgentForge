@@ -164,7 +164,6 @@ class RouteContext:
     conversation_id: str = ""
     session_id: str | None = None
     user_message: str = ""
-    history: list = field(default_factory=list)
     prebuilt_messages: list = field(default_factory=list)  # ContextBuilder 预组装的 LangChain messages
     resolved_model: str = ""
     provider_name: str = ""
