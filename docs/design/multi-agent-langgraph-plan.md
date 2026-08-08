@@ -15,7 +15,7 @@
 - Checkpointing 已接入 `AsyncPostgresSaver`（G1，`checkpoint.py`）
 - `langgraph 1.2.9` / `langchain-core 1.5.1` 已安装，`create_react_agent`、`StateGraph`、`interrupt` 均可用
 
-**边界**：Python 后端使用 LangGraph 独立于 TS Server 的 ADR-001 决策（`python-core-upgrade-plan.md` 已声明）。本方案**不改动 TS `teams/` 模块**。
+**边界**：Python 后端使用 LangGraph 独立于 TS Server 侧的移除 LangGraph 决策（`python-core-upgrade-plan.md` 已声明）。本方案**不改动 TS `teams/` 模块**。
 
 **核心设计决策（v2，基于 PoC 实证）**：不采用"把 ReAct 编译图 `add_node()` 注册为薄子图"的方案，而采用 **"胖阶段节点"** —— 每个阶段（frontend/backend/leader）是父图里的普通 async 节点，内部自行驱动 ReAct 图、把解析后的产物**显式 return 进父图状态**，token 经 `asyncio.Queue` 侧信道实时流出。原因见 §3.2。
 
@@ -347,7 +347,6 @@ pnpm --filter @agentforge/server-py test        # 全量
 ## 8. 关联文档
 
 - `docs/design/python-core-upgrade-plan.md` — G5（多 Agent 编排，P3）、T1（DiagnosisMode → LangGraph，P2）
-- `docs/decisions/adr-001-remove-langgraph.md` — TS 侧决策；Python 后端不受其约束
 - `docs/architecture/routing.md` — 路由架构（原 `overview.md` 已删除，引用已迁移至此）
 - `docs/agent-runtime.md` — Agent Runtime 说明
 
@@ -355,7 +354,7 @@ pnpm --filter @agentforge/server-py test        # 全量
 
 ## 9. 明确不做（Scope Exclusions）
 
-- 不改 TS `teams/` 模块（ADR-001 约束）
+- 不改 TS `teams/` 模块（TS 侧移除 LangGraph 决策的约束）
 - 不引入 `create_react_agent` 作为默认执行器（需 LangChain Tool 包装，改动大、收益小；继续复用 `ToolRegistry` + 自建 ReAct 图）
 - 不把 ReAct 编译图作为"薄子图"注册（PoC 证明状态不可回流 + 嵌套事件歧义，见 §3.2）
 - 不解决诊断质量问题（T4 mock 工具、P1 会话持久化为独立工作项）
