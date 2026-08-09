@@ -14,10 +14,13 @@
 """
 
 import asyncio
+import functools
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
+from typing import TypeVar, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -43,6 +46,7 @@ from src.agent.types import (
     DiagnosisWaitingInput,
     RouteContext,
     RouteName,
+    RouterDecision,
     StreamDone,
     StreamError,
     StreamMeta,
@@ -57,34 +61,36 @@ from src.schemas.chat import ChatMessage, ChatRequest
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 
+logger = logging.getLogger(__name__)
+
+T = TypeVar("T")
+
 # ── 模块级单例 ──
-_executor: AgentExecutor | None = None
-_chat_agent: ChatAgent | None = None
-_diagnosis_agent: DiagnosisRouteAgent | None = None
+_singletons: dict[type, object] = {}
+
+
+def _get_singleton(cls: type[T]) -> T:
+    """惰性初始化并复用进程内单例。"""
+    instance = _singletons.get(cls)
+    if instance is None:
+        instance = _singletons[cls] = cls()
+    return cast(T, instance)
+
 
 # ── 会话级并发控制 ──
 _conversation_locks: dict[str, asyncio.Lock] = {}
 
 
 def _get_executor() -> AgentExecutor:
-    global _executor
-    if _executor is None:
-        _executor = AgentExecutor()
-    return _executor
+    return _get_singleton(AgentExecutor)
 
 
 def _get_chat_agent() -> ChatAgent:
-    global _chat_agent
-    if _chat_agent is None:
-        _chat_agent = ChatAgent()
-    return _chat_agent
+    return _get_singleton(ChatAgent)
 
 
 def _get_diagnosis_agent() -> DiagnosisRouteAgent:
-    global _diagnosis_agent
-    if _diagnosis_agent is None:
-        _diagnosis_agent = DiagnosisRouteAgent()
-    return _diagnosis_agent
+    return _get_singleton(DiagnosisRouteAgent)
 
 
 def _acquire_lock(conversation_id: str) -> asyncio.Lock:
@@ -131,84 +137,104 @@ SAFETY_RESPONSE = "抱歉，您的消息包含不安全内容，无法处理。�
 # ── SSE 序列化 ──────────────────────────────────────────────────
 
 
+@functools.singledispatch
+def _sse_payload(event: object) -> dict:
+    """将单个 Agent 事件序列化为 SSE payload dict（未知类型走兜底）。
+
+    新增事件类型时，只需再注册一个 _sse_payload 的 overload。
+    """
+    return {
+        "type": getattr(event, "type", "unknown"),
+        "message_id": getattr(event, "message_id", ""),
+    }
+
+
+@_sse_payload.register
+def _(event: StreamToken) -> dict:
+    return {"type": "token", "content": event.content, "message_id": event.message_id}
+
+
+@_sse_payload.register
+def _(event: StreamDone) -> dict:
+    return {
+        "type": "done",
+        "message_id": event.message_id,
+        "usage": event.usage,
+        "suggestions": event.suggestions,
+        "validated": event.validated,
+        "fallback_used": event.fallback_used,
+        "route": event.route,
+    }
+
+
+@_sse_payload.register
+def _(event: StreamError) -> dict:
+    return {"type": "error", "content": event.content}
+
+
+@_sse_payload.register
+def _(event: StreamMeta) -> dict:
+    return {
+        "type": event.type,
+        "message_id": event.message_id,
+        "conversation_id": getattr(event, "conversation_id", ""),
+        "session_id": event.session_id,
+        "model": event.model,
+        "provider": event.provider,
+        "route": event.route,
+        "intent": getattr(event, "intent", ""),
+        "within_service_hours": getattr(event, "within_service_hours", None),
+        "memory_count": getattr(event, "memory_count", 0),
+    }
+
+
+@_sse_payload.register
+def _(event: DiagnosisStarted) -> dict:
+    return {"type": "diagnosis_started", "message_id": event.message_id, "agents": event.agents}
+
+
+@_sse_payload.register
+def _(event: DiagnosisPhase) -> dict:
+    return {"type": "diagnosis_phase", "message_id": event.message_id, "phase": event.phase, "agent": event.agent, "label": event.label}
+
+
+@_sse_payload.register
+def _(event: DiagnosisPhaseDone) -> dict:
+    return {"type": "diagnosis_phase_done", "message_id": event.message_id, "phase": event.phase, "agent": event.agent, "label": event.label, "summary": event.summary}
+
+
+@_sse_payload.register
+def _(event: DiagnosisCompleted) -> dict:
+    return {"type": "diagnosis_completed", "message_id": event.message_id, "output": event.output}
+
+
+@_sse_payload.register
+def _(event: ClarificationNeeded) -> dict:
+    return {
+        "type": "clarification_needed",
+        "message_id": event.message_id,
+        "intent": event.intent,
+        "missing_fields": event.missing_fields,
+        "prompt_message": event.prompt_message,
+        "hints": event.hints,
+    }
+
+
+@_sse_payload.register
+def _(event: DiagnosisWaitingInput) -> dict:
+    # Phase 3b HITL：诊断在阶段边界暂停，等待用户补充信息。
+    return {
+        "type": "diagnosis_waiting_input",
+        "message_id": event.message_id,
+        "message": event.message,
+        "missing_fields": event.missing_fields,
+    }
+
+
 async def _to_sse(events: AsyncIterator) -> AsyncIterator[str]:
     """将 Agent 事件流转为 SSE 格式字符串流。"""
     async for event in events:
-        if isinstance(event, StreamToken):
-            payload = json.dumps(
-                {"type": "token", "content": event.content, "message_id": event.message_id},
-                ensure_ascii=False,
-            )
-        elif isinstance(event, StreamDone):
-            payload = json.dumps(
-                {
-                    "type": "done",
-                    "message_id": event.message_id,
-                    "usage": event.usage,
-                    "suggestions": event.suggestions,
-                    "validated": event.validated,
-                    "fallback_used": event.fallback_used,
-                    "route": event.route,
-                },
-                ensure_ascii=False,
-            )
-        elif isinstance(event, StreamError):
-            payload = json.dumps(
-                {"type": "error", "content": event.content},
-                ensure_ascii=False,
-            )
-        elif isinstance(event, StreamMeta):
-            payload = json.dumps(
-                {
-                    "type": event.type,
-                    "message_id": event.message_id,
-                    "conversation_id": getattr(event, "conversation_id", ""),
-                    "session_id": event.session_id,
-                    "model": event.model,
-                    "provider": event.provider,
-                    "route": event.route,
-                    "intent": getattr(event, "intent", ""),
-                    "within_service_hours": getattr(event, "within_service_hours", None),
-                    "memory_count": getattr(event, "memory_count", 0),
-                },
-                ensure_ascii=False,
-            )
-        elif isinstance(event, DiagnosisStarted):
-            payload = json.dumps(
-                {"type": "diagnosis_started", "message_id": event.message_id, "agents": event.agents},
-                ensure_ascii=False,
-            )
-        elif isinstance(event, DiagnosisPhase):
-            payload = json.dumps(
-                {"type": "diagnosis_phase", "message_id": event.message_id, "phase": event.phase, "agent": event.agent, "label": event.label},
-                ensure_ascii=False,
-            )
-        elif isinstance(event, DiagnosisPhaseDone):
-            payload = json.dumps(
-                {"type": "diagnosis_phase_done", "message_id": event.message_id, "phase": event.phase, "agent": event.agent, "label": event.label, "summary": event.summary},
-                ensure_ascii=False,
-            )
-        elif isinstance(event, DiagnosisCompleted):
-            payload = json.dumps(
-                {"type": "diagnosis_completed", "message_id": event.message_id, "output": event.output},
-                ensure_ascii=False,
-            )
-        elif isinstance(event, ClarificationNeeded):
-            payload = json.dumps(
-                {"type": "clarification_needed", "message_id": event.message_id, "intent": event.intent, "missing_fields": event.missing_fields, "prompt_message": event.prompt_message, "hints": event.hints},
-                ensure_ascii=False,
-            )
-        elif isinstance(event, DiagnosisWaitingInput):
-            # Phase 3b HITL：诊断在阶段边界暂停，等待用户补充信息。
-            payload = json.dumps(
-                {"type": "diagnosis_waiting_input", "message_id": event.message_id, "message": event.message, "missing_fields": event.missing_fields},
-                ensure_ascii=False,
-            )
-        else:
-            payload = json.dumps(
-                {"type": getattr(event, "type", "unknown"), "message_id": getattr(event, "message_id", "")},
-                ensure_ascii=False,
-            )
+        payload = json.dumps(_sse_payload(event), ensure_ascii=False)
         yield f"data: {payload}\n\n"
 
 
@@ -230,6 +256,31 @@ async def _stream_human(assistant_msg_id: str) -> AsyncIterator:
 # ── 会话持久化辅助函数 ──────────────────────────────────────
 
 
+async def _find_conversation(
+    db: AsyncSession, conv_id: str, *, conv_type: str | None = None
+) -> Conversation | None:
+    """按 id 查询会话，可选按类型过滤；不存在返回 None。
+
+    注意：不做归属校验，调用方按各自语义处理 403/404 或返回空。
+    """
+    stmt = select(Conversation).where(Conversation.id == conv_id)
+    if conv_type is not None:
+        stmt = stmt.where(Conversation.type == conv_type)
+    result = await db.execute(stmt)
+    return result.scalar_one_or_none()
+
+
+def _serialize_message(m: Message) -> dict:
+    """消息 → API 输出 dict（多个端点复用的统一序列化）。"""
+    return {
+        "id": m.id,
+        "role": m.role,
+        "type": m.type,
+        "content": m.content,
+        "timestamp": m.created_at.isoformat(),
+    }
+
+
 async def _get_or_create_conversation(
     db: AsyncSession, user_id: str, conversation_id: str | None
 ) -> Conversation:
@@ -239,13 +290,7 @@ async def _get_or_create_conversation(
     - 无 → 新建会话
     """
     if conversation_id:
-        result = await db.execute(
-            select(Conversation).where(
-                Conversation.id == conversation_id,
-                Conversation.type == "agent_chat",
-            )
-        )
-        conv = result.scalar_one_or_none()
+        conv = await _find_conversation(db, conversation_id, conv_type="agent_chat")
         if conv is not None:
             # 验证 ownership（防止跨用户访问）
             if conv.user_id != user_id:
@@ -272,6 +317,140 @@ async def _get_or_create_conversation(
 # ═══════════════════════════════════════════════════════════
 
 
+def _build_route_context(
+    *,
+    conversation_id: str,
+    user_message: str,
+    resolved_model: str,
+    provider_name: str,
+    assistant_msg_id: str,
+    intent: str,
+    prebuilt_messages: list | None = None,
+) -> RouteContext:
+    """构造 Agent 执行上下文（各路由共享的公共字段）。"""
+    return RouteContext(
+        conversation_id=conversation_id,
+        user_message=user_message,
+        prebuilt_messages=[] if prebuilt_messages is None else prebuilt_messages,
+        resolved_model=resolved_model,
+        provider_name=provider_name,
+        assistant_msg_id=assistant_msg_id,
+        intent=intent,
+    )
+
+
+def _select_events(
+    decision: RouterDecision,
+    *,
+    conversation_id: str,
+    user_message: str,
+    prebuilt_messages: list,
+    resolved_model: str,
+    provider_name: str,
+    assistant_msg_id: str,
+) -> AsyncIterator:
+    """按路由决策选择对应的事件流。
+
+    SAFETY → 安全拦截文案；HUMAN → 转人工；其余交给对应 Agent 执行。
+    """
+    route = decision.route
+
+    if route == RouteName.SAFETY:
+        return _stream_safety(assistant_msg_id)
+    if route == RouteName.HUMAN:
+        return _stream_human(assistant_msg_id)
+
+    if route == RouteName.CHAT:
+        context = _build_route_context(
+            conversation_id=conversation_id,
+            user_message=user_message,
+            prebuilt_messages=prebuilt_messages,
+            resolved_model=resolved_model,
+            provider_name=provider_name,
+            assistant_msg_id=assistant_msg_id,
+            intent="chat",
+        )
+        return _get_chat_agent().execute(context)
+
+    if route == RouteName.DIAGNOSIS:
+        context = _build_route_context(
+            conversation_id=conversation_id,
+            user_message=user_message,
+            resolved_model=resolved_model,
+            provider_name=provider_name,
+            assistant_msg_id=assistant_msg_id,
+            intent="diagnosis",
+        )
+        return _get_diagnosis_agent().execute(context, tool_registry)
+
+    # TASK 兜底：ReAct + Tool
+    context = _build_route_context(
+        conversation_id=conversation_id,
+        user_message=user_message,
+        prebuilt_messages=prebuilt_messages,
+        resolved_model=resolved_model,
+        provider_name=provider_name,
+        assistant_msg_id=assistant_msg_id,
+        intent=route.value,
+    )
+    return _get_executor().execute(context)
+
+
+async def _save_user_message(
+    db: AsyncSession,
+    conv: Conversation,
+    message: str,
+    model_id: str,
+) -> Message:
+    """持久化用户消息并更新会话时间戳（含 Redis 镜像）。"""
+    user_msg = Message(
+        id=str(uuid.uuid4()),
+        conversation_id=conv.id,
+        role="user",
+        type="text",
+        content=message,
+        model=model_id,
+    )
+    db.add(user_msg)
+    await db.commit()
+
+    # 镜像到 Redis 短期记忆窗口（尽力而为，失败零影响）
+    await mirror_message(db, conv.id, user_msg)
+
+    # 更新会话 updated_at
+    conv.updated_at = datetime.now(UTC)
+    db.add(conv)
+    await db.commit()
+    return user_msg
+
+
+async def _save_assistant_message(
+    db: AsyncSession,
+    conversation_id: str,
+    assistant_msg_id: str,
+    model_id: str,
+    streamed_answer: list[str],
+) -> None:
+    """保存助手回复并镜像到 Redis；无输出时跳过。"""
+    final_answer = "".join(streamed_answer)
+    if not final_answer:
+        return
+
+    assistant_msg = Message(
+        id=assistant_msg_id,
+        conversation_id=conversation_id,
+        role="assistant",
+        type="text",
+        content=final_answer,
+        model=model_id,
+    )
+    db.add(assistant_msg)
+    await db.commit()
+
+    # 镜像到 Redis 短期记忆窗口（尽力而为，失败零影响）
+    await mirror_message(db, conversation_id, assistant_msg)
+
+
 async def _handle_chat(
     message: str,
     model: str | None,
@@ -294,78 +473,30 @@ async def _handle_chat(
 
     async def _persisted_events():
         async with lock:
-            # ── 2. ContextBuilder 组装上下文（含摘要 + Token Budget）──
+            # ── 1. ContextBuilder 组装上下文（含摘要 + Token Budget）──
             builder = ContextBuilder(db)
             ctx_result = await builder.build(actual_conv_id, message)
 
-            # ── 3. 保存用户消息 ──
-            user_msg = Message(
-                id=str(uuid.uuid4()),
-                conversation_id=actual_conv_id,
-                role="user",
-                type="text",
-                content=message,
-                model=resolved["model_id"],
-            )
-            db.add(user_msg)
-            await db.commit()
+            # ── 2. 保存用户消息 ──
+            await _save_user_message(db, conv, message, resolved["model_id"])
 
-            # 镜像到 Redis 短期记忆窗口（尽力而为，失败零影响）
-            await mirror_message(db, actual_conv_id, user_msg)
-
-            # ── 更新会话 updated_at ──
-            conv.updated_at = datetime.now(UTC)
-            db.add(conv)
-            await db.commit()
-
-            # ── 4. 路由 + Agent 执行 ──
+            # ── 3. 路由 + 选择 Agent 事件流 ──
             # 按请求构造 router（携带 resolved model，供 L3/L4 LLM 分类）
             router = QueryRouter(resolved["model_id"])
             decision = await router.classify(
                 message, _to_router_history(ctx_result.messages)
             )
+            events = _select_events(
+                decision,
+                conversation_id=actual_conv_id,
+                user_message=message,
+                prebuilt_messages=ctx_result.messages,
+                resolved_model=resolved["model_id"],
+                provider_name=resolved["provider_name"],
+                assistant_msg_id=assistant_msg_id,
+            )
 
-            if decision.route == RouteName.SAFETY:
-                events = _stream_safety(assistant_msg_id)
-            elif decision.route == RouteName.HUMAN:
-                events = _stream_human(assistant_msg_id)
-            elif decision.route == RouteName.CHAT:
-                chat_context = RouteContext(
-                    conversation_id=actual_conv_id,
-                    user_message=message,
-                    prebuilt_messages=ctx_result.messages,
-                    resolved_model=resolved["model_id"],
-                    provider_name=resolved["provider_name"],
-                    assistant_msg_id=assistant_msg_id,
-                    intent="chat",
-                )
-                chat_agent = _get_chat_agent()
-                events = chat_agent.execute(chat_context)
-            elif decision.route == RouteName.DIAGNOSIS:
-                diagnosis_ctx = RouteContext(
-                    conversation_id=actual_conv_id,
-                    user_message=message,
-                    resolved_model=resolved["model_id"],
-                    provider_name=resolved["provider_name"],
-                    assistant_msg_id=assistant_msg_id,
-                    intent="diagnosis",
-                )
-                agent = _get_diagnosis_agent()
-                events = agent.execute(diagnosis_ctx, tool_registry)
-            else:
-                context = RouteContext(
-                    conversation_id=actual_conv_id,
-                    user_message=message,
-                    prebuilt_messages=ctx_result.messages,
-                    resolved_model=resolved["model_id"],
-                    provider_name=resolved["provider_name"],
-                    assistant_msg_id=assistant_msg_id,
-                    intent=decision.route.value,
-                )
-                executor = _get_executor()
-                events = executor.execute(context)
-
-            # ── 5. Langfuse Trace + 流式输出 ──
+            # ── 4. Langfuse Trace + 流式输出 ──
             obs = get_observability()
             streamed_answer: list[str] = []
 
@@ -383,28 +514,13 @@ async def _handle_chat(
                         streamed_answer.append(event.content)
                     yield event
 
-            # ── 6. 保存助手消息 ──
-            final_answer = "".join(streamed_answer)
-            if final_answer:
-                assistant_msg = Message(
-                    id=assistant_msg_id,
-                    conversation_id=actual_conv_id,
-                    role="assistant",
-                    type="text",
-                    content=final_answer,
-                    model=resolved["model_id"],
-                )
-                db.add(assistant_msg)
-                await db.commit()
+            # ── 5. 保存助手消息 ──
+            await _save_assistant_message(
+                db, actual_conv_id, assistant_msg_id, resolved["model_id"], streamed_answer
+            )
 
-                # 镜像到 Redis 短期记忆窗口（尽力而为，失败零影响）
-                await mirror_message(db, actual_conv_id, assistant_msg)
-
-            # ── 7. 异步压缩检查（非阻塞，失败不影响主流程）──
-            try:
-                asyncio.create_task(_maybe_compress(db, actual_conv_id))
-            except Exception:
-                pass  # 压缩是非关键路径
+            # ── 6. 异步压缩检查（非阻塞，失败不影响主流程）──
+            _spawn_compression(db, actual_conv_id)
 
     return StreamingResponse(
         _to_sse(_persisted_events()),
@@ -419,6 +535,23 @@ async def _handle_chat(
 
 # ── 压缩检查（异步、非关键路径）──────────────────────────────
 
+# 保存压缩任务的强引用，防止 asyncio 在任务完成前回收它
+_compression_tasks: set[asyncio.Task] = set()
+
+
+def _spawn_compression(db: AsyncSession, conversation_id: str) -> None:
+    """异步触发压缩检查（非阻塞，失败不影响主流程）。"""
+    try:
+        task = asyncio.create_task(_maybe_compress(db, conversation_id))
+        _compression_tasks.add(task)
+        task.add_done_callback(_compression_tasks.discard)
+    except Exception:
+        logger.warning(
+            "Failed to schedule compression for conversation %s",
+            conversation_id,
+            exc_info=True,
+        )
+
 
 async def _maybe_compress(db: AsyncSession, conversation_id: str) -> None:
     """检查是否需要压缩，如果是则触发 LLM 摘要生成。
@@ -432,7 +565,9 @@ async def _maybe_compress(db: AsyncSession, conversation_id: str) -> None:
         compressor = SummaryCompressor(db)
         await compressor.compress(conversation_id)
     except Exception:
-        pass  # 压缩失败不影响主流程
+        logger.warning(
+            "Conversation %s compression failed", conversation_id, exc_info=True
+        )
 
 
 # ═══════════════════════════════════════════════════════════
@@ -493,13 +628,7 @@ async def agent_chat_history(
     翻页：传 conversation_id + limit + before_time + before_id
     """
     # 验证 ownership
-    result = await db.execute(
-        select(Conversation).where(
-            Conversation.id == conversation_id,
-            Conversation.type == "agent_chat",
-        )
-    )
-    conv = result.scalar_one_or_none()
+    conv = await _find_conversation(db, conversation_id, conv_type="agent_chat")
     if conv is None:
         return {"conversation_id": conversation_id, "messages": [], "has_more": False}
     if conv.user_id != user.id:
@@ -534,16 +663,7 @@ async def agent_chat_history(
     # 反序恢复时间升序（前端展示用）
     rows = list(reversed(rows))
 
-    messages = [
-        {
-            "id": m.id,
-            "role": m.role,
-            "type": m.type,
-            "content": m.content,
-            "timestamp": m.created_at.isoformat(),
-        }
-        for m in rows
-    ]
+    messages = [_serialize_message(m) for m in rows]
 
     next_cursor = None
     if has_more and rows:
@@ -618,10 +738,7 @@ async def agent_delete_conversation(
     db: AsyncSession = Depends(get_db),
 ):
     """删除会话 —— 验证 ownership 后级联删除。"""
-    result = await db.execute(
-        select(Conversation).where(Conversation.id == conv_id)
-    )
-    conv = result.scalar_one_or_none()
+    conv = await _find_conversation(db, conv_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     if conv.user_id != user.id:
@@ -687,10 +804,7 @@ async def get_conversation_messages(
     db: AsyncSession = Depends(get_db),
 ):
     """获取会话消息列表 —— GET /api/conversations/:id/messages（向后兼容）。"""
-    result = await db.execute(
-        select(Conversation).where(Conversation.id == conv_id)
-    )
-    conv = result.scalar_one_or_none()
+    conv = await _find_conversation(db, conv_id)
     if conv is None or conv.user_id != user.id:
         return {"conversation_id": conv_id, "messages": []}
 
@@ -702,16 +816,7 @@ async def get_conversation_messages(
     messages = msg_result.scalars().all()
     return {
         "conversation_id": conv_id,
-        "messages": [
-            {
-                "id": m.id,
-                "role": m.role,
-                "type": m.type,
-                "content": m.content,
-                "timestamp": m.created_at.isoformat(),
-            }
-            for m in messages
-        ],
+        "messages": [_serialize_message(m) for m in messages],
     }
 
 
@@ -722,10 +827,7 @@ async def delete_conversation_alias(
     db: AsyncSession = Depends(get_db),
 ):
     """删除会话 —— DELETE /api/conversations/:id（向后兼容）。"""
-    result = await db.execute(
-        select(Conversation).where(Conversation.id == conv_id)
-    )
-    conv = result.scalar_one_or_none()
+    conv = await _find_conversation(db, conv_id)
     if conv is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     if conv.user_id != user.id:
@@ -734,3 +836,5 @@ async def delete_conversation_alias(
     await db.delete(conv)
     await db.commit()
     return {"ok": True}
+
+
