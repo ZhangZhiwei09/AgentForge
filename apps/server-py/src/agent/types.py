@@ -51,7 +51,6 @@ class StreamMeta:
     provider: str = ""
     route: str = ""
     intent: str = ""
-    knowledge: list = field(default_factory=list)
     within_service_hours: bool = True
     memory_count: int = 0
 

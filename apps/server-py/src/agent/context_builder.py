@@ -32,8 +32,6 @@ logger = logging.getLogger(__name__)
 # ── 常量 ──────────────────────────────────────────────────────
 MAX_CONTEXT_TOKENS = 4000      # Agent 上下文总 token 预算（不含 system prompt）
 RAW_WINDOW = 10                # 最近保持原始的消息条数
-SUMMARY_MAX_TOKENS = 300       # 压缩摘要最大 token 数（仅用于提示 LLM 压缩时）
-COMPRESSION_THRESHOLD = 20     # 总消息数超过此值触发压缩检查
 
 SYSTEM_PROMPT = """你是核身排障智能助手，专门帮助用户诊断和解决身份核身（人脸核身、活体检测、OCR 识别）相关的技术问题。
 

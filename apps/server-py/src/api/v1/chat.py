@@ -19,10 +19,10 @@ import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field as PydField
-from sqlalchemy import and_, func, select, text as sa_text
+from sqlalchemy import and_, select, text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agent.chat_agent import ChatAgent
@@ -47,7 +47,7 @@ from src.agent.types import (
     StreamToken,
 )
 from src.api.deps import get_current_user, get_db
-from src.models.chat import Conversation, ConversationMemory, Message
+from src.models.chat import Conversation, Message
 from src.models.user import User
 from src.providers.registry import resolve_model
 from src.schemas.chat import ChatRequest
@@ -100,10 +100,7 @@ def _acquire_lock(conversation_id: str) -> asyncio.Lock:
 
 
 # ── 常量 ──────────────────────────────────────────────────────
-MAX_HISTORY_MESSAGES = 20
-RAW_WINDOW = 10
 SAFETY_RESPONSE = "抱歉，您的消息包含不安全内容，无法处理。如有需要，请联系人工客服。"
-AGENT_USER_ID = "00000000-0000-0000-0000-000000000002"
 
 
 # ── SSE 序列化 ──────────────────────────────────────────────────
@@ -243,25 +240,6 @@ async def _get_or_create_conversation(
     await db.commit()
     await db.refresh(conv)
     return conv
-
-
-async def _load_history(
-    db: AsyncSession, conversation_id: str, limit: int = MAX_HISTORY_MESSAGES
-) -> list[dict]:
-    """加载会话最近 N 条历史消息（用于 Agent 上下文注入）。"""
-    result = await db.execute(
-        select(Message)
-        .where(Message.conversation_id == conversation_id)
-        .order_by(Message.created_at.desc())
-        .limit(limit)
-    )
-    rows = result.scalars().all()
-    # 反序恢复时间顺序
-    rows = list(reversed(rows))
-    return [
-        {"role": m.role, "content": m.content}
-        for m in rows
-    ]
 
 
 # ═══════════════════════════════════════════════════════════
@@ -412,8 +390,6 @@ async def _handle_chat(
 
 
 # ── 压缩检查（异步、非关键路径）──────────────────────────────
-
-COMPRESSION_THRESHOLD = 20
 
 
 async def _maybe_compress(db: AsyncSession, conversation_id: str) -> None:
