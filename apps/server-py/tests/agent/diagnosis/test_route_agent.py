@@ -19,7 +19,7 @@ from src.agent.types import (
     RouteContext,
     StreamMeta,
 )
-from src.api.v1.chat import _to_sse
+from src.api.v1.sse import _to_sse
 
 
 async def _first_event(ctx: RouteContext):

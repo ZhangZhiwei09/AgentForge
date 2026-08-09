@@ -29,11 +29,11 @@ class TestOpenAIEmbeddingProvider:
     """OpenAI Embedding Provider 测试。"""
 
     def test_dimensions(self):
-        """维度应为 1536（text-embedding-3-small）。"""
+        """维度应为 1024（本地 Ollama bge-m3）。"""
         from src.rag.embeddings import OpenAIEmbeddingProvider
         # 使用 fake key 创建实例，不实际调用 API
         provider = OpenAIEmbeddingProvider(
             api_key="sk-test-fake-key",
-            base_url="https://api.openai.com/v1",
+            base_url="http://localhost:11434/v1",
         )
-        assert provider.dimensions == 1536
+        assert provider.dimensions == 1024

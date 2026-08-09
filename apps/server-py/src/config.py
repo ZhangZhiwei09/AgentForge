@@ -72,6 +72,22 @@ class Settings(BaseSettings):
     # （需团队级 checkpoint 已开启；checkpointer 不可用时自动降级为 needs_human）。
     langgraph_diagnosis_hitl_enabled: bool = Field(default=False)
 
+    # ── Router（L1-L5 五层路由）─────────────────────────
+    # 对齐 TS routing/pipeline.ts 的编排阈值。
+    # L2 语义层需要 embedding provider + intent_samples 表；缺失时优雅降级 L1→L5。
+    router_semantic_enabled: bool = Field(default=True)
+    router_semantic_top_k: int = Field(default=5)
+    router_semantic_min_similarity: float = Field(default=0.5)
+    router_semantic_high_confidence: float = Field(default=0.8)   # ≥ 直接返回
+    router_semantic_low_confidence: float = Field(default=0.5)    # ≥ 且有 matches → L3
+    router_semantic_ambiguity_gap: float = Field(default=0.15)
+    router_semantic_ambiguity_penalty: float = Field(default=0.8)
+    router_llm_enabled: bool = Field(default=True)
+    router_llm_max_tokens_l3: int = Field(default=200)
+    router_llm_max_tokens_l4: int = Field(default=150)
+    router_llm_history_window: int = Field(default=4)
+    router_fallback_enabled: bool = Field(default=True)
+
     # ── Server ──────────────────────────────────────────
     port: int = Field(default=8000)
     debug: bool = Field(default=False)

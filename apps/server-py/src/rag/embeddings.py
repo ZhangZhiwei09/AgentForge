@@ -1,13 +1,14 @@
 """Embedding Provider —— 文本向量化抽象层。
 
 Phase B: 提供 EmbeddingProvider Protocol + OpenAIEmbeddingProvider。
-V1 只支持 OpenAI text-embedding-3-small（1536d），换模型需改 migration。
+通过 OpenAI 兼容接口支持本地 Ollama bge-m3（1024d）或任意 OpenAI 兼容 API。
 """
 
 import logging
 from collections.abc import Awaitable
 from typing import Protocol
 
+import httpx
 from openai import AsyncOpenAI
 
 from src.config import settings
@@ -76,11 +77,15 @@ class OpenAIEmbeddingProvider:
             )
 
         self._model = model or settings.embedding_model
-        self._dimensions = 1536  # text-embedding-3-small 固定维度
+        # 本地 Ollama bge-m3 固定维度（与 embedding 模型匹配）
+        self._dimensions = 1024
 
         self._client = AsyncOpenAI(
             api_key=resolved_key,
             base_url=base_url or settings.embedding_base_url,
+            # trust_env=False：避免 httpx 读 Windows 系统代理把 localhost 也代理出去
+            # （本地 Ollama 走 127.0.0.1 会 502；对外部 API 直连同样更可靠）
+            http_client=httpx.AsyncClient(trust_env=False),
         )
 
     @property

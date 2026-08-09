@@ -122,9 +122,9 @@ class KnowledgeChunk(Base):
     parent_chunk_id: Mapped[Optional[str]] = mapped_column(
         String(36), ForeignKey("knowledge_chunks.id"), nullable=True
     )
-    # Phase B 新增: pgvector embedding
+    # Phase B 新增: pgvector embedding（维度对齐本地 Ollama bge-m3, 1024d）
     embedding: Mapped[Optional[list[float]]] = mapped_column(
-        Vector(1536), nullable=True
+        Vector(1024), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

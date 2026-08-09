@@ -14,6 +14,7 @@ from src.models.base import Base
 # 每新增一个模型文件，在这里加一行 import
 import src.models.user  # noqa: F401
 import src.models.knowledge  # noqa: F401
+import src.models.intent_sample  # noqa: F401
 
 # Alembic Config 对象，从 alembic.ini 读取配置
 config = context.config

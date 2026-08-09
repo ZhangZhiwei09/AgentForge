@@ -1,163 +1,107 @@
-"""QueryRouter —— 路由管线编排器。
+"""QueryRouter —— 路由管线编排器（L1-L5）。
 
-对应 TS: apps/server/src/services/agent-runtime/router.ts + routing/pipeline.ts
+对应 TS: apps/server/src/services/agent-runtime/routing/pipeline.ts
 
-V1 简化版：只做 L1 关键词正则路由（SAFETY / HUMAN / TASK）。
-L2 语义分类、L3/L4 LLM 路由留到后续版本。
+编排 5 层路由管线，按优先级依次尝试：
+    L1: 关键词快速路由（SAFETY/HUMAN/DIAGNOSIS + Python 独有 CHAT）→ 零延迟
+    L2: 语义意图分类（Embedding + pgvector k-NN）→ <50ms
+    L3: Few-Shot 增强 LLM Router（L2 中置信度时）→ ~500ms
+    L4: 原始 LLM Router（兜底）→ ~500ms
+    L5: IntentDetector regex 兜底 → 永远返回
 
-Python 新概念：
-- re.compile + pattern.search(): 正则匹配（类似 TS Regexp.test()）
-- 优先级链模式: SAFETY > HUMAN > TASK(fallback)
+降级保障：L2 需要 embedding provider + intent_samples 表，L3/L4 需要 LLM provider；
+任一缺失自动跳过对应层，最终由 L5 兜底。
 """
 
-import re
+import logging
 
+from src.agent.router.l1_keyword import quick_route_scan
+from src.agent.router.l2_semantic import SemanticClassifier
+from src.agent.router.l3_fewshot_llm import few_shot_classify
+from src.agent.router.l4_raw_llm import llm_classify
+from src.agent.router.l5_fallback import fallback_classify
 from src.agent.types import RouteName, RouterDecision
+from src.config import settings
 
-# ═══════════════════════════════════════════════════════════
-# L1 关键词正则（中/英）
-# ═══════════════════════════════════════════════════════════
-
-SAFETY_KEYWORDS: list[re.Pattern] = [
-    re.compile(r"忽略.*(指令|规则|限制|之前)"),
-    re.compile(r"扮演.*(角色|黑客|坏人)"),
-    re.compile(r"(DAN|jailbreak|system\s*prompt)", re.IGNORECASE),
-    re.compile(r"(ignore|forget).*(instruction|rule|prompt|everything|all)", re.IGNORECASE),
-    re.compile(r"<\|im_start\|>", re.IGNORECASE),
-    re.compile(r"<\|system\|>", re.IGNORECASE),
-    re.compile(r"\[INST\].*/?INST\]", re.IGNORECASE),
-    re.compile(r"(system|系统)\s*:\s*(你现在|你的新|ignore|forget)"),
-    re.compile(r"(我是|我是你).*(管理员|开发者|创始人|CEO|CTO|老板).*(请|要求|命令|给我)"),
-    re.compile(r"([^\s])\1{500,}"),  # 字符重复攻击
-]
-
-HUMAN_KEYWORDS: list[re.Pattern] = [
-    re.compile(r"转人工"),
-    re.compile(r"找(人工|真人|客服|你们经理|你们领导)"),
-    re.compile(r"(打|联系|给.*)(客服)?电话"),
-    re.compile(r"我要投诉"),
-    re.compile(r"投诉.*(你们|客服|服务)"),
-    re.compile(r"叫.*(经理|领导|负责人)"),
-]
-
-CHAT_KEYWORDS: list[re.Pattern] = [
-    # 问候 / 寒暄
-    re.compile(r"^(你好|hi|hello|嗨|早上好|下午好|晚上好|午安|晚安)[\s!！。.,，]*$", re.IGNORECASE),
-    re.compile(r"^(谢谢|多谢|感谢|thank|thanks|thx|3q|3Q)[\s!！。.,，]*$", re.IGNORECASE),
-    re.compile(r"^(再见|拜拜|bye|回头见|下次见|88)[\s!！。.,，]*$", re.IGNORECASE),
-    # 自我介绍 / 能力询问
-    re.compile(r"(你是谁|你叫什么|你能做什么|你有什么功能|你会什么|介绍一下自己|你是什么模型)"),
-    # 闲聊话题
-    re.compile(r"^(今天天气|讲个笑话|聊聊天|随便聊聊|陪我聊天|好无聊|你在干嘛)"),
-    re.compile(r"(心情不好|安慰我|鼓励我|夸我)"),
-]
-
-DIAGNOSIS_KEYWORDS: list[re.Pattern] = [
-    # 强信号：错误码 + traceId
-    re.compile(r"traceId\s*[:：]\s*\w+", re.IGNORECASE),
-    re.compile(r"error[_ ]?code\s*[:：]\s*\w+", re.IGNORECASE),
-    # 故障关键词
-    re.compile(r"(报错|失败|超时|打不开|连不上|崩溃|闪退|白屏|卡死)"),
-    re.compile(
-        r"(排查|诊断|定位|帮我看下|帮我查下|帮我查|帮我看看|帮我看|帮我分析)"
-        r".*(问题|原因|怎么回事|什么情况|什么原因)"
-    ),
-    # 摄像头/活体/人脸 故障
-    re.compile(
-        r"(摄像头|麦克风|活体|刷脸|人脸|认证|识别)"
-        r".*(失败|打不开|不能用|没反应|超时|异常)"
-    ),
-    # 网络/WebSocket 故障
-    re.compile(r"(WebSocket|网络|连接).*(断开|超时|失败)"),
-    # 通过率/成功率 异常
-    re.compile(r"(成功率|通过率).*(下跌|下降|降低|异常|掉|低)"),
-]
-
-
-# ═══════════════════════════════════════════════════════════
-# quickRouteScan —— L1 关键词快速扫描
-# ═══════════════════════════════════════════════════════════
-
-
-def quick_route_scan(message: str) -> RouterDecision | None:
-    """L1 规则优先扫描：零延迟正则匹配。
-
-    处理 SAFETY、HUMAN 两类高确定性场景。
-    其余所有查询返回 None，交给下游（当前版本直接 fallback 到 TASK）。
-
-    Args:
-        message: 用户原始消息
-
-    Returns:
-        RouterDecision 或 None（需要进一步分类）
-    """
-    # SAFETY 优先 —— 安全合规不能有任何延迟
-    for pattern in SAFETY_KEYWORDS:
-        if pattern.search(message):
-            return RouterDecision(
-                route=RouteName.SAFETY,
-                confidence=1.0,
-                reasoning="安全关键词命中",
-            )
-
-    # HUMAN —— 明确要求转人工
-    for pattern in HUMAN_KEYWORDS:
-        if pattern.search(message):
-            return RouterDecision(
-                route=RouteName.HUMAN,
-                confidence=0.95,
-                reasoning="转人工关键词命中",
-            )
-
-    # DIAGNOSIS —— 故障排查/诊断类问题
-    for pattern in DIAGNOSIS_KEYWORDS:
-        if pattern.search(message):
-            return RouterDecision(
-                route=RouteName.DIAGNOSIS,
-                confidence=0.85,
-                reasoning="诊断关键词命中",
-            )
-
-    # CHAT —— 寒暄/问候/自我介绍（低优先级，避免误拦 TASK）
-    for pattern in CHAT_KEYWORDS:
-        if pattern.search(message):
-            return RouterDecision(
-                route=RouteName.CHAT,
-                confidence=0.9,
-                reasoning='闲聊关键词命中',
-            )
-
-    return None  # → 默认走 TASK
-
-
-# ═══════════════════════════════════════════════════════════
-# QueryRouter
-# ═══════════════════════════════════════════════════════════
+logger = logging.getLogger(__name__)
 
 
 class QueryRouter:
-    """查询路由器 —— V1 只做 L1 关键词匹配 + TASK fallback。
+    """查询路由器 —— 编排 L1-L5 路由管线。
 
-    V2 将加入：
-    - L2: 语义意图分类（Embedding + k-NN）
-    - L3: Few-Shot LLM Router
-    - L4: LLM Router
-    - L5: Regex Fallback
+    用法:
+        router = QueryRouter(model_id="gpt-4o-mini")
+        decision = await router.classify(message, history)
     """
 
-    def classify(self, message: str) -> RouterDecision:
+    def __init__(
+        self,
+        model_id: str | None = None,
+        semantic_classifier: SemanticClassifier | None = None,
+    ) -> None:
+        self.model_id = model_id
+        self.semantic_classifier = semantic_classifier or SemanticClassifier()
+
+    async def classify(
+        self,
+        message: str,
+        history: list | None = None,
+    ) -> RouterDecision:
         """对用户消息分类，返回路由决策。
 
-        当前版本：L1 正则 → TASK fallback。
+        Args:
+            message: 用户原始消息
+            history: 最近对话历史（L3/L4 取最近 4 条），可空
         """
-        # L1: 关键词快速路由
+        history = history or []
+
+        # ── L1: 关键词快速路由（零延迟）──
         quick = quick_route_scan(message)
         if quick is not None:
             return quick
 
-        # 默认：TASK（当前没有 L2-L5，直接用 ReAct 处理）
+        # ── L2: 语义意图分类 ──
+        if settings.router_semantic_enabled:
+            l2 = await self.semantic_classifier.classify(message)
+            if l2 is not None:
+                # L2 高置信度（≥ high_confidence）→ 直接返回
+                if l2.confidence >= settings.router_semantic_high_confidence:
+                    logger.info(
+                        "Router: L2 high confidence (%.2f), returning directly",
+                        l2.confidence,
+                    )
+                    return RouterDecision(
+                        route=l2.route,
+                        confidence=l2.confidence,
+                        reasoning=l2.reasoning,
+                    )
+                # L2 中置信度（low ~ high）且有 matches → L3 Few-Shot 增强
+                if (
+                    l2.confidence >= settings.router_semantic_low_confidence
+                    and l2.matches
+                    and settings.router_llm_enabled
+                ):
+                    l3 = await few_shot_classify(
+                        message, history, l2.matches, self.model_id
+                    )
+                    if l3 is not None:
+                        return l3
+        else:
+            logger.info("Router: L2 disabled by config")
+
+        # ── L4: 原始 LLM Router（兜底）──
+        if settings.router_llm_enabled:
+            l4 = await llm_classify(message, history, self.model_id)
+            if l4 is not None:
+                return l4
+
+        # ── L5: regex 兜底（永远返回）──
+        if settings.router_fallback_enabled:
+            return fallback_classify(message)
+
+        # 理论不可达：所有层被禁用时回退 TASK
         return RouterDecision(
             route=RouteName.TASK,
-            confidence=0.5,
-            reasoning="默认路由（无关键词命中）",
+            confidence=0.0,
+            reasoning="Router fallback disabled",
         )
