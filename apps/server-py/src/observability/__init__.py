@@ -11,30 +11,7 @@ from src.observability.langfuse_provider import (
     init_observability,
     shutdown_observability,
 )
-from src.observability.provider import (
-    GenerationParams,
-    NoopGeneration,
-    NoopObservabilityProvider,
-    NoopTrace,
-    ObservabilityGeneration,
-    ObservabilityProvider,
-    ObservabilityTrace as ObservabilityTraceProtocol,
-    TraceParams,
-    noop_provider,
-)
-
 __all__ = [
-    # legacy protocols
-    "TraceParams",
-    "GenerationParams",
-    "ObservabilityTraceProtocol",
-    "ObservabilityGeneration",
-    "ObservabilityProvider",
-    "NoopTrace",
-    "NoopGeneration",
-    "NoopObservabilityProvider",
-    "noop_provider",
-    # Phase C: Langfuse
     "LangfuseProvider",
     "ObservabilityTrace",
     "ObservabilitySpan",

@@ -4,8 +4,6 @@
 Pydantic 的 EmailStr 自动校验 email 格式，Field 控制约束。
 """
 
-from datetime import datetime
-
 from pydantic import BaseModel, Field
 
 
@@ -26,18 +24,6 @@ class SignInRequest(BaseModel):
 
     email: str
     password: str = Field(min_length=1)
-
-
-class UserResponse(BaseModel):
-    """用户信息响应，对应 TS AuthUser + User。"""
-
-    id: str
-    email: str
-    role: str
-    created_at: datetime
-    updated_at: datetime
-
-    model_config = {"from_attributes": True}  # 允许从 ORM 对象直接构造
 
 
 class TokenResponse(BaseModel):
