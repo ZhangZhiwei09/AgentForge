@@ -122,11 +122,14 @@ class PgVectorKnowledgeService:
         使用 <=> 运算符（余弦距离），1 - 距离 = 相似度。
         """
         # 构建 SQL：按余弦距离排序
+        # asyncpg 要求 vector 传字符串字面量；查询向量转成 '[0.1,...]' 内联
+        #（float 值无注入风险），避免 list 参数报 "expected str, got list"。
         if kb_ids:
             kb_filter = "AND kc.knowledge_base_id = ANY(:kb_ids)"
         else:
             kb_filter = ""
 
+        vec_str = "[" + ",".join(repr(x) for x in query_embedding) + "]"
         sql = f"""
             SELECT
                 kc.id AS chunk_id,
@@ -135,21 +138,18 @@ class PgVectorKnowledgeService:
                 kc.content,
                 kc.chunk_index,
                 kc.token_count,
-                1 - (kc.embedding <=> :query_embedding) AS score,
+                1 - (kc.embedding <=> '{vec_str}'::vector) AS score,
                 kd.title AS doc_title
             FROM knowledge_chunks kc
             JOIN knowledge_documents kd ON kc.document_id = kd.id
             WHERE kc.embedding IS NOT NULL
               AND kc.enabled = TRUE
               {kb_filter}
-            ORDER BY kc.embedding <=> :query_embedding
+            ORDER BY kc.embedding <=> '{vec_str}'::vector
             LIMIT :top_k
         """
 
-        params: dict = {
-            "query_embedding": query_embedding,
-            "top_k": top_k,
-        }
+        params: dict = {"top_k": top_k}
         if kb_ids:
             params["kb_ids"] = kb_ids
 

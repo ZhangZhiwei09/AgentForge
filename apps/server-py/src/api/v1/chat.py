@@ -17,20 +17,22 @@ import asyncio
 import json
 import uuid
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field as PydField
-from sqlalchemy import and_, select, text as sa_text
+from pydantic import BaseModel
+from pydantic import Field as PydField
+from sqlalchemy import and_, select
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agent.chat_agent import ChatAgent
-from src.agent.executor import AgentExecutor
-from src.agent.router.pipeline import QueryRouter
-from src.agent.diagnosis.route_agent import DiagnosisRouteAgent
 from src.agent.context_builder import ContextBuilder
+from src.agent.diagnosis.route_agent import DiagnosisRouteAgent
+from src.agent.executor import AgentExecutor
 from src.agent.redis_memory import mirror_message
+from src.agent.router.pipeline import QueryRouter
 from src.agent.tools.registry import tool_registry
 from src.agent.types import (
     ClarificationNeeded,
@@ -47,28 +49,21 @@ from src.agent.types import (
     StreamToken,
 )
 from src.api.deps import get_current_user, get_db
+from src.config import settings
 from src.models.chat import Conversation, Message
 from src.models.user import User
 from src.providers.registry import resolve_model
-from src.schemas.chat import ChatRequest
+from src.schemas.chat import ChatMessage, ChatRequest
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 
 # ── 模块级单例 ──
-_router: QueryRouter | None = None
 _executor: AgentExecutor | None = None
 _chat_agent: ChatAgent | None = None
 _diagnosis_agent: DiagnosisRouteAgent | None = None
 
 # ── 会话级并发控制 ──
 _conversation_locks: dict[str, asyncio.Lock] = {}
-
-
-def _get_router() -> QueryRouter:
-    global _router
-    if _router is None:
-        _router = QueryRouter()
-    return _router
 
 
 def _get_executor() -> AgentExecutor:
@@ -97,6 +92,36 @@ def _acquire_lock(conversation_id: str) -> asyncio.Lock:
     if conversation_id not in _conversation_locks:
         _conversation_locks[conversation_id] = asyncio.Lock()
     return _conversation_locks[conversation_id]
+
+
+def _to_router_history(msgs: list) -> list[ChatMessage]:
+    """从 ContextBuilder 组装的消息列表提取路由历史（供 L3/L4 用）。
+
+    - 跳过 SystemMessage（系统提示不是对话历史）
+    - 丢弃末尾当前用户消息（classify(message, history) 单独传 message，
+      L3/L4 会把它追加为最后一条，避免重复）
+    - 截取最近 router_llm_history_window 条
+    """
+    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+
+    out: list[ChatMessage] = []
+    for m in msgs:
+        if isinstance(m, SystemMessage):
+            continue
+        if isinstance(m, HumanMessage):
+            role = "user"
+        elif isinstance(m, AIMessage):
+            role = "assistant"
+        else:
+            role = getattr(m, "role", "")
+        content = str(m.content) if m.content else ""
+        if role and content:
+            out.append(ChatMessage(role=role, content=content))
+
+    if out and out[-1].role == "user":
+        out.pop()
+
+    return out[-settings.router_llm_history_window:]
 
 
 # ── 常量 ──────────────────────────────────────────────────────
@@ -289,13 +314,16 @@ async def _handle_chat(
             await mirror_message(db, actual_conv_id, user_msg)
 
             # ── 更新会话 updated_at ──
-            conv.updated_at = datetime.now(timezone.utc)
+            conv.updated_at = datetime.now(UTC)
             db.add(conv)
             await db.commit()
 
             # ── 4. 路由 + Agent 执行 ──
-            router = _get_router()
-            decision = router.classify(message)
+            # 按请求构造 router（携带 resolved model，供 L3/L4 LLM 分类）
+            router = QueryRouter(resolved["model_id"])
+            decision = await router.classify(
+                message, _to_router_history(ctx_result.messages)
+            )
 
             if decision.route == RouteName.SAFETY:
                 events = _stream_safety(assistant_msg_id)
@@ -482,7 +510,7 @@ async def agent_chat_history(
 
     if before_time and before_id:
         # 复合游标：(created_at, id) < (cursor_time, cursor_id)
-        cursor_time = datetime.fromisoformat(before_time.replace("Z", "+00:00"))
+        cursor_time = datetime.fromisoformat(before_time)
         conditions.append(
             sa_text(
                 "(messages.created_at, messages.id) < (:cursor_time, :cursor_id)"
