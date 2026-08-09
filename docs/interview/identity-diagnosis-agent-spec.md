@@ -6,7 +6,7 @@
 
 ## Goal
 
-Build an independent LangGraph-based diagnosis endpoint for identity verification troubleshooting. *(注：LangGraph 方案已废弃，见 ADR-001)*
+Build an independent LangGraph-based diagnosis endpoint for identity verification troubleshooting. *(注：LangGraph 方案已废弃)*
 
 The first version reduces repeated manual frontend troubleshooting by turning user questions into a controlled workflow:
 

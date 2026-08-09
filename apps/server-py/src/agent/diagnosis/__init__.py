@@ -19,10 +19,7 @@ from src.agent.diagnosis.nodes import (
     INTENT_LABELS,
 )
 from src.agent.diagnosis.route_agent import DiagnosisRouteAgent
-from src.agent.diagnosis.tools import (
-    DIAGNOSIS_TOOLS,
-    register_diagnosis_tools,
-)
+from src.agent.diagnosis.tools import DIAGNOSIS_TOOLS
 
 __all__ = [
     "Blackboard",
@@ -36,5 +33,4 @@ __all__ = [
     "FIELD_HINTS",
     "INTENT_LABELS",
     "DIAGNOSIS_TOOLS",
-    "register_diagnosis_tools",
 ]

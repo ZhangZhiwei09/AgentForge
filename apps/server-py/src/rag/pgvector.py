@@ -108,50 +108,6 @@ class PgVectorKnowledgeService:
             top_k=params.top_k,
         )
 
-    # ── 摄入方法 ─────────────────────────────────────────
-
-    async def insert_chunks(
-        self,
-        chunks: list[dict],
-    ) -> int:
-        """批量插入 chunk（含 embedding）。
-
-        Args:
-            chunks: 每条包含 {id, doc_id, kb_id, chunk_index, content, embedding, token_count}
-
-        Returns:
-            插入的 chunk 数量
-        """
-        if not chunks:
-            return 0
-
-        async with self._session_factory() as session:
-            for chunk in chunks:
-                embedding = chunk.get("embedding")
-                await session.execute(
-                    text("""
-                        INSERT INTO knowledge_chunks
-                            (id, document_id, knowledge_base_id, chunk_index,
-                             content, token_count, embedding)
-                        VALUES
-                            (:id, :doc_id, :kb_id, :chunk_index,
-                             :content, :token_count, :embedding)
-                    """),
-                    {
-                        "id": chunk["id"],
-                        "doc_id": chunk["doc_id"],
-                        "kb_id": chunk["kb_id"],
-                        "chunk_index": chunk["chunk_index"],
-                        "content": chunk["content"],
-                        "token_count": chunk.get("token_count", 0),
-                        "embedding": embedding,
-                    },
-                )
-            await session.commit()
-
-        logger.info("Inserted %d chunks into pgvector", len(chunks))
-        return len(chunks)
-
     # ── 内部方法 ─────────────────────────────────────────
 
     async def _vector_search(

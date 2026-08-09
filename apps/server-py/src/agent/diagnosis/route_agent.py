@@ -17,7 +17,6 @@ import time
 from collections.abc import AsyncIterator
 from types import MappingProxyType
 
-from src.agent.diagnosis.blackboard import Blackboard
 from src.agent.diagnosis.mode import (
     AgentRole,
     AgentStarted,
@@ -30,7 +29,6 @@ from src.agent.diagnosis.mode import (
     TeamStreamEvent,
     TeamWaitingForInput,
     extract_json,
-    resolve_diagnosis,
 )
 from src.agent.diagnosis.graph import resume_langgraph_diagnosis
 from src.agent.diagnosis.nodes import (

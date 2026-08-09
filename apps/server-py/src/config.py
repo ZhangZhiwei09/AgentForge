@@ -60,9 +60,6 @@ class Settings(BaseSettings):
     langgraph_checkpoint_enabled: bool = Field(default=False)
 
     # ── LangGraph Diagnosis ──────────────────────────
-    # DIAGNOSIS 路由改用 LangGraph 图路径（multi-agent-langgraph-plan.md）。
-    # Phase 1 默认关；Phase 2 默认开并删除旧顺序编排主体。
-    langgraph_diagnosis_enabled: bool = Field(default=True)
     # 团队级 checkpoint（Phase 2）：父图挂 AsyncPostgresSaver（thread_id=team_run_id）。
     # 与 langgraph_checkpoint_enabled 独立 —— 仅诊断父图启用，不影响 TASK/内层 ReAct。
     # 开启时父图 checkpoint 中间态；DB 不可用时会降级为无状态执行（见 graph.py）。

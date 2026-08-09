@@ -56,19 +56,6 @@ def get_provider(name: str) -> LLMProvider:
     return provider
 
 
-def list_providers() -> list[dict]:
-    """列出所有可用 Provider 及其支持的模型。
-
-    返回格式对应 TS listProviders() 的返回值，
-    供前端 /api/providers 端点使用。
-    """
-    _init_providers()
-    result: list[dict] = []
-    for name, p in _providers.items():
-        result.append({"type": name, "models": p.list_models()})
-    return result
-
-
 def first_provider() -> str:
     """返回第一个可用 Provider 的名称。
 

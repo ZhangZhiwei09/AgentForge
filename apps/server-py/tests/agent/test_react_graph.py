@@ -68,7 +68,6 @@ async def test_plain_text_response_does_not_crash():
     graph = build_react_graph(
         model=FakeBaseChatModel(),
         tool_defs=[],
-        system_prompt="system",
         registry=ToolRegistry(),
         conversation_id="conv-1",
         checkpointer=None,

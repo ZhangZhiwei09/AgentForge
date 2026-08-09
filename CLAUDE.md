@@ -61,9 +61,6 @@ Engineering:
   docs/engineering/type-safety.md
   docs/engineering/chinese-prompts.md
 
-Decisions:
-  docs/decisions/adr-001-remove-langgraph.md
-
 Process:
   docs/agents/pipeline.md
 

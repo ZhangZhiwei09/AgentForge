@@ -74,9 +74,3 @@ query_trace_log_tool = RegisteredTool(
 )
 
 DIAGNOSIS_TOOLS: list[RegisteredTool] = [query_trace_log_tool]
-
-
-def register_diagnosis_tools(registry) -> None:
-    """便捷函数：将诊断工具注册到 ToolRegistry。"""
-    for tool in DIAGNOSIS_TOOLS:
-        registry.register(tool)
