@@ -167,6 +167,11 @@ export type {
   DiagnosisPhase,
 } from "./agent-chat";
 export type {
+  CitationCard,
+  TraceStep,
+  MessageCitationsMeta,
+} from "./citations";
+export type {
   KnowledgeBaseDTO,
   CreateKnowledgeBaseRequest,
   UpdateKnowledgeBaseRequest,

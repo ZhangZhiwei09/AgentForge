@@ -47,6 +47,11 @@ export {
   DiagnosisCard,
   ClarificationCard,
   WaitingInputCard,
+  TraceTimeline,
+  CitationCardList,
+  citeAnchorId,
+  scrollToCite,
+  filterCitedCards,
 } from "./cards";
 
 // ── Utils ──

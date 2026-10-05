@@ -117,7 +117,13 @@ describe("AgentExecutor integration", () => {
 
   it("simple_qa: KB found → 流式输出 LLM 回答", async () => {
     mockKBSearch.mockResolvedValue([
-      { content: "退换货需要在7天内申请", score: 0.9 },
+      {
+        content: "退换货需要在7天内申请",
+        score: 0.9,
+        docId: "doc-001",
+        docTitle: "退换货政策",
+        chunkIndex: 0,
+      },
     ]);
     mockChatSync.mockResolvedValue({
       content: "根据我们的政策，退换货需要在收到商品后7天内提交申请。",
@@ -127,10 +133,36 @@ describe("AgentExecutor integration", () => {
     const ctx = makeContext({ userMessage: "退换货条件是什么？" });
     const events = await collectEvents(executor, ctx);
 
-    // meta → clear_stream → tokens → done
+    // meta → trace_step(running) → trace_step(done) → citations → clear_stream → tokens → done
     expect(events[0].type).toBe("meta");
     expect(events[0].route).toBe("TASK");
-    expect(events[1].type).toBe("clear_stream");
+
+    // 过程时间轴：检索开始/结束各一步，共用 seq=1（前端按 seq 更新同一步）
+    const traceEvents = events.filter((e) => e.type === "trace_step");
+    expect(traceEvents).toHaveLength(2);
+    expect(traceEvents[0].step).toMatchObject({
+      seq: 1,
+      kind: "retrieval",
+      status: "running",
+    });
+    expect(traceEvents[1].step).toMatchObject({
+      seq: 1,
+      kind: "retrieval",
+      status: "done",
+      hitCount: 1,
+    });
+
+    // 引用卡片：index 从 1 开始与 prompt 的 [n] 同源，且保留真实 docId（非 kb-{i}）
+    const citationEvent = events.find((e) => e.type === "citations");
+    expect(citationEvent?.items).toMatchObject([
+      { index: 1, docId: "doc-001", docTitle: "退换货政策", score: 0.9 },
+    ]);
+
+    // 清屏必须在检索与引用下发之后
+    const citeIdx = events.findIndex((e) => e.type === "citations");
+    const clearIdx = events.findIndex((e) => e.type === "clear_stream");
+    expect(citeIdx).toBeGreaterThanOrEqual(0);
+    expect(clearIdx).toBeGreaterThan(citeIdx);
 
     // 应包含 token 事件
     const tokenEvents = events.filter((e) => e.type === "token");
@@ -156,6 +188,11 @@ describe("AgentExecutor integration", () => {
     const doneEvent = events[events.length - 1];
     expect(doneEvent.type).toBe("done");
     expect(doneEvent.validated).toBe(true);
+
+    // 负例：无命中时时间轴收尾为 done 且 hitCount=0，不下发引用卡片
+    const traceEvents = events.filter((e) => e.type === "trace_step");
+    expect(traceEvents[1].step).toMatchObject({ status: "done", hitCount: 0 });
+    expect(events.some((e) => e.type === "citations")).toBe(false);
   });
 
   it("simple_qa: KB 搜索异常 → 降级继续，使用 LLM 回答", async () => {
@@ -171,6 +208,11 @@ describe("AgentExecutor integration", () => {
     const doneEvent = events[events.length - 1];
     expect(doneEvent.type).toBe("done");
     // 降级不阻塞，仍然完成
+
+    // 负例：检索失败时时间轴标记 failed，不下发引用卡片
+    const traceEvents = events.filter((e) => e.type === "trace_step");
+    expect(traceEvents[1].step).toMatchObject({ status: "failed" });
+    expect(events.some((e) => e.type === "citations")).toBe(false);
   });
 
   it("simple_qa: LLM 调用失败 → fallback 兜底文案", async () => {

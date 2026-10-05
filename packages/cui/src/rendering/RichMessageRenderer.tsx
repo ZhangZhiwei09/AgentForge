@@ -14,13 +14,29 @@ import {
 import { ActionCard, OrderCard, PolicyCard, StatusCard, TableCard } from "../cards";
 import type { ContentBlock, ActionCardData, OrderCardData, PolicyCardData, StatusCardData, TableBlockData } from "@agentforge/shared-types";
 
+/** 引用锚点透传参数：由 RichMessageRenderer 原样传给 MarkdownRenderer */
+interface CiteProps {
+  citeIndexes?: number[];
+  citeScope?: string;
+}
+
 interface Props {
   content: string;
   /** 是否正在流式接收中 */
   isStreaming?: boolean;
+  /** 引用卡片编号集合；提供时正文 [n] 渲染为可点击锚点 */
+  citeIndexes?: number[];
+  /** 锚点作用域，通常传消息 id */
+  citeScope?: string;
 }
 
-export function RichMessageRenderer({ content, isStreaming }: Props) {
+export function RichMessageRenderer({
+  content,
+  isStreaming,
+  citeIndexes,
+  citeScope,
+}: Props) {
+  const cite = { citeIndexes, citeScope };
   // 流式过程中：尝试渐进解析未闭合的卡片围栏
   const streamingCard = useMemo(() => {
     if (!isStreaming) return null;
@@ -49,7 +65,7 @@ export function RichMessageRenderer({ content, isStreaming }: Props) {
   if (streamingCard && !streamingCard.isComplete) {
     return (
       <div className="space-y-3">
-        {cleanMarkdown && <MarkdownRenderer content={cleanMarkdown} />}
+        {cleanMarkdown && <MarkdownRenderer content={cleanMarkdown} {...cite} />}
         {renderStreamingCard(streamingCard)}
       </div>
     );
@@ -59,13 +75,13 @@ export function RichMessageRenderer({ content, isStreaming }: Props) {
   if (blocks.length > 0) {
     return (
       <div className="space-y-3">
-        {renderInterleaved(cleanMarkdown, blocks)}
+        {renderInterleaved(cleanMarkdown, blocks, cite)}
       </div>
     );
   }
 
   // 无卡片块时直接用 MarkdownRenderer
-  return <MarkdownRenderer content={content} />;
+  return <MarkdownRenderer content={content} {...cite} />;
 }
 
 /**
@@ -134,15 +150,18 @@ function renderStreamingCard(
 function renderInterleaved(
   cleanMarkdown: string,
   blocks: Array<{ index: number; block: ContentBlock }>,
+  cite: CiteProps,
 ) {
   const elements: React.ReactNode[] = [];
 
   if (cleanMarkdown) {
-    elements.push(<MarkdownRenderer key="text-main" content={cleanMarkdown} />);
+    elements.push(
+      <MarkdownRenderer key="text-main" content={cleanMarkdown} {...cite} />,
+    );
   }
 
   blocks.forEach(({ block }, i) => {
-    elements.push(renderBlock(block, `card-${i}`));
+    elements.push(renderBlock(block, `card-${i}`, cite));
   });
 
   return elements;
@@ -151,7 +170,11 @@ function renderInterleaved(
 /**
  * 根据 ContentBlock 类型分发到对应卡片组件
  */
-function renderBlock(block: ContentBlock, key: string): React.ReactNode {
+function renderBlock(
+  block: ContentBlock,
+  key: string,
+  cite: CiteProps,
+): React.ReactNode {
   switch (block.type) {
     case "action_card":
       return <ActionCard key={key} data={block.data} />;
@@ -169,6 +192,7 @@ function renderBlock(block: ContentBlock, key: string): React.ReactNode {
         <MarkdownRenderer
           key={key}
           content={(block as { content: string }).content}
+          {...cite}
         />
       );
   }

@@ -34,6 +34,7 @@ import { DiagnosisRouteAgent } from "./agent-runtime/diagnosis-agent.js";
 
 import { injectMemories } from "./agent-runtime/knowledge-context.js";
 import { AGENTFORGE_PERSONA } from "@agentforge/shared-prompts";
+import type { CitationCard, TraceStep } from "@agentforge/shared-types";
 
 import type {
   RouteName,
@@ -478,6 +479,9 @@ export class AgentRuntimeService {
 
       const startTime = Date.now();
       let firstTokenRecorded = false;
+      // 引用卡片与过程时间轴：编排器已在转发全部事件，在此累积以便循环结束后单点落库
+      let collectedCitations: CitationCard[] = [];
+      const traceBySeq = new Map<number, TraceStep>();
 
       for await (const event of agent.execute(context, scope)) {
         if (scope.controller.shouldStop) break;
@@ -501,6 +505,14 @@ export class AgentRuntimeService {
             Date.now() - startTime,
           );
         }
+        if (event.type === "citations") {
+          // 每个 citations 事件都是本轮全集，后到者覆盖先到者
+          collectedCitations = event.items;
+        }
+        if (event.type === "trace_step") {
+          // running 与 done/failed 共用同一 seq，按 seq 覆盖得最终态
+          traceBySeq.set(event.step.seq, event.step);
+        }
         yield event;
       }
 
@@ -518,6 +530,7 @@ export class AgentRuntimeService {
             },
           });
         }
+        await this.persistCitationMeta(assistantMsgId, collectedCitations, traceBySeq);
         lfTrace.update({
           output: { answer: streamedAnswer?.slice(0, 500) },
           metadata: { route: decision.route, status: "interrupted" },
@@ -546,6 +559,9 @@ export class AgentRuntimeService {
         }
       }
 
+      // ── 引用卡片与过程时间轴落库（单点后置写）──
+      await this.persistCitationMeta(assistantMsgId, collectedCitations, traceBySeq);
+
       // ── Close observability trace（正常完成）──
       lfTrace.update({
         output: { answer: streamedAnswer.slice(0, 500) },
@@ -560,6 +576,40 @@ export class AgentRuntimeService {
       if (AgentRuntimeService.sessionLocks.get(lockKey) === currentLock) {
         AgentRuntimeService.sessionLocks.delete(lockKey);
       }
+    }
+  }
+
+  /**
+   * 引用卡片与过程时间轴落库（单点后置写）。
+   *
+   * <p>助手消息存在多个 create 点（执行器内部与编排器各若干），其中一处靠唯一约束
+   * 冲突幂等；逐个改 create 既会漏也会并发冲突。此处按 assistantMsgId 后置一次
+   * update，与创建路径无关，天然幂等。落库是旁路，失败只记日志，不影响已输出的回答。</p>
+   */
+  private async persistCitationMeta(
+    assistantMsgId: string,
+    citations: CitationCard[],
+    traceBySeq: Map<number, TraceStep>,
+  ): Promise<void> {
+    const traces = [...traceBySeq.values()].sort((a, b) => a.seq - b.seq);
+    if (!citations.length && !traces.length) return;
+    try {
+      await prisma.message.update({
+        where: { id: assistantMsgId },
+        data: {
+          // 展开为匿名对象字面量：Prisma 的 InputJsonValue 需要隐式索引签名，
+          // 而 interface 不提供该签名（type alias / 匿名对象才行）
+          metadata: {
+            citations: citations.map((c) => ({ ...c })),
+            traces: traces.map((t) => ({ ...t })),
+          },
+        },
+      });
+    } catch (e) {
+      logger.warn(
+        { errorCode: ErrorCode.AR_MSG_PERSIST_FAILED, err: e },
+        "Failed to persist citation metadata",
+      );
     }
   }
 

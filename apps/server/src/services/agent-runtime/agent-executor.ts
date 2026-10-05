@@ -10,6 +10,7 @@
 // 以后任何新场景只需注册新工具到 ToolRegistry，无需新建 Agent 文件。
 
 import type { RouteAgent, RouteContext, RouteStreamEvent } from "./types.js";
+import type { TraceStep } from "@agentforge/shared-types";
 import type { ExecutionScope } from "../../runtime/scope.js";
 import { prisma } from "../../db.js";
 import { logger } from "@agentforge/logger";
@@ -25,10 +26,10 @@ import { sanitizeReActJSON } from "./react-json-utils.js";
 import type { CitationReport } from "./citation-verifier.js";
 import { getCitationVerifier } from "./citation-verifier.js";
 import { validateBusinessResponse } from "./validation.js";
-import { KnowledgeContextBuilder } from "./knowledge-context.js";
+import { KnowledgeContextBuilder, toCitationCards } from "./knowledge-context.js";
 import { toolRegistry } from "../../tools/registry.js";
 import { getTaskIntentClassifier } from "./task-intent.js";
-import { KnowledgeService } from "../knowledge.js";
+import { KnowledgeService, type KnowledgeSearchResult } from "../knowledge.js";
 import { resolveModel, getProvider } from "../../providers/registry.js";
 import { settings } from "../../config.js";
 import { ErrorCode } from "./errors/codes.js";
@@ -39,6 +40,13 @@ const HARDCODED_FALLBACK =
 
 // ── ask_user 空 question 时的兜底提问文案 ──
 const ASK_USER_FALLBACK = "请问您能提供更多信息吗？";
+
+/** 工具名 → 过程时间轴的中文标签；未收录的工具回退为工具名本身 */
+function toolTraceLabel(tool: string): string {
+  if (tool === "search_knowledge_base") return "检索知识库";
+  if (tool === "web_search") return "联网搜索";
+  return tool;
+}
 
 // ── Agent 业务阶段 ──
 type AgentPhase =
@@ -201,6 +209,15 @@ export class AgentExecutor implements RouteAgent {
         }
       }
 
+      // ── 引用卡片：complex_task 的检索发生在工具调用中，故卡片在回答流之后下发 ──
+      if (knowledgeContext && knowledgeContext.citations.length > 0) {
+        yield {
+          type: "citations",
+          items: toCitationCards(knowledgeContext.citations),
+          message_id: assistantMsgId,
+        };
+      }
+
       // ── Citation 引证校验 ──
       if (state.finalAnswer && state.collectedKBChunks.length > 0) {
         try {
@@ -361,6 +378,8 @@ export class AgentExecutor implements RouteAgent {
     });
 
     // 映射 agent 事件 → agent-runtime SSE 事件
+    /** 过程时间轴序号：本方法内单调递增，保证每步独立 */
+    let traceSeq = 0;
     for await (const event of events) {
       if (scope?.controller.shouldStop) break;
 
@@ -395,28 +414,67 @@ export class AgentExecutor implements RouteAgent {
           };
           break;
 
-        case "agent_observe":
+        case "agent_observe": {
           state.phase = "observing";
           state.iterationCount++;
-          if ("tool" in event && event.tool) {
+          const eventTool =
+            "tool" in event && typeof event.tool === "string" ? event.tool : "";
+          const resultStr =
+            "result" in event && typeof event.result === "string"
+              ? event.result
+              : "";
+          if (eventTool) {
             agentToolCallsTotal.inc({
-              tool_name: String(event.tool),
+              tool_name: eventTool,
               status: "success",
               route: "TASK",
             });
           }
-          if ("result" in event && event.result) {
-            const resultStr = event.result as string;
+          let hitCount: number | undefined;
+          let isKbRetrieval = false;
+          if (resultStr) {
             const kbChunks = extractKBChunks(resultStr);
             if (kbChunks.length > 0) {
               state.collectedKBChunks.push(...kbChunks);
+              hitCount = kbChunks.length;
               // 保存最近一次 search_knowledge_base 的原始输出供 KnowledgeContext 构建
               if (isKnowledgeBaseResult(resultStr)) {
                 state.lastKBToolResult = resultStr;
+                isKbRetrieval = true;
               }
+            } else if (/"found"\s*:/.test(resultStr)) {
+              // KB 工具的输出必带 query/found 字段；命中为空时也要落一步，
+              // 让用户看到"查了但没查到"，而不是这一步凭空消失
+              isKbRetrieval = true;
+              hitCount = 0;
             }
           }
+          // agent_observe 不保证带 tool 字段（原生 tool-calling 只给 step/result，
+          // 工具名写在 result 前缀 "Tool <name>: ..."）；取不到就退回通用标签，不臆造。
+          const toolName =
+            eventTool ||
+            /^Tool\s+([A-Za-z0-9_]+)\s*:/.exec(resultStr.trim())?.[1] ||
+            "";
+          // 过程时间轴：每次工具观测一步，让用户看到 Agent 调了什么、拿到多少
+          traceSeq += 1;
+          yield {
+            type: "trace_step",
+            step: {
+              seq: traceSeq,
+              kind: isKbRetrieval ? "retrieval" : "tool",
+              label: isKbRetrieval
+                ? "检索知识库"
+                : toolName
+                  ? toolTraceLabel(toolName)
+                  : "调用工具",
+              status: "done",
+              detail: toolName || undefined,
+              hitCount,
+            },
+            message_id: assistantMsgId,
+          };
           break;
+        }
 
         case "agent_respond":
           if ("content" in event) {
@@ -604,16 +662,66 @@ export class AgentExecutor implements RouteAgent {
     const { userMessage, assistantMsgId, conversationId, sessionId } = context;
 
     // 1. 直接搜索知识库（单次调用，不走 ToolRegistry）
+    // 过程时间轴：本轮只有一次检索，running 与 done/failed 共用 seq=1，前端按 seq 更新同一步
+    const retrievalStep = (
+      status: TraceStep["status"],
+      hitCount?: number,
+    ): TraceStep => ({
+      seq: 1,
+      kind: "retrieval",
+      label: "检索知识库",
+      status,
+      detail: userMessage,
+      hitCount,
+    });
+
+    yield {
+      type: "trace_step",
+      step: retrievalStep("running"),
+      message_id: assistantMsgId,
+    };
+
     let kbResults: string[] = [];
+    /** 与 kbResults 同序同长：kbDocs[i] 对应下方 prompt 里的 [i+1] */
+    let kbDocs: KnowledgeSearchResult[] = [];
+    let kbFailed = false;
     try {
       const kbService = new KnowledgeService();
-      const searchResults = await kbService.search(userMessage, null, 5);
-      kbResults = searchResults.map((r) => r.content).filter(Boolean);
+      // 保留完整结果（docTitle / score / docId / chunkIndex），供引用卡片使用
+      const found = await kbService.search(userMessage, null, 5);
+      // 过滤空正文，保证 kbDocs 与 kbResults 索引严格一致
+      kbDocs = found.filter((r) => Boolean(r.content));
+      kbResults = kbDocs.map((r) => r.content);
       if (kbResults.length > 0) {
         collectedKBChunks.push(...kbResults);
       }
     } catch (e) {
+      kbFailed = true;
       logger.warn({ errorCode: ErrorCode.AE_SIMPLE_QA_KB_FAILED, err: e }, "simple_qa: KB search failed, proceeding without KB context");
+    }
+
+    yield {
+      type: "trace_step",
+      step: retrievalStep(kbFailed ? "failed" : "done", kbFailed ? undefined : kbDocs.length),
+      message_id: assistantMsgId,
+    };
+
+    // 引用卡片：编号与下方 prompt 的 [n] 同源（均按 kbDocs 顺序），
+    // 是否展示由前端在回答完成后按正文实际标注的 [n] 过滤
+    if (kbDocs.length > 0) {
+      yield {
+        type: "citations",
+        items: toCitationCards(
+          kbDocs.map((r) => ({
+            docId: r.docId,
+            docTitle: r.docTitle,
+            chunkIndex: r.chunkIndex,
+            content: r.content,
+            score: r.score,
+          })),
+        ),
+        message_id: assistantMsgId,
+      };
     }
 
     // 2. 构建简洁的 QA prompt（无 ReAct 结构）

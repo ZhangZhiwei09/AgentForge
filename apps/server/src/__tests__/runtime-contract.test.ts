@@ -314,6 +314,118 @@ describe("Runtime Contract — 完整生命周期场景", () => {
     });
   });
 
+  // ── Scenario 5b: 工具调用 → 过程时间轴（trace_step） ──
+
+  describe("Scenario 5b: 工具调用映射为过程时间轴", () => {
+    const kbPayload = JSON.stringify({
+      query: "退换货条件",
+      found: true,
+      top_score: 0.9,
+      results: [
+        {
+          content: "自收到商品之日起7天内可申请退货",
+          score: 0.9,
+          source: "退换货政策",
+        },
+        { content: "退款将在3个工作日内到账", score: 0.8, source: "退换货政策" },
+      ],
+    });
+
+    it("知识库结果映射为 retrieval 步并带命中数", async () => {
+      mockAgentRun.mockReturnValue(
+        generateEvents([
+          { type: "agent_observe", step: 1, result: kbPayload },
+          { type: "agent_responding", step: 1 },
+          {
+            type: "agent_respond",
+            content: "7天内可申请退货",
+            summary: "政策说明",
+            message_id: "m",
+          },
+          {
+            type: "agent_done",
+            total_steps: 1,
+            final_summary: "完成",
+            session_id: "s",
+          },
+        ]),
+      );
+
+      const events = await collectEvents(createContext());
+      const traces = events.filter((e) => e.type === "trace_step");
+
+      expect(traces).toHaveLength(1);
+      if (traces[0].type === "trace_step") {
+        expect(traces[0].step).toMatchObject({
+          kind: "retrieval",
+          label: "检索知识库",
+          status: "done",
+          hitCount: 2,
+        });
+      }
+    });
+
+    it("带 'Tool <name>: ' 前缀的观测不丢步骤，且能解析出工具名", async () => {
+      mockAgentRun.mockReturnValue(
+        generateEvents([
+          {
+            type: "agent_observe",
+            step: 1,
+            result: `Tool get_current_time: ${JSON.stringify({ now: "2026-10-05" })}`,
+          },
+          { type: "agent_responding", step: 1 },
+          {
+            type: "agent_respond",
+            content: "现在是 2026-10-05",
+            summary: "时间",
+            message_id: "m",
+          },
+          {
+            type: "agent_done",
+            total_steps: 1,
+            final_summary: "完成",
+            session_id: "s",
+          },
+        ]),
+      );
+
+      const events = await collectEvents(createContext());
+      const traces = events.filter((e) => e.type === "trace_step");
+
+      expect(traces).toHaveLength(1);
+      if (traces[0].type === "trace_step") {
+        expect(traces[0].step).toMatchObject({
+          kind: "tool",
+          status: "done",
+          detail: "get_current_time",
+        });
+      }
+    });
+
+    it("未调用工具的复杂任务不产生过程步骤", async () => {
+      mockAgentRun.mockReturnValue(
+        generateEvents([
+          { type: "agent_responding", step: 1 },
+          {
+            type: "agent_respond",
+            content: "直接回答",
+            summary: "无工具",
+            message_id: "m",
+          },
+          {
+            type: "agent_done",
+            total_steps: 1,
+            final_summary: "完成",
+            session_id: "s",
+          },
+        ]),
+      );
+
+      const events = await collectEvents(createContext());
+      expect(events.filter((e) => e.type === "trace_step")).toHaveLength(0);
+    });
+  });
+
   // ── Scenario 6: ReAct JSON 泄漏 → sanitize ──
 
   describe("Scenario 6: ReAct JSON 泄漏防护", () => {

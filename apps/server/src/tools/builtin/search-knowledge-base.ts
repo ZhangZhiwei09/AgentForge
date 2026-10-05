@@ -52,7 +52,14 @@ async function execute(
     }
 
     const seen = new Set<string>();
-    const deduped: Array<{ content: string; score: number; source: string }> = [];
+    // docId / chunkIndex 必须保留：下游引用卡片要靠真实 docId 定位原文
+    const deduped: Array<{
+      content: string;
+      score: number;
+      source: string;
+      docId: string;
+      chunkIndex: number;
+    }> = [];
     for (const r of rawResults) {
       const key = r.content.slice(0, 100).trim();
       if (seen.has(key)) continue;
@@ -61,6 +68,8 @@ async function execute(
         content: r.content,
         score: Math.round(r.score * 100) / 100,
         source: r.docTitle || "知识库",
+        docId: r.docId,
+        chunkIndex: r.chunkIndex,
       });
     }
     deduped.sort((a, b) => b.score - a.score);
@@ -87,6 +96,8 @@ async function execute(
         content: r.content,
         score: r.score,
         source: r.source,
+        docId: r.docId,
+        chunkIndex: r.chunkIndex,
       })),
       note: qualityLabel === "low"
         ? "相关度较低，建议在回复中标注'仅供参考'并建议用户联系人工核实。"

@@ -11,6 +11,7 @@
 //   5. 生成结构化上下文摘要
 
 import { logger } from "@agentforge/logger";
+import type { CitationCard } from "@agentforge/shared-types";
 import type { KnowledgeContext, Citation, KBDocumentItem } from "./types.js";
 
 // ── 原始 KB 搜索结果格式 ──
@@ -19,6 +20,9 @@ interface RawKBResult {
   content: string;
   score: number;
   source: string;
+  /** 真实文档 ID；旧版工具输出可能缺失，缺失时由 build() 兜底 */
+  docId?: string;
+  chunkIndex?: number;
 }
 
 interface RawKBToolOutput {
@@ -68,9 +72,10 @@ export class KnowledgeContextBuilder {
 
       // ── 构建 Citations ──
       const citations: Citation[] = topDocs.map((doc, i) => ({
-        docId: `kb-${i}`,
+        // 优先用工具层回传的真实 ID；仅在旧格式输出缺失时才退回合成值
+        docId: doc.docId || `kb-${i}`,
         docTitle: doc.source || "知识库",
-        chunkIndex: i,
+        chunkIndex: doc.chunkIndex ?? i,
         content: doc.content,
         score: doc.score,
       }));
@@ -191,6 +196,30 @@ export class KnowledgeContextBuilder {
 import { getMemoryService } from "../memory-service.js";
 
 const CUSTOMER_USER_ID = "00000000-0000-0000-0000-000000000002";
+
+// ── 协议层引用卡片映射 ──────────────────────────────────
+
+/** 卡片摘录上限（字符） */
+const EXCERPT_LEN = 200;
+
+/**
+ * 内部 Citation → 协议层引用卡片。
+ * index 从 1 开始，与回答正文中的 [n] 编号一一对应。
+ */
+export function toCitationCards(citations: Citation[]): CitationCard[] {
+  return citations.map((c, i) => ({
+    index: i + 1,
+    docId: c.docId,
+    docTitle: c.docTitle,
+    excerpt: excerptOf(c.content),
+    score: c.score,
+  }));
+}
+
+function excerptOf(content: string): string {
+  const text = content.replace(/\s+/g, " ").trim();
+  return text.length <= EXCERPT_LEN ? text : `${text.slice(0, EXCERPT_LEN)}...`;
+}
 
 /**
  * 注入用户短期记忆上下文。
