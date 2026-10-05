@@ -101,6 +101,8 @@ agentRuntimeRoutes.get("/api/agent/chat/history", async (c) => {
       role: true,
       content: true,
       createdAt: true,
+      // metadata 承载引用卡片与过程时间轴，历史回放需要
+      metadata: true,
     },
   });
 
@@ -114,6 +116,7 @@ agentRuntimeRoutes.get("/api/agent/chat/history", async (c) => {
       role: m.role,
       content: m.content,
       timestamp: m.createdAt,
+      metadata: m.metadata,
     })),
   });
 });

@@ -2,18 +2,26 @@
 // 来源：apps/server/src/services/agent-runtime/types.ts
 // 注意：仅包含客户端实际消费的类型，服务端内部字段（usage、citation 等）按需保留
 
-import type { ContentBlock, KnowledgeResult } from "@agentforge/shared-types";
+import type {
+  ContentBlock,
+  KnowledgeResult,
+  CitationCard,
+  TraceStep,
+} from "@agentforge/shared-types";
 
 /**
- * SSE 流的 5 种事件类型。
+ * SSE 流的事件类型。
  * 后端 RouteStreamEvent 中不包含 tool_call / tool_result ——
- * 这些事件在 Agent Executor 内部被消费，不会透传给前端。
+ * 这些事件在 Agent Executor 内部被消费，不会透传给前端；
+ * 前端需要的过程信息经 citations / trace_step 两个语义化事件下发。
  */
 export type SSEDataChunk =
   | SSEMetaChunk
   | SSETokenChunk
   | SSEDoneChunk
   | SSEContentBlockChunk
+  | SSECitationsChunk
+  | SSETraceStepChunk
   | SSEErrorChunk;
 
 /** 流元信息：会话参数、知识库检索结果、路由意图 */
@@ -61,6 +69,20 @@ export interface SSEDoneChunk {
 export interface SSEContentBlockChunk {
   type: "content_block";
   block: ContentBlock;
+  message_id: string;
+}
+
+/** 本轮引用文档卡片全集 */
+export interface SSECitationsChunk {
+  type: "citations";
+  items: CitationCard[];
+  message_id: string;
+}
+
+/** 过程时间轴的单步增量（同名 seq 为同一步的状态更新） */
+export interface SSETraceStepChunk {
+  type: "trace_step";
+  step: TraceStep;
   message_id: string;
 }
 

@@ -10,7 +10,54 @@ import type {
   DiagnosisPhase,
   ClarificationRequest,
   WaitingInputRequest,
+  CitationCard,
+  TraceStep,
+  MessageCitationsMeta,
 } from "@agentforge/shared-types";
+
+// ── metadata 校验 ──
+// Message.metadata 由历史会话带出，可能被旧版本或脏数据污染，属外部数据：
+// 逐字段校验后才可用于渲染，校验不过的部分直接丢弃。
+
+function isCitationCard(v: unknown): v is CitationCard {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.index === "number" &&
+    typeof r.docId === "string" &&
+    typeof r.docTitle === "string" &&
+    typeof r.excerpt === "string" &&
+    typeof r.score === "number"
+  );
+}
+
+function isTraceStep(v: unknown): v is TraceStep {
+  if (!v || typeof v !== "object") return false;
+  const r = v as Record<string, unknown>;
+  return (
+    typeof r.seq === "number" &&
+    (r.kind === "retrieval" || r.kind === "tool") &&
+    typeof r.label === "string" &&
+    (r.status === "running" || r.status === "done" || r.status === "failed")
+  );
+}
+
+function parseCitationMeta(raw: unknown): MessageCitationsMeta {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const rec = raw as Record<string, unknown>;
+
+  const citations = Array.isArray(rec.citations)
+    ? rec.citations.filter(isCitationCard)
+    : [];
+  const traces = Array.isArray(rec.traces)
+    ? rec.traces.filter(isTraceStep)
+    : [];
+
+  return {
+    citations: citations.length ? citations : undefined,
+    traces: traces.length ? traces : undefined,
+  };
+}
 
 // Re-export for backward compatibility
 export type { KnowledgeResult, ContentBlock, AgentMessage, DiagnosisProgress, DiagnosisPhase };
@@ -38,6 +85,8 @@ interface HistoryResponse {
     type?: string;
     content: string;
     timestamp: string;
+    /** 引用卡片与过程时间轴；后端已透传，旧数据可能缺失 */
+    metadata?: unknown;
   }[];
   has_more: boolean;
   next_cursor: Cursor | null;
@@ -93,6 +142,8 @@ export function useAgentChatStream() {
             role: m.role as "user" | "assistant",
             content: m.content,
             timestamp: new Date(m.timestamp).getTime(),
+            // 引用卡片与过程时间轴存在 metadata 里，校验后再水合
+            ...(m.role === "assistant" ? parseCitationMeta(m.metadata) : {}),
           }),
         );
         setMessages([
@@ -145,6 +196,7 @@ export function useAgentChatStream() {
             role: m.role as "user" | "assistant",
             content: m.content,
             timestamp: new Date(m.timestamp).getTime(),
+            ...(m.role === "assistant" ? parseCitationMeta(m.metadata) : {}),
           }),
         );
 
@@ -270,6 +322,34 @@ export function useAgentChatStream() {
         let diagnosisProgress: DiagnosisProgress | undefined;
         let clarificationData: ClarificationRequest | undefined;
         let waitingInputData: WaitingInputRequest | undefined;
+        let citations: CitationCard[] = [];
+        const tracesBySeq = new Map<number, TraceStep>();
+
+        // Helper: 引用卡片/过程步骤可能早于首个 token 到达，此时 __stream__ 消息尚未创建，
+        // 需在此自建，否则事件会被丢弃。
+        function updateStreamWithCitations() {
+          const traces = [...tracesBySeq.values()].sort((a, b) => a.seq - b.seq);
+          const patch: Partial<AgentMessage> = {
+            citations: citations.length ? citations : undefined,
+            traces: traces.length ? traces : undefined,
+          };
+          setMessages((prev) => {
+            const last = prev[prev.length - 1];
+            if (last?.id === "__stream__") {
+              return [...prev.slice(0, -1), { ...last, ...patch }];
+            }
+            return [
+              ...prev,
+              {
+                id: "__stream__",
+                role: "assistant" as const,
+                content: "",
+                timestamp: Date.now(),
+                ...patch,
+              },
+            ];
+          });
+        }
 
         // Helper: update the stream message with current diagnosis progress
         function updateStreamWithDiagnosis(dp: DiagnosisProgress | undefined) {
@@ -337,6 +417,26 @@ export function useAgentChatStream() {
 
               if (chunk.type === "content_block" && chunk.block) {
                 contentBlocks.push(chunk.block as ContentBlock);
+                continue;
+              }
+
+              // ── 引用卡片与过程时间轴 ──
+              if (chunk.type === "citations") {
+                const rawItems: unknown = chunk.items;
+                citations = Array.isArray(rawItems)
+                  ? rawItems.filter(isCitationCard)
+                  : [];
+                updateStreamWithCitations();
+                continue;
+              }
+
+              if (chunk.type === "trace_step") {
+                const rawStep: unknown = chunk.step;
+                if (isTraceStep(rawStep)) {
+                  // running 与 done/failed 共用同一 seq，后到者覆盖
+                  tracesBySeq.set(rawStep.seq, rawStep);
+                  updateStreamWithCitations();
+                }
                 continue;
               }
 
@@ -559,6 +659,14 @@ export function useAgentChatStream() {
                           diagnosis: diagnosisProgress ?? last.diagnosis,
                           clarification: clarificationData ?? last.clarification,
                           waitingInput: waitingInputData ?? last.waitingInput,
+                          citations: citations.length
+                            ? citations
+                            : last.citations,
+                          traces: tracesBySeq.size
+                            ? [...tracesBySeq.values()].sort(
+                                (a, b) => a.seq - b.seq,
+                              )
+                            : last.traces,
                         },
                       ];
                     }

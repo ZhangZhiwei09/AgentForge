@@ -1,15 +1,23 @@
 import { useState, useRef, useEffect, type KeyboardEvent } from "react";
-import {
-  Send,
-  Square,
-  MessageCircle,
-  BookOpen,
-  ChevronDown,
-  ChevronUp,
-} from "lucide-react";
+import { Send, Square, MessageCircle } from "lucide-react";
 import { useAgentChatStream } from "@/hooks/useAgentChatStream";
 import type { AgentMessage } from "@/hooks/useAgentChatStream";
-import { RichMessageRenderer, DiagnosisCard, ClarificationCard, WaitingInputCard } from "@agentforge/cui";
+import {
+  RichMessageRenderer,
+  DiagnosisCard,
+  ClarificationCard,
+  WaitingInputCard,
+  TraceTimeline,
+  CitationCardList,
+  filterCitedCards,
+} from "@agentforge/cui";
+import type { CitationCard } from "@agentforge/shared-types";
+
+/** 取该消息实际被引用的卡片：正文未标注 [n] 时回退为全部召回 */
+function citedCardsOf(msg: AgentMessage): CitationCard[] {
+  if (msg.role !== "assistant" || !msg.citations?.length) return [];
+  return filterCitedCards(msg.citations, msg.content);
+}
 import { SessionList } from "./SessionList";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { QuickReplies } from "@/components/customer-chat/QuickReplies";
@@ -35,9 +43,6 @@ export function AgentChatPage() {
   const [input, setInput] = useState("");
   const [listRefreshKey, setListRefreshKey] = useState(0);
   const prevStreamingRef = useRef(isStreaming);
-  const [expandedKnowledge, setExpandedKnowledge] = useState<Set<string>>(
-    new Set(),
-  );
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const topTriggerRef = useRef<HTMLDivElement>(null);
@@ -125,21 +130,6 @@ export function AgentChatPage() {
     sendMessage(question);
   }
 
-  function toggleKnowledge(msgId: string) {
-    setExpandedKnowledge((prev) => {
-      const next = new Set(prev);
-      if (next.has(msgId)) next.delete(msgId);
-      else next.add(msgId);
-      return next;
-    });
-  }
-
-  function scoreColor(score: number): string {
-    if (score >= 0.8) return "text-green-600 bg-green-50";
-    if (score >= 0.5) return "text-amber-600 bg-amber-50";
-    return "text-red-500 bg-red-50";
-  }
-
   return (
     <div
       className="flex flex-1 overflow-hidden"
@@ -214,16 +204,26 @@ export function AgentChatPage() {
                             onSubmit={sendMessage}
                           />
                         )}
+                        {/* Agent 过程时间轴：本轮去查了什么 */}
+                        {msg.role === "assistant" && msg.traces && (
+                          <TraceTimeline steps={msg.traces} />
+                        )}
                         {msg.id === "__stream__" && isStreaming ? (
                           <div>
                             <RichMessageRenderer
                               content={msg.content}
                               isStreaming
+                              citeIndexes={citedCardsOf(msg).map((c) => c.index)}
+                              citeScope={msg.id}
                             />
                             <span className="inline-block w-1.5 h-4 ml-0.5 bg-current animate-pulse rounded-sm align-middle" />
                           </div>
                         ) : (
-                          <RichMessageRenderer content={msg.content} />
+                          <RichMessageRenderer
+                            content={msg.content}
+                            citeIndexes={citedCardsOf(msg).map((c) => c.index)}
+                            citeScope={msg.id}
+                          />
                         )}
                       </div>
 
@@ -236,50 +236,14 @@ export function AgentChatPage() {
                       )}
                     </div>
 
-                    {/* 知识库参考来源 */}
-                    {msg.role === "assistant" &&
-                      msg.knowledge &&
-                      msg.knowledge.length > 0 && (
-                        <div className="ml-11 mt-1.5">
-                          <button
-                            onClick={() => toggleKnowledge(msg.id)}
-                            className="flex items-center gap-1 text-[11px] text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))] transition-colors"
-                          >
-                            <BookOpen className="h-3 w-3" />
-                            参考来源 ({msg.knowledge.length})
-                            {expandedKnowledge.has(msg.id) ? (
-                              <ChevronUp className="h-3 w-3" />
-                            ) : (
-                              <ChevronDown className="h-3 w-3" />
-                            )}
-                          </button>
-
-                          {expandedKnowledge.has(msg.id) && (
-                            <div className="mt-1.5 space-y-1.5">
-                              {msg.knowledge.map((kr, i) => (
-                                <div
-                                  key={i}
-                                  className="rounded-lg border border-[hsl(var(--cs-border))] bg-white p-2.5 text-xs shadow-sm"
-                                >
-                                  <div className="flex items-center justify-between mb-1">
-                                    <span className="font-medium text-[hsl(var(--muted-foreground))]">
-                                      #{i + 1} {kr.docTitle}
-                                    </span>
-                                    <span
-                                      className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-mono font-medium ${scoreColor(kr.score)}`}
-                                    >
-                                      相似度 {kr.score.toFixed(4)}
-                                    </span>
-                                  </div>
-                                  <p className="text-[hsl(var(--muted-foreground))] leading-relaxed line-clamp-3">
-                                    {kr.content}
-                                  </p>
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
+                    {/* 引用文档卡片：点正文 [n] 可定位到对应卡片 */}
+                    {msg.role === "assistant" && (
+                      <CitationCardList
+                        cards={citedCardsOf(msg)}
+                        scope={msg.id}
+                        className="ml-11"
+                      />
+                    )}
 
                     {/* 满意度评分 */}
                     {msg.role === "assistant" &&

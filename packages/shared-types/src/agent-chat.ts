@@ -2,6 +2,7 @@
 // Agent Runtime 的前后端共享类型定义
 
 import type { ContentBlock } from "./content-block";
+import type { CitationCard, TraceStep } from "./citations";
 
 // ── 知识库检索结果 ──
 
@@ -54,6 +55,10 @@ export interface AgentMessage {
   knowledge?: KnowledgeResult[];
   /** 从 SSE content_block 解析出的结构化卡片 */
   contentBlocks?: ContentBlock[];
+  /** 本轮回答引用的文档卡片（index 对应正文 [n]） */
+  citations?: CitationCard[];
+  /** Agent 本轮检索/工具过程时间轴 */
+  traces?: TraceStep[];
   /** 诊断信息采集请求（信息不足时提示用户补充） */
   clarification?: ClarificationRequest;
   /** 多 Agent 协同诊断过程数据 */

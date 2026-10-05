@@ -2,7 +2,11 @@
 // RouteAgent 接口 + RouteContext + SSE 事件协议
 
 import type { ChatMessage } from "../../providers/types.js";
-import type { ContentBlock } from "@agentforge/shared-types";
+import type {
+  ContentBlock,
+  CitationCard,
+  TraceStep,
+} from "@agentforge/shared-types";
 import type { ExecutionScope } from "../../runtime/scope.js";
 
 // ── 路由分类 ──
@@ -116,6 +120,24 @@ export type RouteStreamEvent =
     }
   | {
       type: "clear_stream";
+      message_id: string;
+    }
+  | {
+      /**
+       * 本轮引用文档卡片全集（检索完成后一次性下发）。
+       * 注意与 done.citation 区分：后者是 L4 引证校验的聚合统计，本事件是逐条卡片。
+       */
+      type: "citations";
+      items: CitationCard[];
+      message_id: string;
+    }
+  | {
+      /**
+       * 过程时间轴的单步增量（先 running 后 done/failed）。
+       * 与 diagnosis_phase 的成对事件不同，前端需按 step.seq 更新已存在步骤。
+       */
+      type: "trace_step";
+      step: TraceStep;
       message_id: string;
     }
   | {
