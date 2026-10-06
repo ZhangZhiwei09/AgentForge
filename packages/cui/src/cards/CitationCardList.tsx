@@ -4,7 +4,8 @@
 // 按 Spec 方案 A：卡片纯展示、不可点 —— customer-service 没有文档详情路由，
 // 不做「查看原文」入口，避免死链或误导性 affordance。
 
-import { FileText } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ChevronUp, FileText } from "lucide-react";
 import { cn } from "../utils/cn";
 import type { CitationCard } from "@agentforge/shared-types";
 
@@ -49,21 +50,40 @@ interface Props {
 }
 
 export function CitationCardList({ cards, scope, className }: Props) {
+  const [isOpen, setIsOpen] = useState(true);
+
   if (!cards.length) return null;
 
   return (
     <div className={cn("mt-3", className)}>
-      <div className="mb-1.5 text-[11px] font-semibold text-[hsl(var(--muted-foreground))]">
-        引用文档 ({cards.length})
+      <div className="flex items-center justify-between border-t border-[hsl(var(--cs-border))] pt-2">
+        <span className="text-[11px] font-semibold text-[hsl(var(--muted-foreground))]">
+          本轮依据 · {cards.length} 条引用
+        </span>
+        <button
+          type="button"
+          onClick={() => setIsOpen((open) => !open)}
+          aria-expanded={isOpen}
+          className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-[hsl(var(--cs-primary))] transition-colors hover:bg-[hsl(var(--cs-primary-light))]"
+        >
+          {isOpen ? "收起" : "展开"}
+          {isOpen ? (
+            <ChevronUp className="h-3 w-3" />
+          ) : (
+            <ChevronDown className="h-3 w-3" />
+          )}
+        </button>
       </div>
-      <div
-        className="flex gap-2 overflow-x-auto pb-2"
-        style={{ scrollSnapType: "x proximity" }}
-      >
-        {cards.map((c) => (
-          <CitationItem key={`${c.docId}-${c.index}`} card={c} scope={scope} />
-        ))}
-      </div>
+      {isOpen && (
+        <div
+          className="mt-2 flex gap-2 overflow-x-auto pb-2"
+          style={{ scrollSnapType: "x proximity" }}
+        >
+          {cards.map((c) => (
+            <CitationItem key={`${c.docId}-${c.index}`} card={c} scope={scope} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

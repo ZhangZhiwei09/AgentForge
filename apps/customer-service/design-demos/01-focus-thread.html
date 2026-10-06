@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Direction 01 · Focus Thread</title>
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172033;background:#eef2f7}
+    *{box-sizing:border-box}body{margin:0}button,textarea{font:inherit}
+    .shell{height:100vh;display:grid;grid-template-columns:72px minmax(0,1fr);background:#f7f9fc}
+    .rail{display:flex;flex-direction:column;align-items:center;gap:16px;padding:18px 12px;border-right:1px solid #e2e7ef;background:#fff}
+    .mark{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:#2167e8;color:#fff;font-weight:800}
+    .rail button{border:0;background:transparent;color:#8b98aa;padding:10px;border-radius:10px;cursor:pointer}
+    .rail button:hover,.rail button.active{background:#edf4ff;color:#2167e8}
+    .page{min-width:0;display:grid;grid-template-rows:64px minmax(0,1fr);max-width:1180px;width:100%;margin:auto}
+    header{display:flex;align-items:center;justify-content:space-between;padding:0 28px;border-bottom:1px solid #e2e7ef;background:#fff}
+    .eyebrow{font-size:11px;letter-spacing:.12em;color:#8591a3;text-transform:uppercase}.title{font-size:15px;font-weight:750;margin-top:3px}
+    .presence{display:flex;align-items:center;gap:8px;color:#66758b;font-size:12px}.dot{width:8px;height:8px;border-radius:99px;background:#34b87b}
+    main{min-height:0;display:grid;grid-template-columns:minmax(0,760px) 240px;gap:28px;padding:28px}
+    .thread{min-height:0;display:flex;flex-direction:column}
+    .thread-head{display:flex;justify-content:space-between;align-items:end;margin-bottom:18px}.thread-head h1{font-size:27px;line-height:1.15;margin:0;letter-spacing:-.03em}.thread-head p{margin:7px 0 0;color:#748196;font-size:13px}
+    .messages{min-height:0;flex:1;overflow:auto;padding:4px 4px 18px 0}
+    .message{display:flex;gap:12px;margin:18px 0;animation:rise .24s ease both}.message.user{justify-content:flex-end}.avatar{width:30px;height:30px;border-radius:10px;display:grid;place-items:center;background:#2167e8;color:white;font-weight:750;font-size:12px;flex:none}.user .avatar{background:#dbe7fb;color:#2167e8;order:2}
+    .bubble{max-width:620px;padding:14px 16px;border:1px solid #e0e6ef;border-radius:16px 16px 16px 5px;background:#fff;box-shadow:0 8px 22px #293b5e0b;font-size:14px;line-height:1.65}.user .bubble{border:0;border-radius:16px 16px 5px 16px;background:#2167e8;color:#fff}
+    .bubble strong{display:block;margin-bottom:6px;font-size:12px;color:#2167e8}.user .bubble strong{color:#dbe7fb}
+    .trace{margin-top:12px;border-top:1px solid #edf0f5;padding-top:10px;color:#748196;font-size:12px}.trace span{display:inline-flex;align-items:center;gap:5px;margin-right:12px}.trace i{width:6px;height:6px;background:#34b87b;border-radius:99px}
+    .composer{display:flex;align-items:end;gap:10px;padding:12px;border:1px solid #dce3ed;border-radius:18px;background:#fff;box-shadow:0 12px 32px #293b5e12}.composer textarea{min-height:42px;max-height:110px;flex:1;resize:none;border:0;outline:0;color:#172033}.composer textarea::placeholder{color:#9aa6b6}.send{border:0;border-radius:12px;background:#2167e8;color:#fff;padding:11px 15px;cursor:pointer;font-weight:700}.send:hover{background:#1756c7}.hint{display:flex;justify-content:space-between;margin-top:8px;color:#9aa6b6;font-size:11px}
+    aside{border-left:1px solid #e2e7ef;padding-left:22px}.side-title{font-size:12px;color:#8591a3;letter-spacing:.08em;text-transform:uppercase;margin-bottom:14px}.context{padding:14px;border:1px solid #e0e6ef;border-radius:14px;background:#fff;margin-bottom:10px}.context b{display:block;font-size:13px;margin-bottom:6px}.context p{font-size:12px;line-height:1.55;color:#748196;margin:0}.action{width:100%;border:1px solid #dbe3ef;background:#fff;color:#2167e8;padding:10px 12px;border-radius:10px;text-align:left;cursor:pointer;font-size:12px;margin-top:7px}.action:hover{border-color:#2167e8;background:#f2f6ff}
+    .toast{position:fixed;right:24px;bottom:24px;padding:12px 15px;border-radius:12px;background:#172033;color:#fff;font-size:12px;opacity:0;transform:translateY(8px);transition:.2s}.toast.show{opacity:1;transform:none}
+    @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+    @media(max-width:820px){.shell{grid-template-columns:1fr}.rail{display:none}.page{grid-template-rows:58px 1fr}header{padding:0 18px}main{display:block;padding:18px}.thread-head h1{font-size:23px}aside{display:none}.bubble{max-width:86vw}}
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <nav class="rail" aria-label="主导航"><div class="mark">A</div><button class="active" title="对话">◌</button><button title="知识">▤</button><button title="设置">⚙</button></nav>
+    <div class="page">
+      <header><div><div class="eyebrow">AgentForge / Support</div><div class="title">核身排障助手</div></div><div class="presence"><span class="dot"></span>在线 · 已连接知识库</div></header>
+      <main>
+        <section class="thread">
+          <div class="thread-head"><div><h1>把问题说清楚，剩下的交给助手</h1><p>当前会话 · FACE_TIMEOUT 排查</p></div><button class="action" style="width:auto;margin:0" id="clear">新对话</button></div>
+          <div class="messages" id="messages">
+            <div class="message"><div class="avatar">AI</div><div class="bubble"><strong>诊断助手</strong>我会先确认错误出现的阶段，再给出最短排查路径。你可以直接粘贴日志或描述复现步骤。<div class="trace"><span><i></i>已识别：FACE_TIMEOUT</span><span><i></i>正在等待上下文</span></div></div></div>
+            <div class="message user"><div class="bubble"><strong>你</strong>活体检测在部分安卓设备上超时，重试后偶尔能通过。</div><div class="avatar">我</div></div>
+            <div class="message"><div class="avatar">AI</div><div class="bubble"><strong>诊断助手</strong>这通常与摄像头初始化时序、前后台切换或网络超时策略有关。先确认失败时是否伴随权限弹窗，以及设备系统版本。</div></div>
+          </div>
+          <div class="composer"><textarea id="input" rows="1" placeholder="输入补充信息，Enter 发送 · Shift + Enter 换行"></textarea><button class="send" id="send">发送</button></div><div class="hint"><span>回答会实时生成</span><span id="count">0 / 2000</span></div>
+        </section>
+        <aside><div class="side-title">当前上下文</div><div class="context"><b>问题类型</b><p>活体检测 · 超时 · Android</p></div><div class="context"><b>建议先查</b><p>权限状态、相机初始化耗时、网络请求超时配置。</p></div><div class="side-title" style="margin-top:24px">快捷动作</div><button class="action" data-action="已复制诊断模板">复制诊断模板</button><button class="action" data-action="已打开排查清单">打开排查清单</button></aside>
+      </main>
+    </div>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script>
+    const input=document.querySelector('#input'), messages=document.querySelector('#messages'), count=document.querySelector('#count'), toast=document.querySelector('#toast');
+    function notify(text){toast.textContent=text;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),1500)}
+    input.addEventListener('input',()=>{count.textContent=input.value.length+' / 2000';input.style.height='auto';input.style.height=Math.min(input.scrollHeight,110)+'px'});
+    function send(){const text=input.value.trim();if(!text)return;messages.insertAdjacentHTML('beforeend','<div class="message user"><div class="bubble"><strong>你</strong>'+text.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</div><div class="avatar">我</div></div>');input.value='';input.style.height='auto';count.textContent='0 / 2000';messages.scrollTop=messages.scrollHeight;setTimeout(()=>{messages.insertAdjacentHTML('beforeend','<div class="message"><div class="avatar">AI</div><div class="bubble"><strong>诊断助手</strong>收到。我会把这条信息并入当前诊断上下文，下一步建议继续补充失败设备型号和完整错误时间点。</div></div>');messages.scrollTop=messages.scrollHeight},500)}
+    document.querySelector('#send').onclick=send;input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});document.querySelector('#clear').onclick=()=>{messages.innerHTML='';notify('已创建新对话')};document.querySelectorAll('[data-action]').forEach(b=>b.onclick=()=>notify(b.dataset.action));
+  </script>
+</body>
+</html>

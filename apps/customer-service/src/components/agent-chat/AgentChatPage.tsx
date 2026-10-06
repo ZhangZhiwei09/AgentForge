@@ -18,6 +18,13 @@ function citedCardsOf(msg: AgentMessage): CitationCard[] {
   if (msg.role !== "assistant" || !msg.citations?.length) return [];
   return filterCitedCards(msg.citations, msg.content);
 }
+
+function formatMessageTime(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString("zh-CN", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
 import { SessionList } from "./SessionList";
 import { WelcomeScreen } from "./WelcomeScreen";
 import { QuickReplies } from "@/components/customer-chat/QuickReplies";
@@ -44,7 +51,7 @@ export function AgentChatPage() {
   const [listRefreshKey, setListRefreshKey] = useState(0);
   const prevStreamingRef = useRef(isStreaming);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const topTriggerRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const prevScrollHeightRef = useRef<number>(0);
@@ -119,7 +126,7 @@ export function AgentChatPage() {
     setInput("");
   }
 
-  function handleKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+  function handleKeyDown(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -145,11 +152,25 @@ export function AgentChatPage() {
 
       {/* 中间聊天区域 */}
       <main className="flex flex-1 flex-col bg-[hsl(var(--cs-bg))]">
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-[hsl(var(--cs-border))] bg-white px-4 sm:px-7">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-[hsl(var(--muted-foreground))]">
+              AgentForge / Support
+            </p>
+            <h1 className="truncate text-sm font-semibold text-[hsl(var(--foreground))]">
+              核身排障助手
+            </h1>
+          </div>
+          <div className="flex shrink-0 items-center gap-2 text-[11px] text-[hsl(var(--muted-foreground))]">
+            <span className="h-2 w-2 rounded-full bg-[hsl(var(--cs-success))]" />
+            智能体在线
+          </div>
+        </header>
         <div ref={scrollContainerRef} className="flex-1 overflow-y-auto">
           {!hasRealMessages ? (
             <WelcomeScreen onSend={handleFAQSelect} />
           ) : (
-            <div className="mx-auto max-w-2xl space-y-4 px-3 sm:px-6 py-4 sm:py-6">
+            <div className="mx-auto max-w-3xl space-y-4 px-3 py-4 sm:px-6 sm:py-6">
               {/* 顶部加载触发器 */}
               <div ref={topTriggerRef} className="py-2 text-center">
                 {isLoadingMore ? (
@@ -183,12 +204,24 @@ export function AgentChatPage() {
                       )}
 
                       <div
-                        className={`max-w-[78%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
+                        className={`max-w-[86%] rounded-2xl px-4 py-3 text-sm leading-relaxed shadow-sm ${
                           msg.role === "user"
                             ? "bg-[hsl(var(--cs-primary))] text-white rounded-br-md"
                             : "bg-white border border-[hsl(var(--cs-border))] text-[hsl(var(--foreground))] rounded-bl-md"
                         }`}
                       >
+                        <div
+                          className={`mb-1.5 flex items-center gap-2 text-[10px] ${
+                            msg.role === "user"
+                              ? "text-blue-100"
+                              : "text-[hsl(var(--muted-foreground))]"
+                          }`}
+                        >
+                          <span className="font-semibold">
+                            {msg.role === "user" ? "你" : "诊断助手"}
+                          </span>
+                          <span>{formatMessageTime(msg.timestamp)}</span>
+                        </div>
                         {/* 诊断信息采集卡片（信息不足时提示用户补充） */}
                         {msg.role === "assistant" && msg.clarification && (
                           <ClarificationCard clarification={msg.clarification} />
@@ -225,6 +258,12 @@ export function AgentChatPage() {
                             citeScope={msg.id}
                           />
                         )}
+                        {msg.role === "assistant" && (
+                          <CitationCardList
+                            cards={citedCardsOf(msg)}
+                            scope={msg.id}
+                          />
+                        )}
                       </div>
 
                       {msg.role === "user" && (
@@ -235,15 +274,6 @@ export function AgentChatPage() {
                         </div>
                       )}
                     </div>
-
-                    {/* 引用文档卡片：点正文 [n] 可定位到对应卡片 */}
-                    {msg.role === "assistant" && (
-                      <CitationCardList
-                        cards={citedCardsOf(msg)}
-                        scope={msg.id}
-                        className="ml-11"
-                      />
-                    )}
 
                     {/* 满意度评分 */}
                     {msg.role === "assistant" &&
@@ -296,16 +326,16 @@ export function AgentChatPage() {
 
         {/* 输入区域 */}
         <div className="border-t border-[hsl(var(--cs-border))] bg-white px-3 sm:px-6 py-3 sm:py-4">
-          <div className="mx-auto max-w-2xl">
-            <div className="flex items-center gap-2 sm:gap-3 rounded-xl border border-[hsl(var(--cs-border))] bg-[hsl(var(--cs-bg))] px-3 sm:px-4 py-2 sm:py-2.5 focus-within:ring-2 focus-within:ring-[hsl(var(--cs-primary))]/20 focus-within:border-[hsl(var(--cs-primary))] transition-all shadow-sm">
-              <input
+          <div className="mx-auto max-w-3xl">
+            <div className="flex items-center gap-2 sm:gap-3 rounded-2xl border border-[hsl(var(--cs-border))] bg-white px-3 sm:px-4 py-2 sm:py-2.5 focus-within:ring-2 focus-within:ring-[hsl(var(--cs-primary))]/20 focus-within:border-[hsl(var(--cs-primary))] transition-all shadow-[0_10px_28px_rgba(32,55,90,0.08)]">
+              <textarea
                 ref={inputRef}
-                type="text"
+                rows={1}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="输入您的问题，Enter 发送..."
-                className="flex-1 bg-transparent py-1.5 text-sm outline-none placeholder:text-gray-400"
+                className="max-h-28 min-h-7 flex-1 resize-none bg-transparent py-1.5 text-sm leading-6 outline-none placeholder:text-gray-400"
               />
               {isStreaming ? (
                 <button

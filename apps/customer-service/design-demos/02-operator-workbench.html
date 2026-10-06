@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Direction 02 · Operator Workbench</title>
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;color:#172033;background:#edf1f6}
+    *{box-sizing:border-box}body{margin:0}button,textarea{font:inherit}
+    .app{height:100vh;display:grid;grid-template-columns:260px minmax(0,1fr)}
+    .left{background:#fff;border-right:1px solid #dde4ee;padding:18px 14px;display:flex;flex-direction:column}
+    .brand{display:flex;align-items:center;gap:10px;font-weight:800;margin:3px 8px 22px}.brand i{display:grid;place-items:center;width:31px;height:31px;background:#2167e8;color:#fff;border-radius:9px;font-style:normal}
+    .new{width:100%;border:0;border-radius:10px;padding:10px;background:#2167e8;color:#fff;font-weight:700;cursor:pointer}.new:hover,.send:hover{background:#1756c7}
+    .label{margin:22px 8px 9px;color:#94a0af;font-size:11px;letter-spacing:.1em;text-transform:uppercase}
+    .session{display:flex;gap:10px;align-items:start;padding:12px 10px;border-radius:10px;border:0;background:transparent;text-align:left;cursor:pointer;width:100%;color:#172033}.session:hover,.session.active{background:#eef4ff}.session.active{box-shadow:inset 3px 0 #2167e8}.session b{display:block;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.session span{display:block;font-size:11px;color:#8b98aa;margin-top:5px}
+    .main{min-width:0;display:grid;grid-template-rows:64px minmax(0,1fr) 88px}.top{display:flex;align-items:center;justify-content:space-between;padding:0 26px;border-bottom:1px solid #dde4ee;background:#fff}.top h1{font-size:15px;margin:0}.status{display:flex;gap:8px;align-items:center;color:#7e8ba0;font-size:12px}.status i{width:7px;height:7px;background:#34b87b;border-radius:99px}
+    .conversation{overflow:auto;padding:24px 30px}.msg{display:flex;gap:10px;margin:19px auto;max-width:820px}.msg.user{justify-content:flex-end}.avatar{width:28px;height:28px;border-radius:9px;background:#dfe9fa;color:#2167e8;display:grid;place-items:center;font-size:11px;font-weight:800;flex:none}.assistant .avatar{background:#2167e8;color:#fff}
+    .card{max-width:680px;padding:13px 15px;border-radius:14px;border:1px solid #e0e6ee;background:#fff;line-height:1.65;font-size:13px;box-shadow:0 4px 12px #25395c0a}.user .card{background:#2167e8;color:#fff;border:0}.meta{font-size:11px;color:#8b98aa;margin-bottom:5px}.user .meta{color:#dce8ff}
+    .evidence{margin-top:10px;border:1px solid #dbe5f3;border-radius:10px;background:#f7faff;padding:11px 12px}.evidence-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.evidence b{font-size:12px}.evidence-toggle{border:0;background:transparent;color:#2167e8;font-size:11px;cursor:pointer}.evidence p{font-size:11px;color:#738197;line-height:1.6;margin:7px 0 0}.tag{display:inline-block;margin-top:8px;padding:4px 7px;border-radius:5px;background:#e8f0ff;color:#2167e8;font-size:10px}
+    .composer{display:flex;align-items:end;gap:10px;padding:16px 30px;border-top:1px solid #dde4ee;background:#fff}.composer textarea{flex:1;resize:none;border:1px solid #dbe3ed;border-radius:11px;padding:11px 13px;outline:none;min-height:42px}.composer textarea:focus{border-color:#2167e8;box-shadow:0 0 0 3px #2167e81a}.send{border:0;border-radius:10px;padding:11px 16px;background:#2167e8;color:#fff;font-weight:700;cursor:pointer}
+    .toast{position:fixed;right:22px;bottom:22px;padding:11px 14px;background:#172033;color:#fff;border-radius:10px;font-size:12px;opacity:0;transition:.2s}.toast.show{opacity:1}
+    @media(max-width:680px){.app{grid-template-columns:1fr}.left{display:none}.conversation{padding:18px 14px}.composer{padding:12px 14px}.top{padding:0 14px}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="left">
+      <div class="brand"><i>A</i><span>AgentForge</span></div>
+      <button class="new" id="new">＋ 新对话</button>
+      <div class="label">最近会话</div>
+      <button class="session active" data-topic="FACE_TIMEOUT"><span>◉</span><div><b>FACE_TIMEOUT Android 排查</b><span>刚刚 · 4 条消息</span></div></button>
+      <button class="session" data-topic="SDK"><span>◉</span><div><b>SDK 版本升级建议</b><span>昨天 · 8 条消息</span></div></button>
+      <button class="session" data-topic="camera"><span>◉</span><div><b>摄像头权限被拒绝</b><span>周一 · 6 条消息</span></div></button>
+    </aside>
+    <section class="main">
+      <header class="top"><h1 id="topic">FACE_TIMEOUT Android 排查</h1><div class="status"><i></i>智能体在线</div></header>
+      <div class="conversation" id="conversation">
+        <div class="msg assistant"><div class="avatar">AI</div><div class="card"><div class="meta">诊断助手 · 10:42</div>已定位到问题上下文：活体检测在部分 Android 设备上超时。下面附上本轮判断依据，方便你直接核对。
+          <div class="evidence"><div class="evidence-head"><b>本轮依据 · 2 条引用</b><button class="evidence-toggle" data-toggle="evidence-1">收起</button></div><div id="evidence-1"><p>Android 相机初始化：建议记录首次打开相机到首帧可用的耗时，区分设备层问题。</p><span class="tag">相关度 0.94</span><p>FACE_TIMEOUT 排查手册：包含网络重试、前后台切换和权限状态的判断分支。</p><span class="tag">相关度 0.89</span></div></div>
+        </div></div>
+        <div class="msg user"><div class="avatar">我</div><div class="card"><div class="meta">你 · 10:43</div>如何确认是相机初始化慢，而不是网络超时？</div></div>
+        <div class="msg assistant"><div class="avatar">AI</div><div class="card"><div class="meta">诊断助手 · 10:43</div>在同一请求中记录 camera_open、frame_ready 和 verify_request 三个时间点。若 frame_ready 已超过 2 秒，优先检查权限和设备兼容层。</div></div>
+      </div>
+      <div class="composer"><textarea id="input" rows="1" placeholder="继续追问当前诊断..."></textarea><button class="send" id="send">发送</button></div>
+    </section>
+  </div>
+  <div class="toast" id="toast"></div>
+  <script>
+    const toast=document.querySelector('#toast'),conversation=document.querySelector('#conversation'),input=document.querySelector('#input');
+    function notify(t){toast.textContent=t;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),1400)}
+    document.querySelectorAll('.session').forEach(btn=>btn.onclick=()=>{document.querySelectorAll('.session').forEach(b=>b.classList.remove('active'));btn.classList.add('active');document.querySelector('#topic').textContent=btn.dataset.topic+' · 当前会话';notify('已切换会话')});
+    document.querySelector('#new').onclick=()=>{document.querySelectorAll('.session').forEach(b=>b.classList.remove('active'));notify('已创建空白会话')};
+    document.querySelectorAll('[data-toggle]').forEach(btn=>btn.onclick=()=>{const target=document.querySelector('#'+btn.dataset.toggle),hidden=target.style.display==='none';target.style.display=hidden?'block':'none';btn.textContent=hidden?'收起':'展开'});
+    function send(){const t=input.value.trim();if(!t)return;conversation.insertAdjacentHTML('beforeend','<div class="msg user"><div class="avatar">我</div><div class="card"><div class="meta">你 · 刚刚</div>'+t.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))+'</div></div>');input.value='';conversation.scrollTop=conversation.scrollHeight;setTimeout(()=>{conversation.insertAdjacentHTML('beforeend','<div class="msg assistant"><div class="avatar">AI</div><div class="card"><div class="meta">诊断助手 · 刚刚</div>我已把这条追问加入当前诊断。依据会继续跟随这条回复展示。</div></div>');conversation.scrollTop=conversation.scrollHeight},450)}
+    document.querySelector('#send').onclick=send;input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send()}});
+  </script>
+</body>
+</html>

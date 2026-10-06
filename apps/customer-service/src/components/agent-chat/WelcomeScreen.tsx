@@ -12,24 +12,24 @@ interface WelcomeScreenProps {
 export function WelcomeScreen({ onSend }: WelcomeScreenProps) {
 
   return (
-    <div className="flex items-center justify-center min-h-full px-4 py-12">
+    <div className="flex min-h-full items-center justify-center px-4 py-12">
       <div className="max-w-lg w-full text-center">
         {/* Logo & Title */}
         <div className="mb-8">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-[hsl(var(--cs-primary))] shadow-lg">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[hsl(var(--cs-primary))] shadow-[0_12px_26px_hsl(var(--cs-primary)/25%)]">
             <MessageCircle className="h-8 w-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-[hsl(var(--foreground))] mb-2">
-            核身排障智能助手
+          <h1 className="mb-2 text-2xl font-bold text-[hsl(var(--foreground))]">
+            开始一个排障会话
           </h1>
-          <p className="text-sm text-[hsl(var(--muted-foreground))]">
+          <p className="text-sm leading-6 text-[hsl(var(--muted-foreground))]">
             基于知识库为您提供核身错误码排查、SDK 集成诊断与通过率优化建议
           </p>
         </div>
 
         {/* Suggested Topics */}
         <div className="space-y-2 mb-6">
-          <p className="text-xs font-medium text-[hsl(var(--muted-foreground))] flex items-center justify-center gap-1.5">
+          <p className="flex items-center justify-center gap-1.5 text-xs font-medium text-[hsl(var(--muted-foreground))]">
             <Sparkles className="h-3 w-3" />
             试试这些话题
           </p>
@@ -38,7 +38,7 @@ export function WelcomeScreen({ onSend }: WelcomeScreenProps) {
               <button
                 key={i}
                 onClick={() => onSend(topic.question)}
-                className="flex items-center gap-2 rounded-xl border border-[hsl(var(--cs-border))] bg-white px-4 py-3 text-sm text-left text-[hsl(var(--foreground))] hover:border-[hsl(var(--cs-primary))] hover:bg-[hsl(var(--cs-primary))]/5 transition-all shadow-sm group"
+                className="group flex items-center gap-3 rounded-xl border border-[hsl(var(--cs-border))] bg-white px-4 py-3 text-left text-sm text-[hsl(var(--foreground))] shadow-sm transition-all hover:-translate-y-0.5 hover:border-[hsl(var(--cs-primary))] hover:bg-[hsl(var(--cs-primary))]/5 hover:shadow-md"
               >
                 <span className="flex-1">{topic.question}</span>
                 <ArrowRight className="h-3.5 w-3.5 text-[hsl(var(--muted-foreground))] group-hover:text-[hsl(var(--cs-primary))] transition-colors" />
