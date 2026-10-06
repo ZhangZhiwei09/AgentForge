@@ -62,6 +62,98 @@ function parseCitationMeta(raw: unknown): MessageCitationsMeta {
 // Re-export for backward compatibility
 export type { KnowledgeResult, ContentBlock, AgentMessage, DiagnosisProgress, DiagnosisPhase };
 
+function isInternalDiagnosisMessage(content: string): boolean {
+  return [
+    "Blackboard（共享上下文）",
+    "你是核身业务前端排查专家",
+    "你是核身业务后端排查专家",
+    "你是核身诊断的质量评估与汇总专家",
+  ].some((marker) => content.includes(marker));
+}
+
+function isLegacyDiagnosisReport(content: string): boolean {
+  // Older server versions persisted the internal diagnosis report as ordinary
+  // assistant text. Keep those records out of the chat after refresh.
+  return (
+    content.includes("核身诊断质量评估与综合结论") ||
+    (content.includes("多 Agent 协同诊断") &&
+      (content.includes("Phase 1") ||
+        content.includes("评分结果") ||
+        content.includes("快速通道")))
+  );
+}
+
+function isDiagnosisPhase(value: unknown): value is DiagnosisPhase {
+  if (!value || typeof value !== "object") return false;
+  const phase = value as Record<string, unknown>;
+  return (
+    typeof phase.phase === "number" &&
+    typeof phase.label === "string" &&
+    typeof phase.agent === "string" &&
+    (phase.status === "pending" ||
+      phase.status === "running" ||
+      phase.status === "done") &&
+    (phase.summary === undefined || typeof phase.summary === "string")
+  );
+}
+
+function parseDiagnosisMeta(raw: unknown): {
+  diagnosis?: DiagnosisProgress;
+  clarification?: ClarificationRequest;
+} {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
+  const metadata = raw as Record<string, unknown>;
+  const rawDiagnosis = metadata.diagnosis;
+  let diagnosis: DiagnosisProgress | undefined;
+
+  if (rawDiagnosis && typeof rawDiagnosis === "object") {
+    const value = rawDiagnosis as Record<string, unknown>;
+    const phases = Array.isArray(value.phases)
+      ? value.phases.filter(isDiagnosisPhase)
+      : [];
+    if (
+      (value.status === "running" ||
+        value.status === "done" ||
+        value.status === "error") &&
+      phases.length > 0
+    ) {
+      diagnosis = {
+        status: value.status,
+        phases,
+        ...(typeof value.resolution === "string"
+          ? { resolution: value.resolution }
+          : {}),
+        ...(typeof value.finalConclusion === "string"
+          ? { finalConclusion: value.finalConclusion }
+          : {}),
+      };
+    }
+  }
+
+  const rawClarification = metadata.clarification;
+  let clarification: ClarificationRequest | undefined;
+  if (rawClarification && typeof rawClarification === "object") {
+    const value = rawClarification as Record<string, unknown>;
+    if (
+      typeof value.intent === "string" &&
+      Array.isArray(value.missingFields) &&
+      value.missingFields.every((field) => typeof field === "string") &&
+      typeof value.promptMessage === "string" &&
+      Array.isArray(value.hints) &&
+      value.hints.every((hint) => typeof hint === "string")
+    ) {
+      clarification = {
+        intent: value.intent,
+        missingFields: value.missingFields,
+        promptMessage: value.promptMessage,
+        hints: value.hints,
+      };
+    }
+  }
+
+  return { diagnosis, clarification };
+}
+
 interface StreamMeta {
   messageId: string;
   conversationId: string;
@@ -136,16 +228,27 @@ export function useAgentChatStream() {
 
       const data: HistoryResponse = await res.json();
       if (data.messages && data.messages.length > 0) {
-        const historyMsgs: AgentMessage[] = data.messages.map(
-          (m) => ({
-            id: m.id,
-            role: m.role as "user" | "assistant",
-            content: m.content,
-            timestamp: new Date(m.timestamp).getTime(),
-            // 引用卡片与过程时间轴存在 metadata 里，校验后再水合
-            ...(m.role === "assistant" ? parseCitationMeta(m.metadata) : {}),
-          }),
-        );
+        const historyMsgs: AgentMessage[] = data.messages
+          .filter(
+            (m) =>
+              !isInternalDiagnosisMessage(m.content) &&
+              !(m.role === "assistant" && isLegacyDiagnosisReport(m.content)),
+          )
+          .map(
+            (m) => {
+              const diagnosisMeta =
+                m.role === "assistant" ? parseDiagnosisMeta(m.metadata) : {};
+              return {
+                id: m.id,
+                role: m.role as "user" | "assistant",
+                content: m.content,
+                timestamp: new Date(m.timestamp).getTime(),
+                // 引用卡片、过程时间轴和诊断卡片都从 metadata 水合
+                ...(m.role === "assistant" ? parseCitationMeta(m.metadata) : {}),
+                ...diagnosisMeta,
+              };
+            },
+          );
         setMessages([
           {
             id: "welcome",
@@ -190,15 +293,26 @@ export function useAgentChatStream() {
 
       const data: HistoryResponse = await res.json();
       if (data.messages && data.messages.length > 0) {
-        const olderMsgs: AgentMessage[] = data.messages.map(
-          (m) => ({
-            id: m.id,
-            role: m.role as "user" | "assistant",
-            content: m.content,
-            timestamp: new Date(m.timestamp).getTime(),
-            ...(m.role === "assistant" ? parseCitationMeta(m.metadata) : {}),
-          }),
-        );
+        const olderMsgs: AgentMessage[] = data.messages
+          .filter(
+            (m) =>
+              !isInternalDiagnosisMessage(m.content) &&
+              !(m.role === "assistant" && isLegacyDiagnosisReport(m.content)),
+          )
+          .map(
+            (m) => {
+              const diagnosisMeta =
+                m.role === "assistant" ? parseDiagnosisMeta(m.metadata) : {};
+              return {
+                id: m.id,
+                role: m.role as "user" | "assistant",
+                content: m.content,
+                timestamp: new Date(m.timestamp).getTime(),
+                ...(m.role === "assistant" ? parseCitationMeta(m.metadata) : {}),
+                ...diagnosisMeta,
+              };
+            },
+          );
 
         setMessages((prev) => {
           // 跳过 welcome 消息，插入到其后
@@ -630,6 +744,17 @@ export function useAgentChatStream() {
                 });
               } else if (chunk.type === "error") {
                 console.error("Stream error:", chunk.content);
+                if (diagnosisProgress) {
+                  diagnosisProgress = {
+                    ...diagnosisProgress,
+                    status: "error",
+                    finalConclusion:
+                      typeof chunk.content === "string"
+                        ? chunk.content
+                        : "诊断过程出现异常，请稍后重试。",
+                  };
+                  updateStreamWithDiagnosis(diagnosisProgress);
+                }
               } else if (chunk.type === "done") {
                 if (chunk.suggestions && meta) {
                   meta = { ...meta, suggestions: chunk.suggestions };
@@ -744,6 +869,29 @@ function extractConclusionFromOutput(
   if (finalDiag) {
     if (typeof finalDiag.conclusion === "string") return finalDiag.conclusion;
     if (typeof finalDiag.message === "string") return finalDiag.message;
+
+    const sections: string[] = [];
+    const frontendView = finalDiag.frontend_view;
+    const backendView = finalDiag.backend_view;
+    if (
+      frontendView &&
+      typeof frontendView === "object" &&
+      typeof (frontendView as Record<string, unknown>).conclusion === "string"
+    ) {
+      sections.push(
+        `前端排查结论：${(frontendView as Record<string, unknown>).conclusion}`,
+      );
+    }
+    if (
+      backendView &&
+      typeof backendView === "object" &&
+      typeof (backendView as Record<string, unknown>).conclusion === "string"
+    ) {
+      sections.push(
+        `后端排查结论：${(backendView as Record<string, unknown>).conclusion}`,
+      );
+    }
+    if (sections.length > 0) return sections.join("\n\n");
   }
   if (typeof output.conclusion === "string") {
     const parsed = tryExtractJsonField(output.conclusion, "conclusion");

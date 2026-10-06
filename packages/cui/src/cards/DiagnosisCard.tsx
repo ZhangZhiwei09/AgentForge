@@ -14,7 +14,7 @@ interface Props {
 }
 
 const RESOLUTION_LABELS: Record<string, string> = {
-  frontend_only: "快速通道 — 前端独立解决",
+  frontend_only: "快速通道 — 仅完成前端排查",
   adopt_frontend: "综合诊断完成 — 以前端结论为主",
   adopt_backend: "综合诊断完成 — 以后端结论为主",
   divergent: "前后端结论存在分歧",

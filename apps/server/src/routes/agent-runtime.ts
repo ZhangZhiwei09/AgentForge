@@ -99,6 +99,7 @@ agentRuntimeRoutes.get("/api/agent/chat/history", async (c) => {
     select: {
       id: true,
       role: true,
+      type: true,
       content: true,
       createdAt: true,
       // metadata 承载引用卡片与过程时间轴，历史回放需要
@@ -114,6 +115,7 @@ agentRuntimeRoutes.get("/api/agent/chat/history", async (c) => {
     messages: messages.map((m) => ({
       id: m.id,
       role: m.role,
+      type: m.type,
       content: m.content,
       timestamp: m.createdAt,
       metadata: m.metadata,

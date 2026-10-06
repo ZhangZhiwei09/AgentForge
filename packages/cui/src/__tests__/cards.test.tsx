@@ -212,7 +212,7 @@ describe("DiagnosisCard", () => {
       finalConclusion: "前端即可解决",
     };
     render(<DiagnosisCard diagnosis={doneData} />);
-    expect(screen.getByText("快速通道 — 前端独立解决")).toBeInTheDocument();
+    expect(screen.getByText("快速通道 — 仅完成前端排查")).toBeInTheDocument();
     expect(screen.getByText("前端即可解决")).toBeInTheDocument();
   });
 

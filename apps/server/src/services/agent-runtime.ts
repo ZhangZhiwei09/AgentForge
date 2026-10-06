@@ -10,6 +10,7 @@
 // 每个 Agent 各自负责自己的 Prompt、校验、重试、fallback
 
 import { randomUUID } from "crypto";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
 import { resolveModel } from "../providers/registry.js";
 import type { ChatMessage } from "../providers/types.js";
@@ -34,7 +35,11 @@ import { DiagnosisRouteAgent } from "./agent-runtime/diagnosis-agent.js";
 
 import { injectMemories } from "./agent-runtime/knowledge-context.js";
 import { AGENTFORGE_PERSONA } from "@agentforge/shared-prompts";
-import type { CitationCard, TraceStep } from "@agentforge/shared-types";
+import type {
+  CitationCard,
+  DiagnosisProgress,
+  TraceStep,
+} from "@agentforge/shared-types";
 
 import type {
   RouteName,
@@ -479,6 +484,15 @@ export class AgentRuntimeService {
 
       const startTime = Date.now();
       let firstTokenRecorded = false;
+      let diagnosisProgress: DiagnosisProgress | undefined;
+      let clarificationData:
+        | {
+            intent: string;
+            missingFields: string[];
+            promptMessage: string;
+            hints: string[];
+          }
+        | undefined;
       // 引用卡片与过程时间轴：编排器已在转发全部事件，在此累积以便循环结束后单点落库
       let collectedCitations: CitationCard[] = [];
       const traceBySeq = new Map<number, TraceStep>();
@@ -513,6 +527,85 @@ export class AgentRuntimeService {
           // running 与 done/failed 共用同一 seq，按 seq 覆盖得最终态
           traceBySeq.set(event.step.seq, event.step);
         }
+        if (event.type === "diagnosis_started") {
+          diagnosisProgress = {
+            status: "running",
+            phases: event.agents.map((agent) => ({
+              phase: agent.name === "frontend_agent"
+                ? 1
+                : agent.name === "backend_agent"
+                  ? 2
+                  : 3,
+              label: agent.role,
+              agent: agent.name,
+              status: "pending" as const,
+            })),
+          };
+        }
+        if (event.type === "diagnosis_phase" && diagnosisProgress) {
+          diagnosisProgress = {
+            ...diagnosisProgress,
+            phases: diagnosisProgress.phases.map((phase) =>
+              phase.phase === event.phase
+                ? { ...phase, status: "running" as const }
+                : phase,
+            ),
+          };
+        }
+        if (event.type === "diagnosis_phase_done" && diagnosisProgress) {
+          diagnosisProgress = {
+            ...diagnosisProgress,
+            phases: diagnosisProgress.phases.map((phase) =>
+              phase.phase === event.phase
+                ? {
+                    ...phase,
+                    status: "done" as const,
+                    summary: event.summary,
+                  }
+                : phase,
+            ),
+          };
+        }
+        if (event.type === "diagnosis_completed") {
+          const output = event.output;
+          const finalDiagnosis =
+            output.final_diagnosis &&
+            typeof output.final_diagnosis === "object"
+              ? (output.final_diagnosis as Record<string, unknown>)
+              : undefined;
+          const finalConclusion =
+            typeof finalDiagnosis?.conclusion === "string"
+              ? finalDiagnosis.conclusion
+              : typeof finalDiagnosis?.message === "string"
+                ? finalDiagnosis.message
+                : typeof output.conclusion === "string"
+                  ? output.conclusion
+                  : undefined;
+          diagnosisProgress = {
+            status: "done",
+            phases: diagnosisProgress?.phases ?? [],
+            resolution:
+              typeof output.resolution === "string"
+                ? output.resolution
+                : undefined,
+            finalConclusion,
+          };
+        }
+        if (event.type === "clarification_needed") {
+          clarificationData = {
+            intent: event.intent,
+            missingFields: event.missing_fields,
+            promptMessage: event.prompt_message,
+            hints: event.hints,
+          };
+        }
+        if (event.type === "error" && diagnosisProgress) {
+          diagnosisProgress = {
+            ...diagnosisProgress,
+            status: "error",
+            finalConclusion: event.content,
+          };
+        }
         yield event;
       }
 
@@ -525,12 +618,21 @@ export class AgentRuntimeService {
               id: assistantMsgId,
               conversationId: conversation.id,
               role: "assistant",
+              type: decision.route === "DIAGNOSIS" ? "diagnosis" : "text",
               content: streamedAnswer,
               model: resolvedModel,
+              metadata: buildAssistantMetadata(
+                diagnosisProgress,
+                clarificationData,
+              ),
             },
           });
         }
-        await this.persistCitationMeta(assistantMsgId, collectedCitations, traceBySeq);
+        await this.persistCitationMeta(
+          assistantMsgId,
+          collectedCitations,
+          traceBySeq,
+        );
         lfTrace.update({
           output: { answer: streamedAnswer?.slice(0, 500) },
           metadata: { route: decision.route, status: "interrupted" },
@@ -547,8 +649,13 @@ export class AgentRuntimeService {
               id: assistantMsgId,
               conversationId: conversation.id,
               role: "assistant",
+              type: decision.route === "DIAGNOSIS" ? "diagnosis" : "text",
               content: streamedAnswer,
               model: resolvedModel,
+              metadata: buildAssistantMetadata(
+                diagnosisProgress,
+                clarificationData,
+              ),
             },
           });
         } catch (e) {
@@ -594,12 +701,23 @@ export class AgentRuntimeService {
     const traces = [...traceBySeq.values()].sort((a, b) => a.seq - b.seq);
     if (!citations.length && !traces.length) return;
     try {
+      const existing = await prisma.message.findUnique({
+        where: { id: assistantMsgId },
+        select: { metadata: true },
+      });
+      const existingMetadata =
+        existing?.metadata &&
+        typeof existing.metadata === "object" &&
+        !Array.isArray(existing.metadata)
+          ? (existing.metadata as Record<string, unknown>)
+          : {};
       await prisma.message.update({
         where: { id: assistantMsgId },
         data: {
           // 展开为匿名对象字面量：Prisma 的 InputJsonValue 需要隐式索引签名，
           // 而 interface 不提供该签名（type alias / 匿名对象才行）
           metadata: {
+            ...existingMetadata,
             citations: citations.map((c) => ({ ...c })),
             traces: traces.map((t) => ({ ...t })),
           },
@@ -657,6 +775,27 @@ export class AgentRuntimeService {
       conversational: true,
     };
   }
+}
+
+function buildAssistantMetadata(
+  diagnosis?: DiagnosisProgress,
+  clarification?: {
+    intent: string;
+    missingFields: string[];
+    promptMessage: string;
+    hints: string[];
+  },
+): Prisma.InputJsonObject {
+  const metadata: Record<string, unknown> = {};
+  if (diagnosis) {
+    metadata.diagnosis = JSON.parse(JSON.stringify(diagnosis));
+  }
+  if (clarification) {
+    metadata.clarification = JSON.parse(
+      JSON.stringify(clarification),
+    );
+  }
+  return metadata as Prisma.InputJsonObject;
 }
 
 // ── 单例工厂 ──

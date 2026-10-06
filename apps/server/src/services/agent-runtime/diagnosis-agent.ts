@@ -530,7 +530,7 @@ function formatConclusionText(resolution: string, conclusion: string): string {
 }
 
 const RESOLUTION_PREFIX: Record<string, string> = {
-  frontend_only: "✅ 经前端排查，问题已定位：",
+  frontend_only: "ℹ️ 前端侧排查完成，未进入后端排查：",
   adopt_frontend: "✅ 综合诊断完成，以前端结论为主：",
   adopt_backend: "✅ 综合诊断完成，以后端结论为主：",
   divergent: "⚠️ 前后端排查结论存在分歧，以下为双方观点：",
