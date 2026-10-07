@@ -17,6 +17,7 @@ import {
   deleteByDocumentIds,
   isESAvailable,
   ensureKnowledgeIndex,
+  indexDocument,
   type ESDocument,
 } from "./elasticsearch.js";
 import type { TextMetrics } from "./document-normalizer/index.js";
@@ -733,6 +734,69 @@ export class KnowledgeIngestionService {
     logger.info({ docId }, "Document deleted");
     invalidateCitationCache();
     return true;
+  }
+
+  // 更新单个 chunk，并同步刷新 PGVector 与 Elasticsearch 内容
+  async updateChunk(chunkId: string, content: string) {
+    const chunk = await prisma.knowledgeChunk.findUnique({
+      where: { id: chunkId },
+      include: {
+        document: { select: { title: true } },
+      },
+    });
+    if (!chunk) return null;
+
+    const provider = getDefaultEmbeddingProvider();
+    if (!provider) {
+      throw new Error("No embedding provider configured");
+    }
+
+    const [embedding, tokenCount] = await Promise.all([
+      provider.embedSingle(content),
+      countEmbeddingTokens(content),
+    ]);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const nextChunk = await tx.knowledgeChunk.update({
+        where: { id: chunkId },
+        data: {
+          content,
+          tokenCount,
+        },
+      });
+
+      await tx.$executeRawUnsafe(
+        `UPDATE knowledge_chunks SET embedding = $1::vector WHERE id = $2`,
+        `[${embedding.join(",")}]`,
+        chunkId,
+      );
+
+      return nextChunk;
+    });
+
+    try {
+      if (await isESAvailable()) {
+        await ensureKnowledgeIndex();
+        await indexDocument({
+          chunkId: updated.id,
+          kbId: updated.knowledgeBaseId,
+          docId: updated.documentId,
+          title: chunk.document.title,
+          content: updated.content,
+          sourceType: updated.sourceType ?? undefined,
+          qualityLabel: updated.qualityLabel ?? undefined,
+          createdAt: updated.created_at?.toISOString() ?? new Date().toISOString(),
+        });
+      }
+    } catch (e) {
+      logger.warn(
+        { chunkId, error: String(e) },
+        "Failed to refresh Elasticsearch chunk after update",
+      );
+    }
+
+    invalidateCitationCache();
+    return updated;
   }
 
   // V3.0: 从 PG 重建 ES 索引（可用于 ES 数据丢失或迁移后的修复）

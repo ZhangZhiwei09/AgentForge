@@ -9,6 +9,7 @@ import type {
   CreateKnowledgeBaseRequest,
   UpdateKnowledgeBaseRequest,
   KnowledgeChunkDTO,
+  UpdateKnowledgeChunkRequest,
   KnowledgeDocumentDTO,
   KnowledgeSearchResponse,
   KnowledgeStatsDTO,
@@ -197,6 +198,19 @@ export class AgentForgeClient {
   async getDocumentChunks(docId: string): Promise<KnowledgeChunkDTO[]> {
     return this.request<KnowledgeChunkDTO[]>(
       `/api/knowledge/documents/${docId}/chunks`,
+    );
+  }
+
+  async updateKnowledgeChunk(
+    chunkId: string,
+    input: UpdateKnowledgeChunkRequest,
+  ): Promise<KnowledgeChunkDTO> {
+    return this.request<KnowledgeChunkDTO>(
+      `/api/knowledge/chunks/${encodeURIComponent(chunkId)}`,
+      {
+        method: "PUT",
+        body: JSON.stringify(input),
+      },
     );
   }
 

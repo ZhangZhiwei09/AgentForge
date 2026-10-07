@@ -748,6 +748,47 @@ knowledgeManagementRoutes.get("/api/knowledge/documents/:docId/chunks", async (c
 // 分块预览（不入库，仅预览）
 // ════════════════════════════════════════════════════════════════
 
+const chunkUpdateSchema = z.object({
+  content: z.string().trim().min(1).max(100000),
+});
+
+// PUT /api/knowledge/chunks/:chunkId - update one chunk and refresh indexes
+knowledgeManagementRoutes.put(
+  "/api/knowledge/chunks/:chunkId",
+  zValidator("json", chunkUpdateSchema),
+  async (c) => {
+    const chunkId = c.req.param("chunkId");
+    const { content } = c.req.valid("json");
+    const ingestion = new KnowledgeIngestionService();
+
+    try {
+      const updated = await ingestion.updateChunk(chunkId, content);
+      if (!updated) {
+        return c.json({ detail: "切片不存在" }, 404);
+      }
+
+      return c.json({
+        id: updated.id,
+        documentId: updated.documentId,
+        knowledgeBaseId: updated.knowledgeBaseId,
+        content: updated.content,
+        chunkIndex: updated.chunkIndex,
+        tokenCount: updated.tokenCount,
+        enabled: updated.enabled,
+        qualityLabel: updated.qualityLabel,
+        sourceType: updated.sourceType,
+        parentChunkId: updated.parentChunkId,
+        createdAt: updated.created_at,
+      });
+    } catch (e) {
+      logger.error({ chunkId, error: String(e) }, "Chunk update failed");
+      const message = e instanceof Error ? e.message : "切片更新失败";
+      const status = message === "No embedding provider configured" ? 503 : 500;
+      return c.json({ detail: message }, status);
+    }
+  },
+);
+
 const chunkPreviewSchema = z.object({
   text: z.string().min(1).max(100000),
   chunk_size_tokens: z.number().int().min(50).max(4000).optional(),

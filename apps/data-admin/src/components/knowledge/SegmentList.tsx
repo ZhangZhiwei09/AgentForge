@@ -26,11 +26,12 @@ function SkeletonSegment() {
 interface SegmentListProps {
   chunks: SegmentData[];
   loading: boolean;
+  onSave: (chunkId: string, content: string) => Promise<unknown>;
 }
 
 // ── 组件 ──────────────────────────────────────────
 
-export function SegmentList({ chunks, loading }: SegmentListProps) {
+export function SegmentList({ chunks, loading, onSave }: SegmentListProps) {
   const [searchText, setSearchText] = useState("");
 
   // ── 加载状态 ──────────────────────────────────────
@@ -123,6 +124,7 @@ export function SegmentList({ chunks, loading }: SegmentListProps) {
               key={chunk.id}
               segment={chunk}
               index={i}
+              onSave={(content) => onSave(chunk.id, content)}
             />
           ))}
         </div>

@@ -60,6 +60,10 @@ export interface KnowledgeChunkDTO {
   updatedAt: string;
 }
 
+export interface UpdateKnowledgeChunkRequest {
+  content: string;
+}
+
 // ── 文档 ──
 
 export interface KnowledgeDocumentDTO {
@@ -104,6 +108,10 @@ export interface KnowledgeSearchResultDTO {
   kbId: string;
   content: string;
   score: number;
+  scoreType?: 'reranker' | 'rrf';
+  sourceScore?: number;
+  fusionScore?: number;
+  rerankScore?: number;
   chunkIndex: number;
   docTitle: string;
 }

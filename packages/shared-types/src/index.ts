@@ -155,6 +155,7 @@ export type {
   CreateKnowledgeBaseRequest,
   UpdateKnowledgeBaseRequest,
   KnowledgeChunkDTO,
+  UpdateKnowledgeChunkRequest,
   KnowledgeDocumentDTO,
   CreateDocumentRequest,
   BatchCreateDocumentsRequest,

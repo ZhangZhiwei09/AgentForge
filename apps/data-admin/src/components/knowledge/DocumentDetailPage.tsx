@@ -1,6 +1,6 @@
 // 文档详情页面 —— 文档元数据 + 分块列表
 import { useParams, useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, FileText, Clock, Layers } from "lucide-react";
 import { client } from "@agentforge/ui";
 import type { KnowledgeDocumentDTO, KnowledgeChunkDTO } from "@agentforge/shared-types";
@@ -64,6 +64,8 @@ function DocumentDetailView({
   docId: string;
   navigate: ReturnType<typeof useNavigate>;
 }) {
+  const queryClient = useQueryClient();
+
   // 查询文档详情
   const {
     data: doc,
@@ -85,6 +87,20 @@ function DocumentDetailView({
     queryFn: () => client.getDocumentChunks(docId),
     // 文档处理中时 chunks 可能为空，不视为错误
     enabled: !!doc && doc.status === "completed",
+  });
+
+  const updateChunkMutation = useMutation({
+    mutationFn: ({ chunkId, content }: { chunkId: string; content: string }) =>
+      client.updateKnowledgeChunk(chunkId, { content }),
+    onSuccess: (updatedChunk) => {
+      queryClient.setQueryData<KnowledgeChunkDTO[]>(
+        ["knowledge", "document", docId, "chunks"],
+        (current) =>
+          current?.map((chunk) =>
+            chunk.id === updatedChunk.id ? updatedChunk : chunk,
+          ),
+      );
+    },
   });
 
   // ── 将后端分块映射为 SegmentData ──
@@ -232,7 +248,13 @@ function DocumentDetailView({
 
       {/* 内容区：分块列表 */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
-        <SegmentList chunks={segmentData} loading={chunksLoading} />
+        <SegmentList
+          chunks={segmentData}
+          loading={chunksLoading}
+          onSave={(chunkId, content) =>
+            updateChunkMutation.mutateAsync({ chunkId, content })
+          }
+        />
       </div>
     </div>
   );
