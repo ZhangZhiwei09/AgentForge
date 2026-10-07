@@ -190,3 +190,7 @@ export type {
   KnowledgeRegressionMetricsDTO,
   KnowledgeRegressionMetricsQuery,
 } from "./knowledge";
+export type {
+  FlowFieldType, FlowValueRef, FlowOutputField, AgentFlowNode, AgentFlowEdge,
+  AgentFlowDefinition, AgentFlowDTO, AgentFlowNodeRecord, AgentFlowRunDTO, AgentFlowEvent,
+} from "./agent-flow";

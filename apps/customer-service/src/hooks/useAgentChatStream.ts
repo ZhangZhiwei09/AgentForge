@@ -92,7 +92,8 @@ function isDiagnosisPhase(value: unknown): value is DiagnosisPhase {
     typeof phase.agent === "string" &&
     (phase.status === "pending" ||
       phase.status === "running" ||
-      phase.status === "done") &&
+      phase.status === "done" ||
+      phase.status === "skipped") &&
     (phase.summary === undefined || typeof phase.summary === "string")
   );
 }
@@ -100,6 +101,7 @@ function isDiagnosisPhase(value: unknown): value is DiagnosisPhase {
 function parseDiagnosisMeta(raw: unknown): {
   diagnosis?: DiagnosisProgress;
   clarification?: ClarificationRequest;
+  waitingInput?: WaitingInputRequest;
 } {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const metadata = raw as Record<string, unknown>;
@@ -114,7 +116,8 @@ function parseDiagnosisMeta(raw: unknown): {
     if (
       (value.status === "running" ||
         value.status === "done" ||
-        value.status === "error") &&
+        value.status === "error" ||
+        value.status === "waiting_input") &&
       phases.length > 0
     ) {
       diagnosis = {
@@ -151,7 +154,16 @@ function parseDiagnosisMeta(raw: unknown): {
     }
   }
 
-  return { diagnosis, clarification };
+  const rawWaiting = metadata.waitingInput;
+  let waitingInput: WaitingInputRequest | undefined;
+  if (rawWaiting && typeof rawWaiting === "object") {
+    const value = rawWaiting as Record<string, unknown>;
+    if (typeof value.message === "string" && Array.isArray(value.missingFields) &&
+        value.missingFields.every((field) => typeof field === "string")) {
+      waitingInput = { message: value.message, missingFields: value.missingFields };
+    }
+  }
+  return { diagnosis, clarification, waitingInput };
 }
 
 interface StreamMeta {
@@ -558,14 +570,9 @@ export function useAgentChatStream() {
               if (chunk.type === "diagnosis_started") {
                 diagnosisProgress = {
                   status: "running",
-                  phases: (chunk.agents as Array<{ name: string; role: string }>).map(
-                    (a: { name: string; role: string }) => ({
-                      phase:
-                        a.name === "frontend_agent"
-                          ? 1
-                          : a.name === "backend_agent"
-                            ? 2
-                            : 3,
+                  phases: (chunk.agents as Array<{ name: string; role: string; phase?: number }>).map(
+                    (a, index) => ({
+                      phase: a.phase ?? index + 1,
                       label: a.role,
                       agent: a.name,
                       status: "pending" as const,
@@ -614,7 +621,11 @@ export function useAgentChatStream() {
                 const output = chunk.output as Record<string, unknown>;
                 const doneProgress: DiagnosisProgress = {
                   status: "done",
-                  phases: diagnosisProgress?.phases ?? [],
+                  phases: (diagnosisProgress?.phases ?? []).map((phase) =>
+                    phase.status === "pending" ||
+                    (Array.isArray(output.skipped_nodes) && output.skipped_nodes.includes(phase.agent))
+                      ? { ...phase, status: "skipped" as const }
+                      : phase),
                   resolution: String(output.resolution ?? ""),
                   finalConclusion: extractConclusionFromOutput(output),
                 };
@@ -681,6 +692,10 @@ export function useAgentChatStream() {
 
               // ── HITL 等待补充事件（Phase 3b） ──
               if (chunk.type === "diagnosis_waiting_input") {
+                if (diagnosisProgress) {
+                  diagnosisProgress = { ...diagnosisProgress, status: "waiting_input" };
+                  updateStreamWithDiagnosis(diagnosisProgress);
+                }
                 waitingInputData = {
                   message: (chunk.message as string) ?? "",
                   missingFields: (chunk.missing_fields as string[]) ?? [],

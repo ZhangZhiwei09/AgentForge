@@ -21,6 +21,7 @@ Graph 结构:
 """
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator
 
@@ -87,6 +88,8 @@ class AgentExecutor:
         registry: ToolRegistry | None = None,
         *,
         checkpoint: bool = True,
+        max_iterations: int = MAX_ITERATIONS,
+        structured_output: bool = False,
     ) -> None:
         """初始化执行器。
 
@@ -95,9 +98,14 @@ class AgentExecutor:
             checkpoint: 是否给 ReAct 图挂 checkpointer（G1 全局门控下）。
                 DIAGNOSIS 多 Agent 编排的内层阶段设为 False（multi-agent-langgraph-plan.md
                 §4.3：内层 ReAct 是瞬态工作，父图是唯一被 checkpoint 的图）。
+            structured_output: 配置流程只接收最终回答，工具失败或预算耗尽即终止。
         """
         self._registry = registry or tool_registry
         self._checkpoint = checkpoint
+        if not 1 <= max_iterations <= 10:
+            raise ValueError("max_iterations must be between 1 and 10")
+        self._max_iterations = max_iterations
+        self._structured_output = structured_output
 
     async def execute(
         self,
@@ -159,7 +167,7 @@ class AgentExecutor:
                 registry=self._registry,
                 conversation_id=context.conversation_id,
                 checkpointer=checkpointer,
-                max_iterations=MAX_ITERATIONS,
+                max_iterations=self._max_iterations,
             )
 
             # ── 初始状态 ──
@@ -184,6 +192,7 @@ class AgentExecutor:
             # ── 流式执行 ──
             final_answer = ""
             final_answer_collected = False
+            pending_tool_calls = False
 
             config = {"configurable": {"thread_id": context.conversation_id}}
 
@@ -195,6 +204,8 @@ class AgentExecutor:
                 kind = event["event"]
 
                 if kind == "on_chat_model_stream":
+                    if self._structured_output:
+                        continue
                     chunk = event["data"]["chunk"]
                     content = getattr(chunk, "content", None)
                     if content:
@@ -209,6 +220,12 @@ class AgentExecutor:
 
                 elif kind == "on_chat_model_end":
                     output = event["data"]["output"]
+                    if self._structured_output:
+                        pending_tool_calls = bool(getattr(output, "tool_calls", None))
+                        final_answer = ""
+                        final_answer_collected = False
+                        if pending_tool_calls:
+                            continue
                     # output 是聚合后的 AIMessage
                     if hasattr(output, "content") and output.content:
                         content_text = _coerce_to_str(output.content)
@@ -224,8 +241,20 @@ class AgentExecutor:
                         tool_name,
                         str(tool_output),
                     )
+                elif self._structured_output and kind == "on_chain_end" and event.get("name") == "tools":
+                    result = event["data"].get("output", {})
+                    for message in result.get("messages", []) if isinstance(result, dict) else []:
+                        payload = json.loads(message.content)
+                        if isinstance(payload, dict) and payload.get("status") in ("failed", "timeout", "error"):
+                            raise RuntimeError(f"工具 {message.name} 执行失败：{payload.get('error', payload['status'])}")
 
             # ── Fallback ──
+            if self._structured_output:
+                if pending_tool_calls:
+                    raise RuntimeError("Agent 已耗尽迭代预算，工具调用尚未完成")
+                if not final_answer_collected or not final_answer:
+                    raise RuntimeError("Agent 未返回最终结构化回答")
+                yield StreamToken(content=final_answer, message_id=assistant_msg_id)
             if not final_answer_collected or not final_answer:
                 for char in HARDCODED_FALLBACK:
                     yield StreamToken(content=char, message_id=assistant_msg_id)
@@ -242,6 +271,8 @@ class AgentExecutor:
         except Exception as exc:
             logger.error("AgentExecutor failed: %s", exc)
             yield StreamError(content=str(exc))
+            if self._structured_output:
+                return
             for char in HARDCODED_FALLBACK:
                 yield StreamToken(content=char, message_id=assistant_msg_id)
                 await asyncio.sleep(0)

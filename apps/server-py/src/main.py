@@ -6,6 +6,7 @@ from fastapi import FastAPI
 
 from src.agent.checkpoint import close_checkpointer, get_checkpointer
 from src.api.v1.auth import router as auth_router
+from src.api.v1.agent_flows import router as agent_flows_router
 from src.api.v1.chat import agent_router, router as chat_router
 from src.api.v1.conversations import agent_chat_router, conversations_router
 from src.api.v1.dev import router as dev_router
@@ -41,6 +42,7 @@ def create_app() -> FastAPI:
     app.include_router(conversations_router)
     app.include_router(knowledge_router)
     app.include_router(auth_router)
+    app.include_router(agent_flows_router)
     app.include_router(dev_router)
     return app
 

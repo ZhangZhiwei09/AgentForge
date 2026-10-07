@@ -142,7 +142,7 @@ export type RouteStreamEvent =
     }
   | {
       type: "diagnosis_started";
-      agents: Array<{ name: string; role: string }>;
+      agents: Array<{ name: string; role: string; phase?: number }>;
       message_id: string;
     }
   | {
@@ -164,6 +164,12 @@ export type RouteStreamEvent =
       type: "diagnosis_completed";
       output: Record<string, unknown>;
       message_id: string;
+    }
+  | {
+      type: "diagnosis_waiting_input";
+      message_id: string;
+      message: string;
+      missing_fields: string[];
     }
   | {
       type: "clarification_needed";

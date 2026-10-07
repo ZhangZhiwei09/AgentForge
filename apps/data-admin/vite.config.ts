@@ -15,7 +15,7 @@ export default defineConfig({
     strictPort: true,
     proxy: {
       "/api": {
-        target: "http://localhost:8000",
+        target: process.env.AGENTFORGE_API_URL || "http://localhost:8000",
         changeOrigin: true,
         ws: true,
       },

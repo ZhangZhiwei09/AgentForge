@@ -54,6 +54,9 @@ class TestCheckRuleEscalation:
     def test_face_timeout_triggers(self):
         assert check_rule_escalation("errorCode: FACE_TIMEOUT") is True
 
+    def test_unknown_timeout_error_code_triggers(self):
+        assert check_rule_escalation("errorCode: ACE_TIMEOUT") is True
+
     def test_server_error_triggers(self):
         assert check_rule_escalation("SERVER_ERROR occurred") is True
 

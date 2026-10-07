@@ -31,15 +31,15 @@ export interface WaitingInputRequest {
 // ── 诊断进度（多 Agent 协同诊断） ──
 
 export interface DiagnosisPhase {
-  phase: number; // 1 | 2 | 3
+  phase: number;
   label: string; // "前端排查" | "后端排查" | "综合分析"
   agent: string; // "frontend_agent" | "backend_agent" | "leader"
-  status: "pending" | "running" | "done";
+  status: "pending" | "running" | "done" | "skipped";
   summary?: string; // 完成后的一句话摘要
 }
 
 export interface DiagnosisProgress {
-  status: "running" | "done" | "error";
+  status: "running" | "done" | "error" | "waiting_input";
   phases: DiagnosisPhase[];
   resolution?: string; // "frontend_only" | "adopt_frontend" | "adopt_backend" | "divergent" | "needs_human"
   finalConclusion?: string; // 最终诊断结论文本

@@ -1,11 +1,12 @@
 // 数据管理仪表盘 —— Tab 布局
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { BarChart3, BookOpen, Eye } from "lucide-react";
+import { BarChart3, BookOpen, Eye, GitBranch } from "lucide-react";
 
 const TABS = [
   { to: "/admin/cs/knowledge", label: "知识库管理", icon: BookOpen },
   { to: "/admin/cs/analytics", label: "数据分析", icon: BarChart3 },
   { to: "/admin/cs/observability", label: "LLM 追踪", icon: Eye },
+  { to: "/admin/cs/agent-flows", label: "Agent 流程", icon: GitBranch },
 ];
 
 export function AdminDashboard() {
@@ -14,7 +15,7 @@ export function AdminDashboard() {
   return (
     <div className="flex flex-col flex-1" style={{ height: "calc(100dvh - 48px)" }}>
       {/* Sub-navigation */}
-      <nav className="flex items-center gap-0 border-b border-[hsl(var(--border))] bg-[hsl(var(--background))] px-4">
+      <nav className="flex shrink-0 items-center gap-0 overflow-x-auto border-b border-[hsl(var(--border))] bg-[hsl(var(--background))] px-4">
         {TABS.map((tab) => {
           const isActive =
             location.pathname === tab.to ||
@@ -23,7 +24,7 @@ export function AdminDashboard() {
             <NavLink
               key={tab.to}
               to={tab.to}
-              className={`flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium border-b-2 transition-colors ${
+              className={`flex shrink-0 items-center gap-1.5 whitespace-nowrap px-3 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                 isActive
                   ? "border-[hsl(var(--cs-primary))] text-[hsl(var(--cs-primary))]"
                   : "border-transparent text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--foreground))]"

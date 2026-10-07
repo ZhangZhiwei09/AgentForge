@@ -8,6 +8,7 @@
   },
   "scripts": {
     "dev": "turbo dev --filter=@agentforge/server --filter=@agentforge/customer-service --filter=@agentforge/data-admin --filter=@agentforge/server-py",
+    "dev:agent-flows": "node scripts/dev-agent-flows.mjs",
     "build": "turbo build",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",

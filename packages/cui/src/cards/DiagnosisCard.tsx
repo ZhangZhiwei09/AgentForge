@@ -3,7 +3,7 @@
 // 展示诊断三阶段（前端排查 → 后端排查 → 综合分析）的实时进度，
 // 支持快速通道（Phase 2/3 跳过）、升级通道、分歧/转人工等结果展示。
 
-import { Stethoscope, Loader2, CheckCircle2, Circle, ChevronRight } from "lucide-react";
+import { Stethoscope, Loader2, CheckCircle2, Circle, ChevronRight, Clock3 } from "lucide-react";
 import { cn } from "../utils/cn";
 import type { DiagnosisProgress, DiagnosisPhase } from "@agentforge/shared-types";
 
@@ -57,6 +57,12 @@ export function DiagnosisCard({ diagnosis, className }: Props) {
             完成
           </span>
         )}
+        {status === "waiting_input" && (
+          <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium text-amber-700">
+            <Clock3 className="h-2.5 w-2.5" />
+            等待补充
+          </span>
+        )}
         {status === "error" && (
           <span className="ml-auto inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[10px] font-medium text-red-600">
             异常
@@ -68,10 +74,11 @@ export function DiagnosisCard({ diagnosis, className }: Props) {
       <div className="px-3 py-2.5 space-y-2">
         {phases.map((phase) => (
           <PhaseRow
-            key={phase.phase}
+            key={phase.agent}
             phase={phase}
             isSkipped={
-              resolution === "frontend_only" && phase.phase > 1
+              phase.status === "skipped" ||
+              (status === "done" && phase.status === "pending")
             }
           />
         ))}

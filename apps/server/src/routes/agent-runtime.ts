@@ -9,6 +9,15 @@ import { authService } from "../services/auth.js";
 
 export const agentRuntimeRoutes = createHono();
 
+const ANONYMOUS_USER_ID = "00000000-0000-0000-0000-000000000002";
+
+async function chatUserId(authorization: string | undefined): Promise<string | null> {
+  if (!authorization) return ANONYMOUS_USER_ID;
+  if (!authorization.startsWith("Bearer ")) return null;
+  const user = await authService.validateToken(authorization.slice(7));
+  return user?.id ?? null;
+}
+
 const agentChatRequestSchema = z.object({
   session_id: z.string().nullable().optional(),
   conversation_id: z.string().optional(),
@@ -24,26 +33,9 @@ agentRuntimeRoutes.post(
     // conversation_id 优先（新前端），fallback 到 session_id（旧兼容）
     const lookupId = conversation_id || (session_id ?? null);
 
-    // 提取用户 ID：优先验证 token，未认证时从 JWT payload 解码 sub，回退到系统用户
-    const authHeader = c.req.header("Authorization")?.replace("Bearer ", "");
-    let userId = "00000000-0000-0000-0000-000000000002";
-    if (authHeader) {
-      const user = await authService.validateToken(authHeader);
-      if (user) {
-        userId = user.id;
-      } else {
-        // Token 验证失败时，尝试直接解码 JWT payload 提取 sub（不验证签名）
-        try {
-          const parts = authHeader.split(".");
-          if (parts.length === 3) {
-            const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
-            if (payload.sub) userId = payload.sub;
-          }
-        } catch {
-          // 解码失败则保持系统用户 ID
-        }
-      }
-    }
+    // Anonymous sessions retain the system identity; supplied tokens must be verified.
+    const userId = await chatUserId(c.req.header("Authorization"));
+    if (!userId) return c.json({ detail: "登录状态已失效，请重新登录" }, 401);
 
     const service = getAgentRuntimeService();
 
@@ -78,14 +70,19 @@ agentRuntimeRoutes.get("/api/agent/chat/history", async (c) => {
   if (!lookupId) {
     return c.json({ detail: "缺少 conversation_id 参数" }, 400);
   }
+  const userId = await chatUserId(c.req.header("Authorization"));
+  if (!userId) return c.json({ detail: "登录状态已失效，请重新登录" }, 401);
 
   // 优先按主键查找，fallback 到 sessionId（旧数据兼容）
   let conversation = await prisma.conversation.findUnique({
     where: { id: lookupId },
   });
+  if (conversation && conversation.userId !== userId) {
+    return c.json({ detail: "无权访问该会话" }, 403);
+  }
   if (!conversation) {
     conversation = await prisma.conversation.findFirst({
-      where: { sessionId: lookupId, type: "agent_chat" },
+      where: { sessionId: lookupId, type: "agent_chat", userId },
     });
   }
 
@@ -133,51 +130,37 @@ agentRuntimeRoutes.get("/api/agent/chat/history", async (c) => {
 agentRuntimeRoutes.get("/api/agent/chat/conversations", async (c) => {
   const sessionId = c.req.query("session_id");
 
-  // 尝试从 Authorization header 提取用户（验证失败时直接解码 payload）
-  const authHeader = c.req.header("Authorization")?.replace("Bearer ", "");
+  const authHeader = c.req.header("Authorization");
+  const userId = await chatUserId(authHeader);
+  if (!userId) return c.json({ detail: "登录状态已失效，请重新登录" }, 401);
   if (authHeader) {
-    let user = await authService.validateToken(authHeader);
-    if (!user) {
-      // Token 过期或签名不匹配时，直接解码 JWT payload 提取 sub
-      try {
-        const parts = authHeader.split(".");
-        if (parts.length === 3) {
-          const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
-          if (payload.sub) user = { id: payload.sub, email: payload.email ?? "", role: payload.role ?? "user" };
-        }
-      } catch {
-        // 解码失败则忽略
-      }
-    }
-    if (user) {
-      const conversations = await prisma.conversation.findMany({
-        where: { userId: user.id, type: "agent_chat" },
-        orderBy: { updatedAt: "desc" },
-        select: {
-          id: true,
-          title: true,
-          sessionId: true,
-          createdAt: true,
-          updatedAt: true,
-          messages: {
-            take: 1,
-            orderBy: { createdAt: "asc" },
-            select: { content: true },
-          },
+    const conversations = await prisma.conversation.findMany({
+      where: { userId, type: "agent_chat" },
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true,
+        title: true,
+        sessionId: true,
+        createdAt: true,
+        updatedAt: true,
+        messages: {
+          take: 1,
+          orderBy: { createdAt: "asc" },
+          select: { content: true },
         },
-      });
+      },
+    });
 
-      return c.json({
-        conversations: conversations.map((conv) => ({
-          id: conv.id,
-          title: conv.title,
-          session_id: conv.sessionId,
-          created_at: conv.createdAt,
-          updated_at: conv.updatedAt,
-          first_message: conv.messages[0]?.content?.slice(0, 100) ?? null,
-        })),
-      });
-    }
+    return c.json({
+      conversations: conversations.map((conv) => ({
+        id: conv.id,
+        title: conv.title,
+        session_id: conv.sessionId,
+        created_at: conv.createdAt,
+        updated_at: conv.updatedAt,
+        first_message: conv.messages[0]?.content?.slice(0, 100) ?? null,
+      })),
+    });
   }
 
   // 匿名用户：通过 session_id 查找
@@ -186,7 +169,7 @@ agentRuntimeRoutes.get("/api/agent/chat/conversations", async (c) => {
   }
 
   const conv = await prisma.conversation.findFirst({
-    where: { sessionId, type: "agent_chat" },
+    where: { sessionId, type: "agent_chat", userId },
     select: {
       id: true,
       title: true,

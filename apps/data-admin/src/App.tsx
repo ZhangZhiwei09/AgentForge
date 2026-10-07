@@ -10,6 +10,8 @@ import { DocumentListPage } from "./components/knowledge/DocumentListPage";
 import { DocumentDetailPage } from "./components/knowledge/DocumentDetailPage";
 import { ObservabilityPage } from "./components/analytics/ObservabilityPage";
 import { HitTestingPage } from "./components/knowledge/HitTestingPage";
+import { AgentFlowList } from "./components/agent-flows/AgentFlowList";
+import { AgentFlowEditor } from "./components/agent-flows/AgentFlowEditor";
 import { Loader2 } from "lucide-react";
 
 // ── 路由级组件：文档列表（从 URL 读取 kbId，获取 kbName） ──
@@ -80,6 +82,8 @@ export default function App() {
           <Route path="cs/knowledge/bases/:kbId" element={<DocumentListView />} />
 
           {/* 其他模块 */}
+          <Route path="cs/agent-flows" element={<AgentFlowList />} />
+          <Route path="cs/agent-flows/:flowId" element={<AgentFlowEditor />} />
           <Route path="cs/analytics" element={<AnalyticsPage />} />
           <Route path="cs/observability" element={<ObservabilityPage />} />
           <Route index element={<Navigate to="cs/knowledge" replace />} />

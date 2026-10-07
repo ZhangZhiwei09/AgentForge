@@ -32,12 +32,15 @@ import { ChatAgent } from "./agent-runtime/chat-agent.js";
 import { AgentExecutor } from "./agent-runtime/agent-executor.js";
 import { HumanAgent } from "./agent-runtime/human-agent.js";
 import { DiagnosisRouteAgent } from "./agent-runtime/diagnosis-agent.js";
+import { hasWaitingConfiguredDiagnosis } from "./agent-runtime/configured-diagnosis.js";
+import { quickRouteScan } from "./agent-runtime/routing/l1-keyword.js";
 
 import { injectMemories } from "./agent-runtime/knowledge-context.js";
 import { AGENTFORGE_PERSONA } from "@agentforge/shared-prompts";
 import type {
   CitationCard,
   DiagnosisProgress,
+  WaitingInputRequest,
   TraceStep,
 } from "@agentforge/shared-types";
 
@@ -166,11 +169,14 @@ export class AgentRuntimeService {
       const byId = await prisma.conversation.findUnique({
         where: { id: lookupId },
       });
-      if (byId) return byId;
+      if (byId) {
+        if (byId.userId !== userId) throw new Error("无权访问该会话");
+        return byId;
+      }
 
       // Fallback：按旧的 session_id 字段查找
       const bySessionId = await prisma.conversation.findFirst({
-        where: { sessionId: lookupId, type: "agent_chat" },
+        where: { sessionId: lookupId, type: "agent_chat", userId },
       });
       if (bySessionId) return bySessionId;
     }
@@ -359,7 +365,8 @@ export class AgentRuntimeService {
       scope.controller.start();
 
       // ── 2. 传统对话快速通道（零延迟） ──
-      const convMatch = this.matchConversational(userMessage);
+      const waitingFlow = await hasWaitingConfiguredDiagnosis(conversation.id);
+      const convMatch = waitingFlow ? null : this.matchConversational(userMessage);
       if (convMatch && checkContentSafety(userMessage).safe) {
         const convStartTime = Date.now();
 
@@ -402,7 +409,10 @@ export class AgentRuntimeService {
 
       // ── 3. QueryRouter 分类 ──
       const classifyStart = Date.now();
-      const decision = await this.router.classify(
+      const priorityRoute = quickRouteScan(userMessage)?.route;
+      const decision = waitingFlow && priorityRoute !== "SAFETY" && priorityRoute !== "HUMAN"
+        ? { route: "DIAGNOSIS" as const, confidence: 1, reasoning: "等待补充的配置诊断续跑" }
+        : await this.router.classify(
         userMessage,
         historyMessages,
         lfTrace,
@@ -485,6 +495,7 @@ export class AgentRuntimeService {
       const startTime = Date.now();
       let firstTokenRecorded = false;
       let diagnosisProgress: DiagnosisProgress | undefined;
+      let waitingInputData: WaitingInputRequest | undefined;
       let clarificationData:
         | {
             intent: string;
@@ -530,12 +541,8 @@ export class AgentRuntimeService {
         if (event.type === "diagnosis_started") {
           diagnosisProgress = {
             status: "running",
-            phases: event.agents.map((agent) => ({
-              phase: agent.name === "frontend_agent"
-                ? 1
-                : agent.name === "backend_agent"
-                  ? 2
-                  : 3,
+            phases: event.agents.map((agent, index) => ({
+              phase: agent.phase ?? index + 1,
               label: agent.role,
               agent: agent.name,
               status: "pending" as const,
@@ -583,7 +590,10 @@ export class AgentRuntimeService {
                   : undefined;
           diagnosisProgress = {
             status: "done",
-            phases: diagnosisProgress?.phases ?? [],
+            phases: (diagnosisProgress?.phases ?? []).map((phase) =>
+              phase.status === "pending" ||
+              (Array.isArray(output.skipped_nodes) && output.skipped_nodes.includes(phase.agent))
+                ? { ...phase, status: "skipped" as const } : phase),
             resolution:
               typeof output.resolution === "string"
                 ? output.resolution
@@ -606,6 +616,12 @@ export class AgentRuntimeService {
             finalConclusion: event.content,
           };
         }
+        if (event.type === "diagnosis_waiting_input") {
+          waitingInputData = { message: event.message, missingFields: event.missing_fields };
+          if (diagnosisProgress) {
+            diagnosisProgress = { ...diagnosisProgress, status: "waiting_input" };
+          }
+        }
         yield event;
       }
 
@@ -624,6 +640,7 @@ export class AgentRuntimeService {
               metadata: buildAssistantMetadata(
                 diagnosisProgress,
                 clarificationData,
+                waitingInputData,
               ),
             },
           });
@@ -655,6 +672,7 @@ export class AgentRuntimeService {
               metadata: buildAssistantMetadata(
                 diagnosisProgress,
                 clarificationData,
+                waitingInputData,
               ),
             },
           });
@@ -785,6 +803,7 @@ function buildAssistantMetadata(
     promptMessage: string;
     hints: string[];
   },
+  waitingInput?: WaitingInputRequest,
 ): Prisma.InputJsonObject {
   const metadata: Record<string, unknown> = {};
   if (diagnosis) {
@@ -795,6 +814,7 @@ function buildAssistantMetadata(
       JSON.stringify(clarification),
     );
   }
+  if (waitingInput) metadata.waitingInput = JSON.parse(JSON.stringify(waitingInput));
   return metadata as Prisma.InputJsonObject;
 }
 

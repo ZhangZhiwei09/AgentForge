@@ -8,7 +8,8 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test:e2e:flows": "playwright test e2e/agent-flows.spec.ts"
   },
   "dependencies": {
     "@agentforge/cui": "workspace:*",
@@ -16,6 +17,7 @@
     "@agentforge/shared-types": "workspace:*",
     "@agentforge/ui": "workspace:*",
     "@tanstack/react-query": "^5.0.0",
+    "@xyflow/react": "^12",
     "lucide-react": "^0.400.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
@@ -24,6 +26,7 @@
     "zustand": "^5.0.0"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.0",

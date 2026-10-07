@@ -25,7 +25,9 @@ logger = logging.getLogger(__name__)
 # ── Constants ──────────────────────────────────────────────
 
 BACKEND_ERROR_CODES = [
+    "ACE_TIMEOUT",
     "FACE_TIMEOUT",
+    "NETWORK_TIMEOUT",
     "FACE_FAILED",
     "LIVENESS_FAILED",
     "ALGORITHM_ERROR",

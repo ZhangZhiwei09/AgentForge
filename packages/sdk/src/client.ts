@@ -28,11 +28,29 @@ import type {
   CreateKnowledgeRegressionTestSetRequest,
   KnowledgeRegressionMetricsDTO,
   KnowledgeRegressionMetricsQuery,
+  AgentFlowDTO,
+  AgentFlowDefinition,
+  AgentFlowRunDTO,
+  AgentFlowEvent,
 } from "@agentforge/shared-types";
 export interface AgentForgeConfig {
   baseUrl: string;
   getAccessToken?: () => string | null;
   onAuthError?: () => void;
+}
+
+function formatApiError(detail: unknown, status: number): string {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    return detail.map((item: { loc?: string[]; msg?: string }) =>
+      `${item.loc?.join(".") ?? ""}: ${item.msg ?? "请求格式错误"}`).join("\n");
+  }
+  if (detail && typeof detail === "object") {
+    const structured = detail as { message?: string; errors?: Array<{ path: string; message: string }> };
+    return structured.errors?.map((item) => `${item.path}: ${item.message}`).join("\n")
+      || structured.message || `HTTP ${status}`;
+  }
+  return `HTTP ${status}`;
 }
 
 export class AgentForgeClient {
@@ -66,7 +84,7 @@ export class AgentForgeClient {
     }
     if (!res.ok) {
       const error = await res.json().catch(() => ({ detail: res.statusText }));
-      throw new Error(error.detail ?? `HTTP ${res.status}`);
+      throw new Error(formatApiError(error.detail, res.status));
     }
     return res.json();
   }
@@ -122,6 +140,91 @@ export class AgentForgeClient {
     count: number;
   }> {
     return this.request("/api/tools");
+  }
+
+  async listAgentFlows(): Promise<{ items: AgentFlowDTO[] }> {
+    return this.request("/api/agent-flows");
+  }
+
+  async createAgentFlow(name: string): Promise<AgentFlowDTO> {
+    return this.request("/api/agent-flows", { method: "POST", body: JSON.stringify({ name }) });
+  }
+
+  async getAgentFlow(id: string): Promise<AgentFlowDTO> {
+    return this.request(`/api/agent-flows/${id}`);
+  }
+
+  async saveAgentFlow(id: string, name: string, revision: number, definition: AgentFlowDefinition): Promise<AgentFlowDTO> {
+    return this.request(`/api/agent-flows/${id}/draft`, {
+      method: "PUT", body: JSON.stringify({ name, revision, definition }),
+    });
+  }
+
+  async publishAgentFlow(id: string, revision: number): Promise<AgentFlowDTO> {
+    return this.request(`/api/agent-flows/${id}/publish`, {
+      method: "POST", body: JSON.stringify({ revision }),
+    });
+  }
+
+  async activateAgentFlow(id: string, enabled: boolean): Promise<AgentFlowDTO> {
+    return this.request(`/api/agent-flows/${id}/activation`, {
+      method: "PUT", body: JSON.stringify({ enabled }),
+    });
+  }
+
+  async archiveAgentFlow(id: string): Promise<{ ok: boolean }> {
+    return this.request(`/api/agent-flows/${id}`, { method: "DELETE" });
+  }
+
+  async listAgentFlowTools(): Promise<{ tools: Array<{ name: string; description: string }> }> {
+    return this.request("/api/agent-flows/tools");
+  }
+
+  async listAgentFlowRuns(id: string): Promise<{ items: AgentFlowRunDTO[] }> {
+    return this.request(`/api/agent-flows/${id}/runs`);
+  }
+
+  async cancelAgentFlowRun(id: string, runId: string): Promise<{ ok: boolean }> {
+    return this.request(`/api/agent-flows/${id}/runs/${runId}/cancel`, { method: "POST" });
+  }
+
+  async *testAgentFlow(id: string, revision: number, message: string, signal?: AbortSignal): AsyncGenerator<AgentFlowEvent> {
+    const response = await fetch(`${this.baseUrl}/api/agent-flows/${id}/test-run`, {
+      method: "POST", headers: this.authHeaders(), body: JSON.stringify({ revision, message }), signal,
+    });
+    if (response.status === 401) this.onAuthError?.();
+    if (!response.ok || !response.body) {
+      const error = await response.json().catch(() => ({ detail: response.statusText }));
+      throw new Error(formatApiError(error.detail, response.status));
+    }
+    const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let terminal = false;
+      try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+          buffer = (buffer + decoder.decode(value, { stream: true })).replace(/\r\n/g, "\n");
+          if (buffer.length > 1048576) throw new Error("流程事件超过大小上限");
+        let boundary: number;
+        while ((boundary = buffer.indexOf("\n\n")) >= 0) {
+          const frame = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const data = frame.split("\n").filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).trim()).join("\n");
+            if (data && data !== "[DONE]") {
+              const event = JSON.parse(data) as AgentFlowEvent;
+              if (["flow_completed", "flow_failed", "flow_cancelled", "flow_waiting_input"].includes(event.type)) terminal = true;
+              yield event;
+            }
+          }
+        }
+        if (!terminal) throw new Error("流程连接提前结束，请查看运行记录");
+    } finally {
+      await reader.cancel();
+      reader.releaseLock();
+    }
   }
 
   async listMemories(type?: string): Promise<Memory[]> {

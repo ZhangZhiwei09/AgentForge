@@ -19,6 +19,7 @@ import {
   getMissingFields,
 } from "../diagnosis/nodes.js";
 import { agentRouteInvocations } from "../../observability/metrics.js";
+import { configuredDiagnosis, hasConfiguredDiagnosis } from "./configured-diagnosis.js";
 
 const AGENT_USER_ID = "00000000-0000-0000-0000-000000000002";
 const DIAGNOSIS_TEMPLATE_ID = "identity-diagnosis";
@@ -203,6 +204,22 @@ export class DiagnosisRouteAgent implements RouteAgent {
       memory_count: context.injectedMemories.length,
       route: "DIAGNOSIS",
     };
+
+    // Waiting configuration runs resume their original snapshot before preflight.
+    try {
+      if (await hasConfiguredDiagnosis(context.conversationId)) {
+        yield* configuredDiagnosis(context, scope);
+        return;
+      }
+    } catch (error) {
+      logger.error({ error }, "Configured diagnosis unavailable");
+      yield { type: "error", content: "配置诊断服务不可用，请联系管理员。" };
+      yield {
+        type: "done", message_id: messageId, usage: {},
+        memory: { injected: context.injectedMemories.length, extracted: 0 }, route: "DIAGNOSIS",
+      };
+      return;
+    }
 
     // 2. 信息充分性检查 —— 信息不足时提示用户补充，避免启动无效的重型诊断
     const infoCheck = checkDiagnosisInfoSufficiency(context.userMessage);
