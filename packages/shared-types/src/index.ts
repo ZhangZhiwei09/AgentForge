@@ -114,27 +114,6 @@ export type {
   TeamTemplate,
 } from "./team";
 export type {
-  AppProjectDTO,
-  ProjectFileDTO,
-  AppGenRunDTO,
-  AppGenRunResult,
-  CreateProjectRequest,
-  UpdateProjectRequest,
-  GenerateAppRequest,
-  WriteFileRequest,
-  AppGenStreamEventType,
-  AppGenStreamEvent,
-  AppFilePlan,
-  ProjectStatus,
-  ProjectType,
-  ProjectFramework,
-  ProjectLanguage,
-  PlanAppStructureOutput,
-  GenerateFileOutput,
-  ReviewCodeOutput,
-  ModifyFileOutput,
-} from "./app-project";
-export type {
   ContentBlock,
   ContentBlockType,
   TextBlock,

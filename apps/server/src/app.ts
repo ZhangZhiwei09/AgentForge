@@ -18,7 +18,6 @@ import { teamRoutes } from "./routes/teams.js";
 import { debugDiagnosisRoutes } from "./routes/debug-diagnosis.js";
 import { healthRoutes } from "./routes/health.js";
 import { registerMetricsEndpoint } from "./observability/metrics.js";
-import { appCreationModule } from "./modules/app-creation/index.js";
 import { dataManagementModule } from "./modules/data-management/index.js";
 import type { ServerModule } from "./modules/types.js";
 import type { AuthUser } from "@agentforge/shared-types";
@@ -69,7 +68,6 @@ export async function createApp() {
 
   // 注册业务模块路由（可插拔：设置 enabled: false 即可禁用整个模块）
   const modules: ServerModule[] = [
-    appCreationModule,   // /api/projects/* (WeaveFox V12)
     dataManagementModule, // /api/knowledge/*, /api/memories/*, /api/agent/chat/rate|faq|feedback|analytics
   ];
   for (const mod of modules) {

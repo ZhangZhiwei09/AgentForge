@@ -1,15 +1,15 @@
 # AgentForge
 
-面向智能客服、Agent 应用生成、知识管理和多 Agent 协作的全栈实验平台。仓库采用 pnpm + Turborepo 管理 React 前端、TypeScript 主后端、Python Agent Runtime 与共享包。
+面向企业内部问答、平台能力调用、知识管理和多 Agent 协作的全栈实验平台。仓库采用 pnpm + Turborepo 管理 React 前端、TypeScript 主后端、Python Agent Runtime 与共享包。
 
 ## 架构
 
 ```
-React Apps (5173 / 8080 / 5200)
+React Apps (5173 / 5200)
           │  Vite proxy: /api → :8000
           ▼
 TypeScript API · Hono (8000)
-          ├── Auth / App Creation / Data Management
+          ├── Auth / Data Management
           ├── Agent Runtime ── 5-route 分类 ── OpenAI / DeepSeek
           ├── Workflow Engine / Multi-Agent Team / Tool Registry
           └── Knowledge ── PGVector + Elasticsearch ── RRF ── Reranker (可选)
@@ -48,12 +48,12 @@ Python API · FastAPI (8004，可选、独立演进)
 | 框架 | Hono 4 + Prisma 6 | FastAPI + SQLAlchemy + LangGraph |
 | 端口（dev） | 8000 | 8004 |
 | 数据库 | `agentforge`（Prisma） | `agentforge_py`（Alembic） |
-| 主要能力 | 认证、应用生成、数据管理、Agent、Workflow、Team | 五层路由、LangGraph ReAct、诊断多 Agent、RAG、Redis 短期记忆 |
+| 主要能力 | 认证、数据管理、Agent、Workflow、Team | 五层路由、LangGraph ReAct、诊断多 Agent、RAG、Redis 短期记忆 |
 | 共享包 | 使用 `packages/database`、`shared-*`、`logger` | 不依赖 `packages/*` |
 
 两者当前不共享数据库。配置相同 `JWT_SECRET` 后，Python 端可以校验 TS 签发的 Token；Python 自带的 `/api/auth/signup` 和 `/api/auth/signin` 仅用于本地开发，正式部署应由统一认证服务签发 Token。
 
-三个前端（customer-service / app-creator / data-admin）的 Vite 代理均指向 `:8000`，即 TS 后端。Python 端目前没有前端接入。
+两个前端（customer-service / data-admin）的 Vite 代理均指向 `:8000`，即 TS 后端。Python 端目前没有前端接入。
 
 > `apps/server-py/src/config.py` 与 `.env.example` 的默认端口是 8000。请使用 `pnpm py:dev`（固定为 8004），或在 Python 的 `.env` 中显式设置 `PORT=8004`，避免与 TS 服务冲突。
 
@@ -65,7 +65,6 @@ AgentForge/
 │   ├── server/              # Hono 4 后端 API（端口 8000，主后端）
 │   ├── server-py/           # FastAPI 后端（端口 8004，并行演进中）
 │   ├── customer-service/    # 智能客服前端（端口 5173）
-│   ├── app-creator/         # Agent 构建器前端（端口 8080）
 │   └── data-admin/          # 数据管理前端（端口 5200）
 ├── packages/
 │   ├── database/            # Prisma 6 Schema + Client 单例
@@ -141,7 +140,6 @@ pnpm db:migrate
 # 推荐按需启动
 pnpm server:dev     # TS 后端 → http://localhost:8000
 pnpm cs:dev         # 智能客服 → http://localhost:5173
-pnpm creator:dev    # Agent 构建器 → http://localhost:8080
 pnpm admin:dev      # 数据管理 → http://localhost:5200
 
 # 启动整个 workspace（包含可选 Python 服务）
@@ -170,7 +168,6 @@ pnpm py:dev
 |------|------|
 | 后端 API (TS) | http://localhost:8000 |
 | 智能客服 | http://localhost:5173 |
-| Agent 构建器 | http://localhost:8080 |
 | 数据管理 | http://localhost:5200 |
 
 ### 基础设施面板

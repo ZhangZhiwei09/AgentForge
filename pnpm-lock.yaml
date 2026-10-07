@@ -18,64 +18,6 @@ importers:
         specifier: ^5.7.0
         version: 5.9.3
 
-  apps/app-creator:
-    dependencies:
-      '@agentforge/cui':
-        specifier: workspace:*
-        version: link:../../packages/cui
-      '@agentforge/sdk':
-        specifier: workspace:*
-        version: link:../../packages/sdk
-      '@agentforge/shared-types':
-        specifier: workspace:*
-        version: link:../../packages/shared-types
-      '@agentforge/ui':
-        specifier: workspace:*
-        version: link:../../packages/ui
-      '@tanstack/react-query':
-        specifier: ^5.0.0
-        version: 5.100.14(react@19.2.7)
-      lucide-react:
-        specifier: ^0.400.0
-        version: 0.400.0(react@19.2.7)
-      react:
-        specifier: ^19.0.0
-        version: 19.2.7
-      react-dom:
-        specifier: ^19.0.0
-        version: 19.2.7(react@19.2.7)
-      react-router-dom:
-        specifier: ^7.0.0
-        version: 7.16.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
-      zustand:
-        specifier: ^5.0.0
-        version: 5.0.14(@types/react@19.2.16)(react@19.2.7)
-    devDependencies:
-      '@types/react':
-        specifier: ^19.0.0
-        version: 19.2.16
-      '@types/react-dom':
-        specifier: ^19.0.0
-        version: 19.2.3(@types/react@19.2.16)
-      '@vitejs/plugin-react':
-        specifier: ^4.3.0
-        version: 4.7.0(vite@6.4.3(@types/node@25.9.2)(jiti@1.21.7)(tsx@4.22.4)(yaml@2.9.0))
-      autoprefixer:
-        specifier: ^10.4.0
-        version: 10.5.0(postcss@8.5.15)
-      postcss:
-        specifier: ^8.4.0
-        version: 8.5.15
-      tailwindcss:
-        specifier: ^3.4.0
-        version: 3.4.19(tsx@4.22.4)(yaml@2.9.0)
-      typescript:
-        specifier: ^5.7.0
-        version: 5.9.3
-      vite:
-        specifier: ^6.0.0
-        version: 6.4.3(@types/node@25.9.2)(jiti@1.21.7)(tsx@4.22.4)(yaml@2.9.0)
-
   apps/customer-service:
     dependencies:
       '@agentforge/cui':

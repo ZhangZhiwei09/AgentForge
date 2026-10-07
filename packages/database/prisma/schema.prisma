@@ -24,7 +24,6 @@ model User {
   workflowRuns  WorkflowRun[]
   agentTeams    AgentTeam[]
   agentTeamRuns AgentTeamRun[]
-  appProjects   AppProject[]
 
   @@map("users")
 }
@@ -533,59 +532,6 @@ model AgentTeamRun {
   @@index([status])
   @@index([startedAt])
   @@map("agent_team_runs")
-}
-
-model AppProject {
-  id          String   @id @db.VarChar(36)
-  userId      String   @map("user_id") @db.VarChar(36)
-  name        String   @db.VarChar(255)
-  description String?
-  status      String   @default("draft") @db.VarChar(32) // draft, generating, previewing, deployed, archived
-  type        String   @default("frontend") @db.VarChar(32) // frontend, fullstack
-  framework   String   @default("react") @db.VarChar(32) // react, vue, html, nextjs
-  previewUrl  String?  @map("preview_url") @db.VarChar(500)
-  deployUrl   String?  @map("deploy_url") @db.VarChar(500)
-  metadata    Json     @default("{}")
-  createdAt   DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt   DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  files       ProjectFile[]
-  runs        AppGenRun[]
-
-  @@index([userId, updatedAt])
-  @@map("app_projects")
-}
-
-model ProjectFile {
-  id        String   @id @db.VarChar(36)
-  projectId String   @map("project_id") @db.VarChar(36)
-  path      String   @db.VarChar(500)
-  content   String   @db.Text
-  language  String   @db.VarChar(32) // tsx, ts, css, html, json, py
-  size      Int      @default(0)
-  version   Int      @default(1)
-  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
-  project   AppProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@unique([projectId, path])
-  @@index([projectId])
-  @@map("project_files")
-}
-
-model AppGenRun {
-  id             String   @id @db.VarChar(36)
-  projectId      String   @map("project_id") @db.VarChar(36)
-  prompt         String   @db.Text
-  status         String   @default("running") @db.VarChar(32) // running, completed, failed
-  result         Json?    // { files_created: string[], tokens_used: number, errors: string[] }
-  agentSessionId String?  @map("agent_session_id") @db.VarChar(36)
-  startedAt      DateTime @default(now()) @map("started_at") @db.Timestamptz(6)
-  completedAt    DateTime? @map("completed_at") @db.Timestamptz(6)
-  project        AppProject @relation(fields: [projectId], references: [id], onDelete: Cascade)
-
-  @@index([projectId])
-  @@map("app_gen_runs")
 }
 
 model alembic_version {
