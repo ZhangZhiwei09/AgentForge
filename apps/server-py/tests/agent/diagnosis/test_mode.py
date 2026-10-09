@@ -124,6 +124,14 @@ class TestParseFrontendOutput:
         assert result.escalation_reason == "backend error"
         assert result.context_for_backend == {"traceId": "abc"}
 
+    def test_empty_conclusion_cannot_fast_track(self):
+        result = parse_frontend_output(
+            '{"conclusion": "", "evidence": [], "need_escalation": false}'
+        )
+        assert "未提供可验证结论" in result.conclusion
+        assert result.need_escalation is True
+        assert result.escalation_reason == "cannot_determine"
+
 
 class TestParseBackendOutput:
     """Backend output parsing."""
@@ -143,6 +151,10 @@ class TestParseBackendOutput:
         result = parse_backend_output("not json")
         assert result.conclusion == "not json"
         assert result.evidence == []
+
+    def test_empty_conclusion_fallback(self):
+        result = parse_backend_output('{"conclusion": "", "evidence": []}')
+        assert "未提供可验证结论" in result.conclusion
 
 
 class TestParseScoringOutput:

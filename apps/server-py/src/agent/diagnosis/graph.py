@@ -278,7 +278,9 @@ def build_diagnosis_graph(
         fe = parse_frontend_output(output)
 
         # 规则兜底：LLM 漏判但 check_rule_escalation 命中 → 强制升级
-        if check_rule_escalation(output):
+        # 原始问题中的错误码同样是升级依据，不能只扫描 LLM 是否复述了错误码。
+        task_requires_escalation = check_rule_escalation(state["task"])
+        if check_rule_escalation(f"{state['task']}\n{output}"):
             if not fe.need_escalation:
                 logger.info(
                     "LangGraph diagnosis: rule-based escalation triggered "
@@ -289,6 +291,12 @@ def build_diagnosis_graph(
                     "rule_override: backend error code or stage detected "
                     "in frontend output"
                 )
+        if task_requires_escalation and not fe.evidence:
+            fe.conclusion = (
+                "检测到后端错误码，前端没有足够证据独立定位，已升级后端排查。"
+            )
+            fe.need_escalation = True
+            fe.escalation_reason = fe.escalation_reason or "cannot_determine"
 
         bb.write("frontend_conclusion", {
             "conclusion": fe.conclusion,
@@ -379,7 +387,16 @@ def build_diagnosis_graph(
         return {"resolution": resolve_diagnosis(fe, be, sc)}
 
     async def fast_track_node(state: DiagnosisState) -> dict:
-        return {"resolution": DiagnosisResolution(resolution="frontend_only")}
+        frontend = state.get("frontend_output") or FrontendOutput()
+        return {
+            "resolution": DiagnosisResolution(
+                resolution="frontend_only",
+                final_diagnosis={
+                    "conclusion": frontend.conclusion,
+                    "evidence": frontend.evidence,
+                },
+            )
+        }
 
     async def ask_clarification_node(state: DiagnosisState) -> dict:
         """HITL（Phase 3b）：Leader 判定信息不足 → interrupt 暂停等用户补充。

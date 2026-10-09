@@ -314,6 +314,10 @@ describe("checkRuleEscalation", () => {
     ).toBe(true);
   });
 
+  it("returns true for ACE_TIMEOUT in the original task", () => {
+    expect(checkRuleEscalation("ACE_TIMEOUT 错误怎么排查")).toBe(true);
+  });
+
   it("returns true for SERVER_ERROR in output (case insensitive)", () => {
     expect(
       checkRuleEscalation("后端返回 server_error 异常"),
@@ -409,6 +413,15 @@ describe("parseFrontendOutput", () => {
     expect(result.need_escalation).toBe(false);
   });
 
+  it("does not allow an empty conclusion to enter fast track", () => {
+    const result = parseFrontendOutput(
+      '{"conclusion": "", "evidence": [], "need_escalation": false}',
+    );
+    expect(result.conclusion).toContain("未提供可验证结论");
+    expect(result.need_escalation).toBe(true);
+    expect(result.escalation_reason).toBe("cannot_determine");
+  });
+
   it("handles null escalation_reason", () => {
     const result = parseFrontendOutput(
       '{"conclusion": "x", "evidence": [], "need_escalation": false, "escalation_reason": null, "context_for_backend": {}}',
@@ -433,6 +446,11 @@ describe("parseBackendOutput", () => {
     const result = parseBackendOutput("后端监控一切正常");
     expect(result.conclusion).toBe("后端监控一切正常");
     expect(result.evidence).toEqual([]);
+  });
+
+  it("does not render an empty backend conclusion", () => {
+    const result = parseBackendOutput('{"conclusion": "", "evidence": []}');
+    expect(result.conclusion).toContain("未提供可验证结论");
   });
 
   it("truncates long fallback to 500 chars", () => {
@@ -791,6 +809,42 @@ describe("DiagnosisMode integration", () => {
       .map((e) => (e as { agentName: string }).agentName);
     expect(startedAgents).toContain("backend_agent");
     expect(startedAgents).toContain("leader");
+    expect(mockAgentRun).toHaveBeenCalledTimes(3);
+  });
+
+  it("rule escalation uses the original task when the frontend omits the code", async () => {
+    const frontendWithoutCode = JSON.stringify({
+      conclusion: "问题已定位",
+      evidence: [],
+      need_escalation: false,
+      escalation_reason: null,
+      context_for_backend: {},
+    });
+
+    mockAgentRun
+      .mockReturnValueOnce(makeAgentRespond(frontendWithoutCode))
+      .mockReturnValueOnce(makeAgentRespond(JSON.stringify(BACKEND_STRONG)))
+      .mockReturnValueOnce(
+        makeAgentRespond(JSON.stringify(SCORING_BACKEND_WINS)),
+      );
+
+    const mode = new DiagnosisMode();
+    const context = makeContext();
+    const events = await collectEvents(
+      mode,
+      context.definition,
+      "ACE_TIMEOUT 错误怎么排查",
+      context,
+    );
+
+    const startedAgents = events
+      .filter((e) => e.type === "agent_started")
+      .map((e) => (e as { agentName: string }).agentName);
+    expect(startedAgents).toEqual([
+      "frontend_agent",
+      "backend_agent",
+      "leader",
+    ]);
     expect(mockAgentRun).toHaveBeenCalledTimes(3);
   });
 

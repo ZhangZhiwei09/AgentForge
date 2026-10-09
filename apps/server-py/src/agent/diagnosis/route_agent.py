@@ -347,6 +347,18 @@ def _extract_conclusion_text(output: dict) -> str:
             conclusion = str(final_diag["conclusion"])
         elif isinstance(final_diag.get("message"), str):
             conclusion = str(final_diag["message"])
+        elif isinstance(final_diag.get("frontend_view"), dict) or isinstance(
+            final_diag.get("backend_view"), dict
+        ):
+            # divergent 结果只向用户展示双方的可读结论，禁止透传原始 JSON。
+            sections: list[str] = []
+            frontend_view = final_diag.get("frontend_view")
+            backend_view = final_diag.get("backend_view")
+            if isinstance(frontend_view, dict) and frontend_view.get("conclusion"):
+                sections.append(f"前端排查结论：{frontend_view['conclusion']}")
+            if isinstance(backend_view, dict) and backend_view.get("conclusion"):
+                sections.append(f"后端排查结论：{backend_view['conclusion']}")
+            conclusion = "\n\n".join(sections)
     elif isinstance(output.get("conclusion"), str):
         raw = str(output["conclusion"])
         try:
@@ -359,7 +371,7 @@ def _extract_conclusion_text(output: dict) -> str:
             conclusion = raw[:500]
 
     if not conclusion:
-        conclusion = f"诊断完成。结果：{str(output)[:500]}"
+        conclusion = "当前信息不足以自动定位根因，请补充 traceId、orderId、客户端类型和失败时间。"
 
     prefix = RESOLUTION_PREFIX.get(resolution, "")
     return f"{prefix}\n\n{conclusion}" if prefix else conclusion

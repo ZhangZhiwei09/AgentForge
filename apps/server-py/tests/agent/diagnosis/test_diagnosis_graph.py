@@ -128,11 +128,11 @@ def _make_runner(**overrides):
     return runner
 
 
-async def _collect(roles, runner, cancel=None):
+async def _collect(roles, runner, cancel=None, task=None):
     events = []
     async for ev in run_langgraph_diagnosis(
         roles=roles,
-        task="用户刷脸失败，报错 FACE_TIMEOUT",
+        task=task or "用户刷脸失败，报错 FACE_TIMEOUT",
         conversation_id="conv-1",
         tools_registry=ToolRegistry(),
         cancel_event=cancel,
@@ -172,7 +172,8 @@ class TestDiagnosisGraphFastTrack:
     @pytest.mark.asyncio
     async def test_fast_track(self):
         events = await _collect(
-            _roles(), _make_runner(frontend=FRONTEND_NO_ESC)
+            _roles(), _make_runner(frontend=FRONTEND_NO_ESC),
+            task="摄像头权限被拒绝",
         )
         assert isinstance(events[0], TeamStarted)
         assert isinstance(events[-1], TeamCompleted)
@@ -233,6 +234,18 @@ class TestDiagnosisGraphRuleOverride:
         assert agent_names == ["frontend_agent", "backend_agent", "leader"]
         completed = events[-1]
         assert completed.output["escalated"] is True
+
+    @pytest.mark.asyncio
+    async def test_task_error_code_triggers_escalation_when_frontend_omits_it(self):
+        events = await _collect(
+            _roles(),
+            _make_runner(frontend=FRONTEND_NO_ESC),
+            task="ACE_TIMEOUT 错误怎么排查",
+        )
+        agent_names = [
+            ev.agent_name for ev in events if isinstance(ev, AgentStarted)
+        ]
+        assert agent_names == ["frontend_agent", "backend_agent", "leader"]
 
 
 class TestDiagnosisGraphEventSequence:
@@ -348,7 +361,7 @@ class TestDiagnosisGraphStageTimeout:
                 await asyncio.sleep(5)  # 首次超时
             return FRONTEND_NO_ESC
 
-        events = await _collect(_roles(), flaky_runner)
+        events = await _collect(_roles(), flaky_runner, task="摄像头权限被拒绝")
         assert calls["n"] == 2  # 恰好重试一次
         # 只发射一次 AgentStarted（重试不重开前端阶段号）
         assert sum(isinstance(ev, AgentStarted) for ev in events) == 1
@@ -391,6 +404,6 @@ class TestDiagnosisGraphStageTimeout:
             await asyncio.sleep(0.05)  # 50ms > 20ms 全局，但 < 5000ms role 覆盖
             return FRONTEND_NO_ESC
 
-        events = await _collect(roles, slow_runner)
+        events = await _collect(roles, slow_runner, task="摄像头权限被拒绝")
         assert isinstance(events[-1], TeamCompleted)
         assert not any(isinstance(ev, TeamFailed) for ev in events)
