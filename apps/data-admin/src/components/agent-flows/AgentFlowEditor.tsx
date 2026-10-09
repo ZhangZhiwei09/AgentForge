@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState, useMemo } from "react";
+import { memo, useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ReactFlow, Background, Controls, Handle, Position, applyNodeChanges,
-  type Node, type NodeProps, type NodeChange, type Connection, type ReactFlowInstance,
+  type NodeProps, type NodeChange, type Connection, type ReactFlowInstance,
 } from "@xyflow/react";
 import {
   ArrowLeft, Bot, GitBranch, Flag, CirclePlay, Save, Upload, Play,
@@ -15,12 +15,13 @@ import type {
 } from "@agentforge/shared-types";
 import { FlowNodePanel } from "./FlowNodePanel";
 import { FlowRunPanel } from "./FlowRunPanel";
+import { commitCanvasPositions, syncCanvasNodes, type CanvasNode } from "./canvas-state";
 import "@xyflow/react/dist/style.css";
 import "./agent-flows.css";
 
-type CanvasNode = Node<{ config: AgentFlowNode; state?: string; core?: string }, "flow">;
 const NODE_ICONS = { start: CirclePlay, agent: Bot, condition: GitBranch, end: Flag };
 const NODE_LABELS = { start: "开始", agent: "Agent", condition: "条件", end: "结束" };
+const FIT_VIEW_OPTIONS = { padding: 0.18 };
 
 function definitionKey(definition: AgentFlowDefinition): string {
   // JSONB changes object key order; array order still carries flow semantics.
@@ -30,7 +31,7 @@ function definitionKey(definition: AgentFlowDefinition): string {
       : value);
 }
 
-function CanvasBlock({ data, selected }: NodeProps<CanvasNode>) {
+const CanvasBlock = memo(function CanvasBlock({ data, selected }: NodeProps<CanvasNode>) {
   const node = data.config;
   const Icon = NODE_ICONS[node.type];
   return <div className={`af-canvas-node af-kind-${node.type} ${data.core ? `af-core-${data.core}` : ""} ${selected ? "af-selected" : ""} ${data.state ? `af-state-${data.state}` : ""}`}>
@@ -44,7 +45,7 @@ function CanvasBlock({ data, selected }: NodeProps<CanvasNode>) {
       <span className="af-handle-label af-false-label">否</span><Handle id="false" type="source" position={Position.Right} style={{ top: "76%" }} />
     </> : node.type !== "end" && <Handle type="source" position={Position.Right} />}
   </div>;
-}
+});
 const nodeTypes = { flow: CanvasBlock };
 
 export function AgentFlowEditor() {
@@ -72,60 +73,76 @@ function Editor({ initial }: { initial: AgentFlowDTO }) {
   const [notice, setNotice] = useState("");
   const [runId, setRunId] = useState<string | null>(null);
   const [records, setRecords] = useState<Record<string, AgentFlowNodeRecord>>({});
+  const [canvasNodes, setCanvasNodes] = useState<CanvasNode[]>(() =>
+    syncCanvasNodes([], initial.draft, null, {}));
   const [runStatus, setRunStatus] = useState("");
   const [output, setOutput] = useState<Record<string, unknown> | null>(null);
   const controller = useRef<AbortController | null>(null);
   const canvasElement = useRef<HTMLDivElement | null>(null);
+  const dragging = useRef(new Set<string>());
   const [canvas, setCanvas] = useState<ReactFlowInstance<CanvasNode> | null>(null);
   const tools = useQuery({ queryKey: ["agent-flow-tools"], queryFn: () => client.listAgentFlowTools() });
   const history = useQuery({
     queryKey: ["agent-flow-runs", flow.id], queryFn: () => client.listAgentFlowRuns(flow.id),
     enabled: showRun, refetchInterval: running ? 1500 : false,
   });
-  const dirty = name !== flow.name || definitionKey(definition) !== definitionKey(flow.draft);
+  const draftKey = useMemo(() => definitionKey(definition), [definition]);
+  const savedKey = useMemo(() => definitionKey(flow.draft), [flow.draft]);
+  const dirty = name !== flow.name || draftKey !== savedKey;
   const node = definition.nodes.find((n) => n.id === selected);
   const working = busy || running;
 
   useEffect(() => () => controller.current?.abort(), []);
   useEffect(() => {
+    setCanvasNodes((previous) => syncCanvasNodes(previous, definition, selected, records));
+  }, [definition, selected, records]);
+  useEffect(() => {
     if (!canvas || !canvasElement.current) return;
     let frame = 0;
-    const observer = new ResizeObserver(() => {
+    let size: { width: number; height: number } | null = null;
+    const observer = new ResizeObserver(([entry]) => {
+      if (!entry) return;
+      const { width, height } = entry.contentRect;
+      if (size?.width === width && size.height === height) return;
+      const initialized = size !== null;
+      size = { width, height };
       cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(() => { void canvas.fitView({ padding: 0.18 }); });
+      if (!initialized || width <= 0 || height <= 0 || dragging.current.size > 0) return;
+      frame = requestAnimationFrame(() => {
+        if (!dragging.current.size) void canvas.fitView(FIT_VIEW_OPTIONS);
+      });
     });
     observer.observe(canvasElement.current);
     return () => { observer.disconnect(); cancelAnimationFrame(frame); };
   }, [canvas]);
   useEffect(() => {
-    function beforeUnload(event: BeforeUnloadEvent) { if (dirty || running) event.preventDefault(); }
+    function beforeUnload(event: BeforeUnloadEvent) { if (dirty || running || dragging.current.size > 0) event.preventDefault(); }
     window.addEventListener("beforeunload", beforeUnload);
     return () => window.removeEventListener("beforeunload", beforeUnload);
   }, [dirty, running]);
 
-  const canvasNodes: CanvasNode[] = useMemo(() => definition.nodes.map((n) => ({
-    id: n.id, type: "flow", position: n.position, selected: n.id === selected,
-    data: {
-      config: n, state: records[n.id]?.status,
-      core: Object.entries(definition.diagnosisBindings).find(([, id]) => id === n.id)?.[0],
-    },
-  })), [definition, selected, records]);
-  const canvasEdges = definition.edges.map((edge) => ({
+  const canvasEdges = useMemo(() => definition.edges.map((edge) => ({
     id: edge.id, source: edge.source, target: edge.target, sourceHandle: edge.branch,
     selected: edge.id === selectedEdge, label: edge.branch === "true" ? "是" : edge.branch === "false" ? "否" : undefined,
     style: { stroke: edge.branch === "false" ? "#b7791f" : "#82938f", strokeWidth: 1.7 },
-  }));
+  })), [definition.edges, selectedEdge]);
 
   function changeNode(patch: Partial<AgentFlowNode>) {
     setDefinition((draft) => ({ ...draft, nodes: draft.nodes.map((n) => n.id === selected ? { ...n, ...patch } : n) }));
     setNotice("");
   }
-  function changes(changes: NodeChange<CanvasNode>[]) {
-    const changed = applyNodeChanges(changes, canvasNodes);
-    if (changes.some((change) => change.type === "position")) {
-      setDefinition((draft) => ({ ...draft, nodes: draft.nodes.map((n) => ({ ...n, position: changed.find((c) => c.id === n.id)?.position || n.position })) }));
+  const changes = useCallback((changes: NodeChange<CanvasNode>[]) => {
+    setCanvasNodes((previous) => applyNodeChanges(changes, previous));
+    for (const change of changes) {
+      if (change.type === "position" && change.dragging !== undefined) {
+        if (change.dragging) dragging.current.add(change.id);
+        else dragging.current.delete(change.id);
+      }
     }
-  }
+    if (!working && changes.some((change) => change.type === "position" && change.dragging !== true && change.position)) {
+      setDefinition((draft) => commitCanvasPositions(draft, changes));
+    }
+  }, [working]);
   function connect(connection: Connection) {
     if (working || !connection.source || !connection.target || connection.source === connection.target) return;
     const branch = connection.sourceHandle as "true" | "false" | null;
@@ -280,7 +297,7 @@ function Editor({ initial }: { initial: AgentFlowDTO }) {
   return <div className="af-editor">
     <header className="af-editor-header">
       <Link className="af-icon" title="返回流程列表" aria-label="返回流程列表" to="/admin/cs/agent-flows" onClick={(event) => {
-        if ((dirty || running) && !window.confirm("离开此页面？未保存修改将丢失，试运行将取消。")) event.preventDefault();
+        if ((dirty || running || dragging.current.size > 0) && !window.confirm("离开此页面？未保存修改将丢失，试运行将取消。")) event.preventDefault();
       }}><ArrowLeft size={18} /></Link>
       <input className="af-name-input" aria-label="流程名称" value={name} onChange={(e) => setName(e.target.value)} disabled={working} maxLength={200} />
       <span className="af-badge">{dirty ? "未保存" : flow.draftRevision !== flow.publishedRevision ? "未发布" : `v${flow.publishedVersion}`}</span>
@@ -308,12 +325,12 @@ function Editor({ initial }: { initial: AgentFlowDTO }) {
         <ReactFlow<CanvasNode>
           nodes={canvasNodes} edges={canvasEdges} nodeTypes={nodeTypes} fitView
           onInit={setCanvas}
-          onNodesChange={working ? undefined : changes} onConnect={connect}
+          onNodesChange={changes} onConnect={connect}
           onNodeClick={(_, clicked) => { setSelected(clicked.id); setSelectedEdge(null); setShowRun(false); }}
           onEdgeClick={(_, edge) => { setSelectedEdge(edge.id); setSelected(null); }}
           onPaneClick={() => { setSelected(null); setSelectedEdge(null); }}
           nodesDraggable={!working} nodesConnectable={!working} deleteKeyCode={null}
-          minZoom={0.25} maxZoom={1.8} fitViewOptions={{ padding: 0.18 }}
+          minZoom={0.25} maxZoom={1.8} fitViewOptions={FIT_VIEW_OPTIONS}
         ><Background gap={22} size={1} color="#d6dedb" /><Controls showInteractive={false} /></ReactFlow>
         <div className="af-canvas-status">{definition.nodes.filter((n) => n.type === "agent").length} 个 Agent · {definition.limits.timeoutMs / 1000}s</div>
       </div>
