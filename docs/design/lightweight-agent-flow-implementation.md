@@ -43,6 +43,8 @@ pnpm dev:agent-flows
 
 启动器读取 `apps/server/.env`，统一业务数据库和 JWT 密钥，不覆盖任何 `.env` 文件。当前平台默认使用 DeepSeek 时，将其配置映射到 Python 已有的 OpenAI 兼容 Provider。
 
+常规 `pnpm dev` 也会通过 `python -m src.dev` 启动 Python 平台后端，读取 TS 的数据库和 JWT 配置（显式环境变量优先），不再误用独立的 `agentforge_py` 库。此启动方式不改写两端 `.env`，Python 独立启动 `python -m src.main` 仍使用自己的配置。更新启动命令后，需要重启开发服务。
+
 启动器默认选择 Python `8005`、TS `8001`、管理端 `5201`；端口已占用时使用其他空闲端口。实际地址打印在终端。
 
 默认管理入口：
@@ -75,6 +77,8 @@ pnpm --filter @agentforge/server exec node scripts/create-admin.mjs
 - Python 的模型名称、兼容 API 地址和凭据需与当前正式诊断模型匹配。首版没有扩展 Python 的多 Provider 管理。
 - 管理端的 `AGENTFORGE_API_URL` 可以改变开发代理目标，默认仍为原有 `8000`。
 - 客服页面默认仍代理 `8000`；独立工作台的正式链路测试使用 `8001` 的 `/api/agent/chat`。不要误把旧服务上的请求当成新实例的验证。
+
+若 TS 登录成功、`/api/auth/me` 正常，但流程接口提示后端认证失败，应检查 Python 的数据库和 JWT 配置。TS 已验证通过的登录不会因为 Python 返回 401 被清除；管理代理将其报告为 502 配置错误。真正的 TS 登录失效仍返回 401 并要求重新登录。
 
 ## 数据库
 

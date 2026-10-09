@@ -28,6 +28,14 @@ async function forward(c: Context<{ Variables: AppVariables }>) {
       body: ["GET", "HEAD"].includes(c.req.method) ? undefined : await c.req.text(),
       signal: c.req.raw.signal,
     });
+    // The public server already authenticated this session. An upstream rejection
+    // is a backend configuration failure, not a reason to log the browser out.
+    if (response.status === 401) {
+      await response.body?.cancel();
+      return c.json({
+        detail: "流程后端认证失败，请确认 TS 与 Python 使用同一业务数据库和 JWT_SECRET；当前登录仍然有效。",
+      }, 502);
+    }
     return new Response(response.body, {
       status: response.status,
       headers: {

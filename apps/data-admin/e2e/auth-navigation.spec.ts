@@ -120,6 +120,34 @@ test("logout remains available when identity loading fails", async ({ page }) =>
   ])).toEqual([null, null]);
 });
 
+test("flow backend authentication errors do not log out a valid administrator", async ({ page }) => {
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === "/api/auth/signin") {
+      await route.fulfill({ json: {
+        user: admin, accessToken: "admin-token", refreshToken: "admin-refresh",
+      } });
+    } else if (path === "/api/auth/me") {
+      await route.fulfill({ json: admin });
+    } else if (path === "/api/agent-flows") {
+      await route.fulfill({
+        status: 502, json: { detail: "流程后端认证失败，请确认同一业务数据库和 JWT_SECRET" },
+      });
+    } else {
+      await route.fulfill({ json: { items: [] } });
+    }
+  });
+  await page.goto("/login?mode=admin");
+  await page.getByLabel("Password", { exact: true }).fill("test-password");
+  await page.getByRole("button", { name: "管理员登录", exact: true }).click();
+  await expect(page.getByRole("alert")).toContainText("流程后端认证失败");
+  await expect(page).toHaveURL(/\/admin\/cs\/agent-flows$/);
+  await expect(page.getByRole("navigation", { name: "账号导航" })).toContainText("管理员");
+  expect(await page.evaluate(() => [
+    localStorage.getItem("accessToken"), localStorage.getItem("refreshToken"),
+  ])).toEqual(["admin-token", "admin-refresh"]);
+});
+
 for (const returnTo of ["https://example.test/admin/cs/agent-flows", "http://[invalid"]) {
   test(`admin login rejects unsafe return location: ${returnTo}`, async ({ page }) => {
     await page.route("**/api/**", async (route) => {
