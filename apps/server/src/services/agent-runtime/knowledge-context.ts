@@ -19,6 +19,10 @@ import type { KnowledgeContext, Citation, KBDocumentItem } from "./types.js";
 interface RawKBResult {
   content: string;
   score: number;
+  scoreType?: "reranker" | "rrf";
+  sourceScore?: number;
+  fusionScore?: number;
+  rerankScore?: number;
   source: string;
   /** 真实文档 ID；旧版工具输出可能缺失，缺失时由 build() 兜底 */
   docId?: string;
@@ -28,8 +32,10 @@ interface RawKBResult {
 interface RawKBToolOutput {
   query: string;
   found: boolean;
-  quality?: "high" | "medium" | "low";
+  quality?: "high" | "medium" | "low" | "ranked";
+  score_type?: "reranker" | "rrf";
   top_score?: number;
+  top_relevance_score?: number | null;
   results?: RawKBResult[];
   message?: string;
 }
@@ -57,6 +63,10 @@ export class KnowledgeContextBuilder {
 
       const rawResults: RawKBResult[] = parsed.results;
       const topScore: number = parsed.top_score ?? 0;
+      const confidenceScore =
+        parsed.score_type === "rrf"
+          ? null
+          : (parsed.top_relevance_score ?? topScore);
 
       // ── 去重 + 排序 ──
       const seen = new Set<string>();
@@ -78,6 +88,10 @@ export class KnowledgeContextBuilder {
         chunkIndex: doc.chunkIndex ?? i,
         content: doc.content,
         score: doc.score,
+        scoreType: doc.scoreType,
+        sourceScore: doc.sourceScore,
+        fusionScore: doc.fusionScore,
+        rerankScore: doc.rerankScore,
       }));
 
       // ── 计算置信度 ──
@@ -86,11 +100,13 @@ export class KnowledgeContextBuilder {
           ? topDocs.reduce((sum, d) => sum + d.score, 0) / topDocs.length
           : 0;
       let confidence: number;
-      if (topScore >= HIGH_CONFIDENCE_SCORE) {
+      if (confidenceScore == null) {
+        confidence = 0.3;
+      } else if (confidenceScore >= HIGH_CONFIDENCE_SCORE) {
         confidence = 0.9;
-      } else if (topScore >= 0.65) {
+      } else if (confidenceScore >= 0.65) {
         confidence = 0.7;
-      } else if (topScore >= MIN_CONFIDENCE_SCORE) {
+      } else if (confidenceScore >= MIN_CONFIDENCE_SCORE) {
         confidence = 0.5;
       } else {
         confidence = 0.3;
@@ -141,7 +157,9 @@ export class KnowledgeContextBuilder {
     }
 
     // 低分警告
-    const lowScoreDocs = docs.filter((d) => d.score < MIN_CONFIDENCE_SCORE);
+    const lowScoreDocs = docs.filter(
+      (d) => d.scoreType !== "rrf" && d.score < MIN_CONFIDENCE_SCORE,
+    );
     if (lowScoreDocs.length > 0 && docs.length <= 2) {
       gaps.push("检索结果整体相关度偏低");
     }
@@ -171,8 +189,14 @@ export class KnowledgeContextBuilder {
           doc.content.length > 150
             ? doc.content.slice(0, 150) + "..."
             : doc.content;
+        const scoreLabel =
+          doc.scoreType === "rrf"
+            ? "综合排序分"
+            : doc.scoreType === "reranker"
+              ? "Rerank 分"
+              : "检索分";
         lines.push(
-          `- [${doc.source}] (相关度: ${(doc.score * 100).toFixed(0)}%) ${preview}`,
+          `- [${doc.source}] (${scoreLabel}: ${doc.score.toFixed(4)}) ${preview}`,
         );
       }
     }
@@ -213,6 +237,10 @@ export function toCitationCards(citations: Citation[]): CitationCard[] {
     docTitle: c.docTitle,
     excerpt: excerptOf(c.content),
     score: c.score,
+    scoreType: c.scoreType,
+    sourceScore: c.sourceScore,
+    fusionScore: c.fusionScore,
+    rerankScore: c.rerankScore,
   }));
 }
 

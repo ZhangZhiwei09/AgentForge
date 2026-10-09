@@ -110,7 +110,12 @@ function CitationItem({ card, scope }: { card: CitationCard; scope: string }) {
       </p>
 
       <div className="mt-1.5 text-right text-[10px] font-mono text-[hsl(var(--muted-foreground))]">
-        相似度 {card.score.toFixed(2)}
+        {card.scoreType === "rrf"
+          ? "综合排序分"
+          : card.scoreType === "reranker"
+            ? "Rerank 分"
+            : "检索分"}{" "}
+        {card.score.toFixed(4)}
       </div>
     </div>
   );

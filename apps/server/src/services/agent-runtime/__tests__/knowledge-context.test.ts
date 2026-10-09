@@ -11,7 +11,7 @@
 //   - 真实场景 search_knowledge_base 响应
 
 import { describe, it, expect, vi } from "vitest";
-import { KnowledgeContextBuilder } from "../knowledge-context.js";
+import { KnowledgeContextBuilder, toCitationCards } from "../knowledge-context.js";
 import type { KnowledgeContext } from "../types.js";
 
 // ── Mock logger（hoisted）──
@@ -127,6 +127,67 @@ describe("KnowledgeContextBuilder", () => {
   });
 
   describe("build() — confidence calculation", () => {
+    it("does not interpret an RRF ranking score as semantic relevance", () => {
+      const result = builder.build(
+        makeToolOutput({
+          score_type: "rrf",
+          top_score: 0.0164,
+          top_relevance_score: null,
+          results: [{
+            content: "退款流程",
+            source: "退款政策",
+            score: 0.0164,
+            scoreType: "rrf",
+          }],
+        }),
+        "退款流程",
+      );
+      expect(result!.confidence).toBe(0.3);
+      expect(result!.gaps).not.toContain("检索结果整体相关度偏低");
+      expect(result!.summary).toContain("综合排序分: 0.0164");
+    });
+
+    it("uses the reranker relevance score for confidence", () => {
+      const result = builder.build(
+        makeToolOutput({
+          score_type: "reranker",
+          top_score: 0.0164,
+          top_relevance_score: 0.9,
+        }),
+        "测试",
+      );
+      expect(result!.confidence).toBe(0.9);
+    });
+
+    it("preserves score metadata in citations and protocol cards", () => {
+      const metadata = {
+        score: 0.91,
+        scoreType: "reranker",
+        sourceScore: 0.8,
+        fusionScore: 0.0164,
+        rerankScore: 0.91,
+      };
+      const result = builder.build(
+        makeToolOutput({
+          results: [{
+            docId: "doc-1",
+            chunkIndex: 3,
+            content: "退款流程",
+            source: "退款政策",
+            ...metadata,
+          }],
+        }),
+        "退款流程",
+      );
+      expect(result!.citations[0]).toMatchObject(metadata);
+      expect(toCitationCards(result!.citations)[0]).toMatchObject({
+        docId: "doc-1",
+        index: 1,
+        ...metadata,
+      });
+      expect(result!.summary).toContain("Rerank 分: 0.9100");
+    });
+
     it("top_score >= 0.8 → confidence 0.9", () => {
       const result = builder.build(
         makeToolOutput({ top_score: 0.85 }),

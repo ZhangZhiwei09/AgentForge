@@ -9,6 +9,10 @@ import type { ContentBlock } from "./content-block";
 export interface KnowledgeResult {
   content: string;
   score: number;
+  scoreType?: "reranker" | "rrf";
+  sourceScore?: number;
+  fusionScore?: number;
+  rerankScore?: number;
   docTitle: string;
 }
 

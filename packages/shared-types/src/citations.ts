@@ -15,6 +15,10 @@ export interface CitationCard {
   /** 正文摘录，约 200 字符，仅用于卡片展示 */
   excerpt: string;
   score: number;
+  scoreType?: "reranker" | "rrf";
+  sourceScore?: number;
+  fusionScore?: number;
+  rerankScore?: number;
 }
 
 /** 过程时间轴的一步：Agent 本轮"去查了什么" */

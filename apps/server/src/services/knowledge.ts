@@ -30,6 +30,10 @@ export interface KnowledgeSearchResult {
   kbId: string;
   content: string;
   score: number;
+  scoreType?: "reranker" | "rrf";
+  sourceScore?: number;
+  fusionScore?: number;
+  rerankScore?: number;
   chunkIndex: number;
   docTitle: string;
 }
@@ -41,6 +45,8 @@ export interface HybridSearchResult {
   kbId: string;
   content: string;
   score: number;                   // 最终分数
+  scoreType?: "reranker" | "rrf";
+  sourceScore?: number;            // 原始召回分数（仅用于诊断，不跨召回源比较）
   fusionScore: number;             // RRF 融合分数
   rerankScore?: number;            // Reranker 精排分数（如有）
   recallSources: ("pgvector" | "elasticsearch")[];  // 召回来源
@@ -320,6 +326,7 @@ export class KnowledgeService {
           reranked.push({
             ...original,
             score: Math.round(rr.score * 10000) / 10000,
+            scoreType: "reranker" as const,
             rerankScore: Math.round(rr.score * 10000) / 10000,
           });
         }
@@ -333,6 +340,7 @@ export class KnowledgeService {
     const finalResults = dedupedCandidates.slice(0, topK).map((f) => ({
       ...f,
       score: f.fusionScore,
+      scoreType: "rrf" as const,
     }));
     return this.enrichWithParentChunks(finalResults);
   }
@@ -604,6 +612,10 @@ export class KnowledgeService {
       kbId: r.kbId,
       content: r.content,
       score: r.score,
+      scoreType: r.scoreType,
+      sourceScore: r.sourceScore,
+      fusionScore: r.fusionScore,
+      rerankScore: r.rerankScore,
       chunkIndex: r.chunkIndex,
       docTitle: r.docTitle,
     }));
@@ -633,6 +645,10 @@ export class KnowledgeService {
       kbId: r.kbId,
       content: r.content,
       score: r.score,
+      scoreType: r.scoreType,
+      sourceScore: r.sourceScore,
+      fusionScore: r.fusionScore,
+      rerankScore: r.rerankScore,
       chunkIndex: r.chunkIndex,
       docTitle: r.docTitle,
     }));

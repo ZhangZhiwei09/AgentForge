@@ -9,6 +9,10 @@ import type { CitationCard, TraceStep } from "./citations";
 export interface KnowledgeResult {
   content: string;
   score: number;
+  scoreType?: "reranker" | "rrf";
+  sourceScore?: number;
+  fusionScore?: number;
+  rerankScore?: number;
   docTitle: string;
 }
 

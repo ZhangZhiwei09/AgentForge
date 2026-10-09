@@ -285,8 +285,12 @@ export function CustomerChat() {
     }
   }
 
-  // 分数颜色映射：绿色高相关，黄色中等，红色低相关
-  function scoreColor(score: number): string {
+  // 只有 Reranker 分数适合按 0~1 相关度阈值着色；RRF 分数仅用于排序。
+  function scoreColor(
+    score: number,
+    scoreType?: KnowledgeResult["scoreType"],
+  ): string {
+    if (scoreType === "rrf") return "text-slate-600 bg-slate-50";
     if (score >= 0.8) return "text-green-600 bg-green-50";
     if (score >= 0.5) return "text-amber-600 bg-amber-50";
     return "text-red-500 bg-red-50";
@@ -399,9 +403,14 @@ export function CustomerChat() {
                                   #{i + 1} {kr.docTitle}
                                 </span>
                                 <span
-                                  className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-mono font-medium ${scoreColor(kr.score)}`}
+                                  className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-mono font-medium ${scoreColor(kr.score, kr.scoreType)}`}
                                 >
-                                  相似度 {kr.score.toFixed(4)}
+                                  {kr.scoreType === "rrf"
+                                    ? "综合排序分"
+                                    : kr.scoreType === "reranker"
+                                      ? "Rerank 分"
+                                      : "检索分"}{" "}
+                                  {kr.score.toFixed(4)}
                                 </span>
                               </div>
                               <p className="text-muted-foreground leading-relaxed line-clamp-3">

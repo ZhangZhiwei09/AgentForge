@@ -688,7 +688,7 @@ export class AgentExecutor implements RouteAgent {
     try {
       const kbService = new KnowledgeService();
       // 保留完整结果（docTitle / score / docId / chunkIndex），供引用卡片使用
-      const found = await kbService.search(userMessage, null, 5);
+      const found = await kbService.searchWithRerank(userMessage, null, 5);
       // 过滤空正文，保证 kbDocs 与 kbResults 索引严格一致
       kbDocs = found.filter((r) => Boolean(r.content));
       kbResults = kbDocs.map((r) => r.content);
@@ -718,6 +718,10 @@ export class AgentExecutor implements RouteAgent {
             chunkIndex: r.chunkIndex,
             content: r.content,
             score: r.score,
+            scoreType: r.scoreType,
+            sourceScore: r.sourceScore,
+            fusionScore: r.fusionScore,
+            rerankScore: r.rerankScore,
           })),
         ),
         message_id: assistantMsgId,

@@ -25,6 +25,10 @@ export interface RouterDecision {
 export interface KnowledgeChunkResult {
   content: string;
   score: number;
+  scoreType?: "reranker" | "rrf";
+  sourceScore?: number;
+  fusionScore?: number;
+  rerankScore?: number;
   docTitle: string;
 }
 
@@ -36,6 +40,10 @@ export interface Citation {
   chunkIndex: number;
   content: string;
   score: number;
+  scoreType?: "reranker" | "rrf";
+  sourceScore?: number;
+  fusionScore?: number;
+  rerankScore?: number;
 }
 
 export interface KBDocumentItem {
