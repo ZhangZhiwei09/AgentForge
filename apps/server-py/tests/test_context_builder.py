@@ -81,6 +81,23 @@ class TestRedisHappyPath:
         assert result.messages[1].content == "redis 消息"
         assert result.history_count == 1
 
+    @pytest.mark.asyncio
+    async def test_internal_diagnosis_output_is_excluded_from_history(self):
+        store = make_store()
+        marker = "Blackboard（共享上下文）"
+        await store.append_message("c1", _msg("m1", marker))
+        await store.append_message("c1", _msg("m2", marker, role="assistant"))
+        await store.append_message("c1", _msg("m3", "建议检查摄像头权限", role="assistant"))
+
+        builder = ContextBuilder(db=None, memory_store=store, verify_latest_id=False)
+        builder._load_memory = _noop
+        result = await builder.build("c1", "还有哪些原因")
+
+        assert [m.type for m in result.messages] == ["system", "human", "ai", "human"]
+        assert result.messages[1].content == marker
+        assert result.messages[2].content == "建议检查摄像头权限"
+        assert result.history_count == 2
+
 
 class TestFallback:
     """Redis miss / stale / 异常 → 回退 PG。"""

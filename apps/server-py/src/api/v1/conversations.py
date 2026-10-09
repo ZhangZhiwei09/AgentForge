@@ -42,6 +42,21 @@ def _serialize_message(m: Message) -> dict:
     }
 
 
+def _is_internal_diagnosis_message(m: Message) -> bool:
+    """过滤历史中误持久化的多 Agent 内部提示和调试上下文。"""
+    if m.role != "assistant":
+        return False
+    return any(
+        marker in m.content
+        for marker in (
+            "Blackboard（共享上下文）",
+            "你是核身业务前端排查专家",
+            "你是核身业务后端排查专家",
+            "你是核身诊断的质量评估与汇总专家",
+        )
+    )
+
+
 # ═══════════════════════════════════════════════════════════
 # /api/agent/chat —— 会话资源端点（聊天 POST 在 chat.py）
 # ═══════════════════════════════════════════════════════════
@@ -99,7 +114,10 @@ async def agent_chat_history(
     # 反序恢复时间升序（前端展示用）
     rows = list(reversed(rows))
 
-    messages = [_serialize_message(m) for m in rows]
+    messages = [
+        _serialize_message(m) for m in rows
+        if not _is_internal_diagnosis_message(m)
+    ]
 
     next_cursor = None
     if has_more and rows:
@@ -137,12 +155,18 @@ async def agent_conversations(
     for conv in conversations:
         # 获取首条用户消息作为预览
         first_msg_result = await db.execute(
-            select(Message.content)
+            select(Message)
             .where(Message.conversation_id == conv.id)
             .order_by(Message.created_at.asc())
-            .limit(1)
         )
-        first_msg = first_msg_result.scalar_one_or_none()
+        first_msg = next(
+            (
+                m.content
+                for m in first_msg_result.scalars().all()
+                if not _is_internal_diagnosis_message(m)
+            ),
+            None,
+        )
 
         conv_list.append({
             "id": conv.id,
@@ -234,7 +258,10 @@ async def get_conversation_messages(
         .where(Message.conversation_id == conv_id)
         .order_by(Message.created_at.asc())
     )
-    messages = msg_result.scalars().all()
+    messages = [
+        m for m in msg_result.scalars().all()
+        if not _is_internal_diagnosis_message(m)
+    ]
     return {
         "conversation_id": conv_id,
         "messages": [_serialize_message(m) for m in messages],

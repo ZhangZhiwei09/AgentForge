@@ -33,6 +33,17 @@ logger = logging.getLogger(__name__)
 MAX_CONTEXT_TOKENS = 4000      # Agent 上下文总 token 预算（不含 system prompt）
 RAW_WINDOW = 10                # 最近保持原始的消息条数
 
+
+def _is_internal_diagnosis_output(role: str, content: str) -> bool:
+    if role != "assistant":
+        return False
+    return any(marker in content for marker in (
+        "Blackboard（共享上下文）",
+        "你是核身业务前端排查专家",
+        "你是核身业务后端排查专家",
+        "你是核身诊断的质量评估与汇总专家",
+    ))
+
 SYSTEM_PROMPT = """你是核身排障智能助手，专门帮助用户诊断和解决身份核身（人脸核身、活体检测、OCR 识别）相关的技术问题。
 
 ## 你的专业领域
@@ -129,6 +140,8 @@ class ContextBuilder:
         # 从最近的消息倒序取，直到 budget 用完
         selected: list[Message | StoredMessage] = []
         for msg in reversed(recent_messages):
+            if _is_internal_diagnosis_output(msg.role, msg.content):
+                continue
             tokens = _estimate_tokens(msg.content)
             if budget - tokens < 0:
                 break

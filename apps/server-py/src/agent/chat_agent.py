@@ -28,6 +28,13 @@ logger = logging.getLogger(__name__)
 
 CHAT_SYSTEM_PROMPT = """你是一个友好、专业的AI助手。请用简洁清晰的中文回答用户的问题。
 
+## 角色边界
+- 你是服务方的客服/诊断助手，用户是提问和反馈问题的一方。
+- 直接回答用户的问题，并给出分析、建议或下一步操作。
+- 不要替用户作答，不要把用户的问题改写成用户已经完成的结论。
+- 除非用户明确要求代写，否则不要使用“我已经……”“我们已经……”等替用户陈述事实的第一人称。
+- 需要描述用户现象时，使用“您反馈的现象是……”；需要给出处理意见时，使用“建议您……”或“可以……”
+
 ## 你的能力
 - 回答各类知识性问题
 - 进行自然、友好的对话
@@ -98,10 +105,19 @@ class ChatAgent:
                 system_prompt if system_prompt else CHAT_SYSTEM_PROMPT
             )
 
-            messages = [
-                SystemMessage(content=effective_system_prompt),
-                HumanMessage(content=context.user_message),
-            ]
+            # ContextBuilder 已经按 system -> history -> current user 组装好上下文。
+            # 仅在没有预构建上下文时回退到单轮消息，避免丢失历史并让模型误判说话人。
+            if context.prebuilt_messages:
+                messages = list(context.prebuilt_messages)
+                if isinstance(messages[0], SystemMessage):
+                    messages[0] = SystemMessage(content=effective_system_prompt)
+                else:
+                    messages.insert(0, SystemMessage(content=effective_system_prompt))
+            else:
+                messages = [
+                    SystemMessage(content=effective_system_prompt),
+                    HumanMessage(content=context.user_message),
+                ]
 
             answer_collected = ""
 
