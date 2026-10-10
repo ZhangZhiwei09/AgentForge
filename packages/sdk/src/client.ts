@@ -32,6 +32,11 @@ import type {
   AgentFlowDefinition,
   AgentFlowRunDTO,
   AgentFlowEvent,
+  EntryRouteFlowDTO,
+  EntryRouteDefinition,
+  EntryRouteValidation,
+  EntryRouteRunDTO,
+  EntryRouteRunPage,
 } from "@agentforge/shared-types";
 export interface AgentForgeConfig {
   baseUrl: string;
@@ -144,6 +149,50 @@ export class AgentForgeClient {
 
   async listAgentFlows(): Promise<{ items: AgentFlowDTO[] }> {
     return this.request("/api/agent-flows");
+  }
+
+  async listEntryRouteFlows(): Promise<{ items: EntryRouteFlowDTO[] }> {
+    return this.request("/api/entry-route-flows");
+  }
+
+  async createEntryRouteFlow(name: string, template: "default" | "empty" = "default"): Promise<EntryRouteFlowDTO> {
+    return this.request("/api/entry-route-flows", { method: "POST", body: JSON.stringify({ name, template }) });
+  }
+
+  async getEntryRouteFlow(id: string): Promise<EntryRouteFlowDTO> {
+    return this.request(`/api/entry-route-flows/${id}`);
+  }
+
+  async saveEntryRouteFlow(id: string, name: string, revision: number, definition: EntryRouteDefinition): Promise<EntryRouteFlowDTO> {
+    return this.request(`/api/entry-route-flows/${id}/draft`, { method: "PUT", body: JSON.stringify({ name, revision, definition }) });
+  }
+
+  async validateEntryRouteFlow(id: string, revision: number): Promise<EntryRouteValidation> {
+    return this.request(`/api/entry-route-flows/${id}/validate`, { method: "POST", body: JSON.stringify({ revision }) });
+  }
+
+  async publishEntryRouteFlow(id: string, revision: number): Promise<EntryRouteFlowDTO> {
+    return this.request(`/api/entry-route-flows/${id}/publish`, { method: "POST", body: JSON.stringify({ revision }) });
+  }
+
+  async activateEntryRouteFlow(id: string, enabled: boolean): Promise<EntryRouteFlowDTO> {
+    return this.request(`/api/entry-route-flows/${id}/activation`, { method: "PUT", body: JSON.stringify({ enabled }) });
+  }
+
+  async archiveEntryRouteFlow(id: string): Promise<{ ok: boolean }> {
+    return this.request(`/api/entry-route-flows/${id}`, { method: "DELETE" });
+  }
+
+  async testEntryRouteFlow(id: string, revision: number, message: string, signal?: AbortSignal): Promise<EntryRouteRunDTO> {
+    return this.request(`/api/entry-route-flows/${id}/test-run`, { method: "POST", body: JSON.stringify({ revision, message }), signal });
+  }
+
+  async listEntryRouteRuns(id: string, page = 1): Promise<EntryRouteRunPage> {
+    return this.request(`/api/entry-route-flows/${id}/runs?page=${page}`);
+  }
+
+  async getEntryRouteRun(id: string, runId: string): Promise<EntryRouteRunDTO> {
+    return this.request(`/api/entry-route-flows/${id}/runs/${runId}`);
   }
 
   async createAgentFlow(name: string): Promise<AgentFlowDTO> {

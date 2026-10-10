@@ -1,9 +1,9 @@
 # AgentForge 路由架构
 
-> **Rule First + LLM Fallback** — 五路由分类器（SAFETY / CHAT / TASK / HUMAN / DIAGNOSIS）
+> **可配置一级流程 + L2～L5 智能路由**，保留 SAFETY / CHAT / TASK / HUMAN / DIAGNOSIS 五个处理入口。
 >
-> 转人工请求优先走规则匹配，其余由 RouterLLM 输出结构化分类结果。
-> 三层降级保障：规则 → LLM → 正则兜底。
+> 未启用一级流程时使用原问候快通道和完整 L1～L5；启用后由发布快照返回 reply、route 或 continue。
+> 安全检查及等待补充的诊断优先。一级流程加载或记录保存失败明确报错。
 
 ---
 
@@ -13,43 +13,48 @@
 用户消息
   │
   ▼
-AgentRuntimeService.streamChat()                  [services/agent-runtime.ts:204]
+AgentRuntimeService.streamChat()
   │
-  ├── 第零层：会话快路径 (CONVERSATIONAL_RULES)         [agent-runtime.ts:333-372]
-  │   问候/感谢/告别 → 静态文案直接返回，全程零 LLM 调用
+  ├── 安全检查 → SAFETY；等待补充 → 原诊断续跑（保留 HUMAN 例外）
   │
-  ├── 第一层：Rule First (quickRouteScan)              [router.ts:113-133]
-  │   ├─ SAFETY_KEYWORDS (24条正则) → SAFETY, confidence=1.0
-  │   └─ HUMAN_KEYWORDS  (7条正则)  → HUMAN,  confidence=0.95
-  │   无匹配 → 返回 null，进入 LLM 层
+  ├── 已启用一级流程 → TS 确定性条件图
+  │   ├─ reply → 配置正文、建议问题、保存历史；无模型/工具/记忆注入
+  │   ├─ route → 直接分发 CHAT / TASK / HUMAN / DIAGNOSIS
+  │   └─ continue → classifyFromL2()
   │
-  ├── 第二层：LLM Fallback (RouterLLM)                 [router.ts:167-207]
-  │   chatSync + jsonMode, temperature=0.0, maxTokens=150
-  │   置信度 ≥ 0.5 → 采纳；< 0.5 或异常 → 进入兜底层
-  │
-  └── 第三层：Regex 兜底 (IntentDetector)              [router.ts:226]
-      6组意图正则 → INTENT_TO_ROUTE 映射 → 默认 TASK
+  └── 未启用一级流程 → 原问候快通道 → classify()
+      └─ L1：SAFETY > HUMAN > DIAGNOSIS 关键词扫描
   │
   ▼
-resolveAgent(route) → 分发到对应 Agent 执行             [agent-runtime.ts:192-198]
+共享后续管线：
+  L2：语义样本检索 → 高置信度直接返回
+  L3：中置信度且有样本 → Few-Shot 模型
+  L4：模型分类
+  L5：IntentDetector 正则兜底
+  │
+  ▼
+resolveAgent(route) → 现有 Agent 执行 → 消息与引用等后处理
 ```
 
 ---
 
 ## 2. 核心文件
 
-| 文件 | 行数 | 职责 |
-|---|---|---|
-| `apps/server/src/services/agent-runtime/router.ts` | 274 | 核心路由器 — 三阶段分类管线 |
-| `apps/server/src/services/agent-runtime.ts` | 594 | 编排层 — 会话管理 + 路由调用 + Agent 分发 |
-| `apps/server/src/services/agent-runtime/types.ts` | 175 | 类型定义 (RouteName, RouterDecision, RouteAgent, RouteStreamEvent) |
-| `apps/server/src/services/intent-detector.ts` | 57 | 正则意图检测器 — LLM 失败时的最终兜底 |
-| `apps/server/src/services/agent-runtime/task-intent.ts` | 236 | TASK 路由内二次分类 (simple_qa / complex_task) |
-| `apps/server/src/services/agent-runtime/safety-agent.ts` | 59 | SAFETY 路由 — 零延迟静态拒绝 |
-| `apps/server/src/services/agent-runtime/chat-agent.ts` | 141 | CHAT 路由 — 轻量 LLM 对话 |
-| `apps/server/src/services/agent-runtime/human-agent.ts` | 99 | HUMAN 路由 — 更新状态 + 转人工消息 |
-| `apps/server/src/services/agent-runtime/diagnosis-agent.ts` | - | DIAGNOSIS 路由 — 身份诊断分析 |
-| `apps/server/src/services/agent-runtime/agent-executor.ts` | 685 | TASK 路由 — ReAct 执行器 |
+| 文件 | 职责 |
+|---|---|
+| `apps/server/src/services/entry-route-flows/` | 条件 DSL、图校验、执行、发布快照和运行记录 |
+| `apps/server/src/routes/entry-route-flows.ts` | TS 原生管理员配置与试运行接口 |
+| `apps/server/src/services/agent-runtime/routing/pipeline.ts` | 共享 L1～L5 管线及 L2 起点 |
+| `apps/server/src/services/agent-runtime/router.ts` | 兼容导出 |
+| `apps/server/src/services/agent-runtime.ts` | 会话管理、一级决策、Agent 分发和消息保存 |
+| `apps/server/src/services/agent-runtime/types.ts` | 内部上下文和 SSE 契约 |
+| `apps/server/src/services/intent-detector.ts` | L5 意图兜底 |
+| `apps/server/src/services/agent-runtime/task-intent.ts` | TASK 内部二次分类 |
+| `apps/server/src/services/agent-runtime/safety-agent.ts` | 安全拒绝 |
+| `apps/server/src/services/agent-runtime/chat-agent.ts` | 普通问答 |
+| `apps/server/src/services/agent-runtime/human-agent.ts` | 会话升级，支持可信配置话术 |
+| `apps/server/src/services/agent-runtime/diagnosis-agent.ts` | 已启用诊断流程或原诊断团队 |
+| `apps/server/src/services/agent-runtime/agent-executor.ts` | 业务任务执行 |
 
 ---
 
@@ -67,17 +72,21 @@ export type RouteName = "SAFETY" | "CHAT" | "TASK" | "HUMAN" | "DIAGNOSIS";
 | **CHAT** | 问候、感谢、道别、能力询问、闲聊 | ChatAgent | 1 次 (chatSync, jsonMode) |
 | **TASK** | 业务问题、知识查询、需要工具的任务 | AgentExecutor (ReAct) | N 次 (ReAct 循环) |
 | **HUMAN** | 明确要求转人工、投诉升级 | HumanAgent | 无（消息模板） |
-| **DIAGNOSIS** | 身份诊断、用户画像分析 | DiagnosisRouteAgent | N 次（多阶段分析） |
+| **DIAGNOSIS** | 核身故障、错误码及系统排查 | DiagnosisRouteAgent | N 次（多阶段分析） |
 
 ---
 
-## 4. 三层分类管线详解
+## 4. 兼容管线详解
+
+本节描述一级流程未启用时的兼容路径。启用后仅 SAFETY 和等待诊断的生命周期例外保留，业务 L1 与问候快通道由一级流程取代。
+
+L2 为 Embedding 样本检索：置信度 >= 0.8 直接采纳；0.5～0.8 且有样本时进入 L3 Few-Shot。L3 和 L4 的普通路由门槛为 0.5，DIAGNOSIS 为 0.7。未获得可接受结果时进入 L5，原算法、提示词和阈值均保持。
 
 ### 4.1 第零层：会话快路径（CONVERSATIONAL_RULES）
 
 **位置**: `agent-runtime.ts:85-111`
 
-在任何路由逻辑之前，先用精确正则匹配问候/感谢/告别：
+未启用一级流程且没有安全命中或等待任务时，用精确正则匹配问候/感谢/告别：
 
 ```typescript
 const CONVERSATIONAL_RULES: ConversationalRule[] = [
@@ -93,7 +102,7 @@ const CONVERSATIONAL_RULES: ConversationalRule[] = [
 
 ### 4.2 第一层：Rule First（quickRouteScan）
 
-**位置**: `router.ts:113-133`
+**位置**: `routing/l1-keyword.ts`
 
 ```typescript
 function quickRouteScan(message: string): QuickRouteResult | null {
@@ -105,7 +114,10 @@ function quickRouteScan(message: string): QuickRouteResult | null {
   if (HUMAN_KEYWORDS.some((p) => p.test(message))) {
     return { route: "HUMAN", confidence: 0.95, reasoning: "转人工关键词命中" };
   }
-  return null; // → Router LLM
+  if (DIAGNOSIS_KEYWORDS.some((p) => p.test(message))) {
+    return { route: "DIAGNOSIS", confidence: 0.85, reasoning: "诊断关键词命中" };
+  }
+  return null; // → L2
 }
 ```
 
@@ -130,20 +142,20 @@ function quickRouteScan(message: string): QuickRouteResult | null {
 设计要点：
 - SAFETY 优先级最高且 confidence 为 1.0 — 不可被后续步骤覆盖
 - HUMAN confidence 为 0.95 — 略低于 1.0，表示规则匹配有极微小的误判可能
-- 两条规则都不匹配时返回 `null`，语义明确：**我不知道，交给 LLM**
+- 没有命中时返回 `null`，进入 L2。
 
-### 4.3 第二层：LLM Fallback（RouterLLM）
+### 4.3 L4：LLM Fallback（RouterLLM）
 
-**位置**: `router.ts:167-207`
+**位置**: `routing/l3-llm-router.ts`
 
-仅当 quickRouteScan 返回 null 时执行。核心决策：
+当 L2 和 L3 都未给出可接受结果时执行。核心决策：
 
 ```
 模型：resolveModel()（默认廉价模型）
 参数：temperature=0.0, maxTokens=150, jsonMode=true
 上下文：最近 4 条历史 + 当前用户消息
 输出：{"route":"TASK","confidence":0.9,"reasoning":"用户询问订单状态"}
-阈值：confidence >= 0.5 采纳，否则降级到 IntentDetector
+阈值：confidence >= 0.5 采纳；DIAGNOSIS 至少 0.7，否则降级到 IntentDetector
 ```
 
 **RouterLLM System Prompt**（`router.ts:28-46`）：
@@ -166,7 +178,7 @@ function quickRouteScan(message: string): QuickRouteResult | null {
 Agent 会自主决定是否搜索知识库、调用业务工具，或组合使用。
 
 ### DIAGNOSIS（身份诊断）
-用户画像分析、身份推断、行为模式识别 → route: "DIAGNOSIS"
+核身故障、错误码与系统诊断 → route: "DIAGNOSIS"
 
 ## 输出格式（仅 JSON）
 {"route":"TASK","confidence":0.9,"reasoning":"简短的意图分析"}
@@ -190,9 +202,9 @@ const RouterDecisionSchema = z.object({
 });
 ```
 
-### 4.4 第三层：Regex 兜底（IntentDetector）
+### 4.4 L5：Regex 兜底（IntentDetector）
 
-**位置**: `router.ts:226` + `intent-detector.ts`
+**位置**: `routing/l5-fallback.ts` + `intent-detector.ts`
 
 当 RouterLLM 调用失败、JSON 解析失败、或置信度 < 0.5 时触发。
 
@@ -225,17 +237,18 @@ const INTENT_TO_ROUTE: Record<string, RouteName> = {
 每次分类完成后，`agent-runtime.ts:390-402` 记录分类来源：
 
 ```typescript
-const source = decision.reasoning.includes("关键词命中")
+const source = decision.source ?? (decision.reasoning.includes("关键词命中")
   ? "keyword"
-  : decision.reasoning.includes("fallback")
-    ? "fallback"
-    : "llm";
+  : decision.reasoning.includes("L2语义匹配") ? "l2_semantic"
+  : decision.reasoning.includes("L3少样本增强") ? "l3_fewshot"
+  : decision.reasoning.includes("fallback") ? "fallback"
+  : "llm");
 
 agentRouteClassificationTotal.inc({ route: decision.route, source });
 agentRouteConfidence.observe({ route: decision.route }, decision.confidence);
 ```
 
-三种来源明确区分，通过 Prometheus 指标可监控：
+配置分流与固定回复显式使用 `source=entry_flow`；固定回复兼容 CHAT 指标，运行记录另存 `action=reply`。确定性判断的 1.0 置信度不代表答案质量。`continue` 保留实际后续分类来源。原有指标继续可用：
 - **keyword** — 规则命中率（追求高比例 = 降低 LLM 成本）
 - **llm** — LLM 分类率（正常补充）
 - **fallback** — 降级率（告警阈值，表示 LLM 调用质量异常）
@@ -339,5 +352,7 @@ type RouteStreamEvent =
 
 ## 9. 相关文档
 
+- `docs/design/lightweight-entry-route-flow-implementation.md` — 配置契约、验证结果、模板差异和停用操作
+- `docs/design/lightweight-entry-route-flow-plan.md` — 实施范围与验收 checklist
 - `docs/agent-runtime.md` — Agent Runtime 状态模型（三维状态机、事件协议）
 - `docs/runtime/execution-runtime-v1.md` — 执行运行时详细设计

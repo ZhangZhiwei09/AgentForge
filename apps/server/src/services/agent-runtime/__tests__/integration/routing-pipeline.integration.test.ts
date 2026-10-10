@@ -56,6 +56,15 @@ describe("QueryRouter 5-layer cascade", () => {
     router = new QueryRouter(null);
   });
 
+  it("configured continue starts at L2 even for old HUMAN and DIAGNOSIS keywords", async () => {
+    mockL2Classify.mockResolvedValue({
+      route: "TASK", confidence: 0.85, reasoning: "L2", matches: [],
+    });
+    expect((await router.classifyFromL2("转人工，traceId: abc 报错", [])).route).toBe("TASK");
+    expect(mockL2Classify).toHaveBeenCalledTimes(1);
+    expect(mockLlmClassify).not.toHaveBeenCalled();
+  });
+
   // ═══ L1: Keyword matching ═══
 
   it("L1: 安全关键词命中 → 直接返回 SAFETY (confidence=1.0)", async () => {

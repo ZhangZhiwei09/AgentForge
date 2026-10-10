@@ -57,6 +57,14 @@ export class QueryRouter {
       return quickResult;
     }
 
+    return this.classifyFromL2(message, history, trace);
+  }
+
+  async classifyFromL2(
+    message: string,
+    history: ChatMessage[],
+    trace?: ObservabilityTrace,
+  ): Promise<RouterDecision> {
     // ── L2: 语义意图分类（Embedding + pgvector k-NN）──
     const l2Start = Date.now();
     const semanticResult = await this.semanticRouter.classify(message);

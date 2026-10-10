@@ -1,22 +1,26 @@
 // 数据管理仪表盘 —— Tab 布局
 import { NavLink, Outlet, useLocation } from "react-router-dom";
-import { BarChart3, BookOpen, Eye, GitBranch } from "lucide-react";
+import { BarChart3, BookOpen, Eye, GitBranch, Route } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { client } from "@agentforge/ui";
 
 const TABS = [
   { to: "/admin/cs/knowledge", label: "知识库管理", icon: BookOpen },
   { to: "/admin/cs/analytics", label: "数据分析", icon: BarChart3 },
   { to: "/admin/cs/observability", label: "LLM 追踪", icon: Eye },
   { to: "/admin/cs/agent-flows", label: "Agent 流程", icon: GitBranch },
+  { to: "/admin/cs/entry-route-flows", label: "一级路由流程", icon: Route, adminOnly: true },
 ];
 
 export function AdminDashboard() {
   const location = useLocation();
+  const { data: user } = useQuery({ queryKey: ["auth", "me"], queryFn: () => client.getMe(), retry: false });
 
   return (
     <div className="flex flex-col flex-1" style={{ height: "calc(100dvh - 48px)" }}>
       {/* Sub-navigation */}
       <nav className="flex shrink-0 items-center gap-0 overflow-x-auto border-b border-[hsl(var(--border))] bg-[hsl(var(--background))] px-4">
-        {TABS.map((tab) => {
+        {TABS.filter((tab) => !tab.adminOnly || user?.role === "admin").map((tab) => {
           const isActive =
             location.pathname === tab.to ||
             location.pathname.startsWith(`${tab.to}/`);

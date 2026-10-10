@@ -87,6 +87,17 @@ function reconstructAnswer(events: RouteStreamEvent[]): string {
     .join("");
 }
 
+describe("trusted entry flow handoff", () => {
+  it.each([true, false])("applies configured text and retains escalation (%s)", async (withinServiceHours) => {
+    mockPrismaUpdate.mockResolvedValue({});
+    const handoff = { withinHours: "配置工作时间话术", outsideHours: "配置非工作时间话术", suggestions: ["下一步"] };
+    const events = await collectEvents(new HumanAgent().execute(makeContext({ withinServiceHours, handoff })));
+    expect(reconstructAnswer(events)).toBe(withinServiceHours ? handoff.withinHours : handoff.outsideHours);
+    expect(events.at(-1)).toMatchObject({ suggestions: handoff.suggestions, route: "HUMAN" });
+    expect(mockPrismaUpdate).toHaveBeenCalledWith({ where: { id: "conv-test-1" }, data: { status: "escalated" } });
+  });
+});
+
 // ═══════════════════════════════════════════════════════
 // HumanAgent
 // ═══════════════════════════════════════════════════════

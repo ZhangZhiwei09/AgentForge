@@ -10,7 +10,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit",
     "test:e2e:flows": "playwright test e2e/agent-flows.spec.ts e2e/flow-canvas-state.spec.ts e2e/flow-canvas-drag.spec.ts",
-    "test:e2e:auth": "playwright test e2e/auth-navigation.spec.ts"
+    "test:e2e:auth": "playwright test e2e/auth-navigation.spec.ts",
+    "test:e2e:entry-flows": "playwright test e2e/entry-route-flows.spec.ts e2e/entry-canvas-state.spec.ts"
   },
   "dependencies": {
     "@agentforge/cui": "workspace:*",

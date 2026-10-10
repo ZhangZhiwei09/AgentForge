@@ -194,3 +194,8 @@ export type {
   FlowFieldType, FlowValueRef, FlowOutputField, AgentFlowNode, AgentFlowEdge,
   AgentFlowDefinition, AgentFlowDTO, AgentFlowNodeRecord, AgentFlowRunDTO, AgentFlowEvent,
 } from "./agent-flow";
+export type {
+  EntryRouteTarget, EntryNodeType, EntryHandoff, EntryRouteResult, EntryRouteNode,
+  EntryRouteEdge, EntryRouteDefinition, EntryRouteFlowDTO, EntryRouteNodeRecord,
+  EntryRouteRunDTO, EntryRouteValidation, EntryRouteRunPage,
+} from "./entry-route-flow";

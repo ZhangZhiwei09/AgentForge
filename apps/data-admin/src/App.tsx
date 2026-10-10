@@ -12,6 +12,9 @@ import { ObservabilityPage } from "./components/analytics/ObservabilityPage";
 import { HitTestingPage } from "./components/knowledge/HitTestingPage";
 import { AgentFlowList } from "./components/agent-flows/AgentFlowList";
 import { AgentFlowEditor } from "./components/agent-flows/AgentFlowEditor";
+import { EntryAdminGate } from "./components/entry-route-flows/EntryAdminGate";
+import { EntryRouteFlowList } from "./components/entry-route-flows/EntryRouteFlowList";
+import { EntryRouteFlowEditor } from "./components/entry-route-flows/EntryRouteFlowEditor";
 import { Loader2 } from "lucide-react";
 
 // ── 路由级组件：文档列表（从 URL 读取 kbId，获取 kbName） ──
@@ -84,6 +87,8 @@ export default function App() {
           {/* 其他模块 */}
           <Route path="cs/agent-flows" element={<AgentFlowList />} />
           <Route path="cs/agent-flows/:flowId" element={<AgentFlowEditor />} />
+          <Route path="cs/entry-route-flows" element={<EntryAdminGate><EntryRouteFlowList /></EntryAdminGate>} />
+          <Route path="cs/entry-route-flows/:flowId" element={<EntryAdminGate><EntryRouteFlowEditor /></EntryAdminGate>} />
           <Route path="cs/analytics" element={<AnalyticsPage />} />
           <Route path="cs/observability" element={<ObservabilityPage />} />
           <Route index element={<Navigate to="cs/knowledge" replace />} />

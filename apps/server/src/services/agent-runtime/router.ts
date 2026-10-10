@@ -21,6 +21,7 @@ export {
   HUMAN_KEYWORDS,
   DIAGNOSIS_KEYWORDS,
   quickRouteScan,
+  safetyRouteScan,
   ROUTER_SYSTEM_PROMPT,
   ROUTE_LABELS,
   RouterDecisionSchema,

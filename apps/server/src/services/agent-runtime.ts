@@ -33,7 +33,8 @@ import { AgentExecutor } from "./agent-runtime/agent-executor.js";
 import { HumanAgent } from "./agent-runtime/human-agent.js";
 import { DiagnosisRouteAgent } from "./agent-runtime/diagnosis-agent.js";
 import { hasWaitingConfiguredDiagnosis } from "./agent-runtime/configured-diagnosis.js";
-import { quickRouteScan } from "./agent-runtime/routing/l1-keyword.js";
+import { quickRouteScan, safetyRouteScan } from "./agent-runtime/routing/l1-keyword.js";
+import { entryRouteFlowService, type EntryRunExecution } from "./entry-route-flows/service.js";
 
 import { injectMemories } from "./agent-runtime/knowledge-context.js";
 import { AGENTFORGE_PERSONA } from "@agentforge/shared-prompts";
@@ -50,6 +51,7 @@ import type {
   RouteStreamEvent,
   RouteAgent,
   KnowledgeChunkResult,
+  RouterDecision,
 } from "./agent-runtime/types.js";
 import {
   SORRY_TEMPLATE,
@@ -302,6 +304,7 @@ export class AgentRuntimeService {
     });
 
     try {
+      if (signal?.aborted) return;
       // ── 1. Session 层 ──
       const conversation = await this.getOrCreateConversation(lookupId, userId);
       const { providerName, modelId: resolvedModel } = resolveModel(this.modelId);
@@ -366,7 +369,72 @@ export class AgentRuntimeService {
 
       // ── 2. 传统对话快速通道（零延迟） ──
       const waitingFlow = await hasWaitingConfiguredDiagnosis(conversation.id);
-      const convMatch = waitingFlow ? null : this.matchConversational(userMessage);
+      const safetyDecision = safetyRouteScan(userMessage) ?? (
+        !checkContentSafety(userMessage).safe
+          ? { route: "SAFETY" as const, confidence: 1, reasoning: "安全关键词命中" }
+          : null
+      );
+      // Waiting diagnosis and safety bypass entry configuration, including DB loading.
+      const snapshot = waitingFlow || safetyDecision ? null : await entryRouteFlowService.activeSnapshot();
+      if (scope.controller.shouldStop) return;
+      let entryExecution: EntryRunExecution | undefined;
+      if (snapshot) {
+        entryExecution = await entryRouteFlowService.execute(snapshot, userMessage, userId, {
+          conversationId: conversation.id, signal: scope.context.signal,
+        });
+      }
+      if (scope.controller.shouldStop) return;
+      if (entryExecution?.result.action === "reply") {
+        const result = entryExecution.result;
+        let answer = "";
+        let saved = false;
+        const persistReply = async () => {
+          if (saved || !answer) return;
+          await prisma.message.create({
+            data: {
+              id: assistantMsgId, conversationId: conversation.id, role: "assistant", content: answer,
+              model: resolvedModel,
+              metadata: {
+                suggestions: result.suggestions,
+                entryRoute: { flowId: entryExecution!.flowId, runId: entryExecution!.runId, version: entryExecution!.version },
+              },
+            },
+          });
+          saved = true;
+          await entryRouteFlowService.linkAssistant(entryExecution!.runId, assistantMsgId);
+        };
+        agentRouteClassificationTotal.inc({ route: "CHAT", source: "entry_flow" });
+        agentRouteConfidence.observe({ route: "CHAT" }, 1);
+        await prisma.routeClassificationLog.create({
+          data: {
+            id: randomUUID(), sessionId: conversation.sessionId, conversationId: conversation.id,
+            userMessage: userMessage.slice(0, 2000), route: "CHAT", confidence: 1,
+            source: "entry_flow", latencyMs: entryExecution.durationMs,
+          },
+        }).catch(() => {});
+        const started = Date.now();
+        try {
+          for await (const event of this.streamConversationalMatch(
+            assistantMsgId, conversation.id, conversation.sessionId, resolvedModel, providerName,
+            withinHours, intent, result, scope.context.signal,
+          )) {
+            if (scope.controller.shouldStop) break;
+            if (event.type === "token") {
+              if (!answer) agentRequestDurationMs.observe({ route: "CHAT", phase: "ttft" }, Date.now() - started);
+              answer += event.content;
+            }
+            if (event.type === "done") await persistReply();
+            yield event;
+          }
+        } finally {
+          // Closing the generator on disconnect must also preserve delivered text.
+          await persistReply();
+        }
+        agentRequestDurationMs.observe({ route: "CHAT", phase: "ttlt" }, Date.now() - started);
+        lfTrace.update({ output: { answer }, metadata: { route: "CHAT", source: "entry_flow" } });
+        return;
+      }
+      const convMatch = waitingFlow || safetyDecision || snapshot ? null : this.matchConversational(userMessage);
       if (convMatch && checkContentSafety(userMessage).safe) {
         const convStartTime = Date.now();
 
@@ -379,6 +447,7 @@ export class AgentRuntimeService {
           withinHours,
           intent,
           convMatch,
+          scope.context.signal,
         );
 
         agentRequestDurationMs.observe(
@@ -410,13 +479,16 @@ export class AgentRuntimeService {
       // ── 3. QueryRouter 分类 ──
       const classifyStart = Date.now();
       const priorityRoute = quickRouteScan(userMessage)?.route;
-      const decision = waitingFlow && priorityRoute !== "SAFETY" && priorityRoute !== "HUMAN"
-        ? { route: "DIAGNOSIS" as const, confidence: 1, reasoning: "等待补充的配置诊断续跑" }
-        : await this.router.classify(
-        userMessage,
-        historyMessages,
-        lfTrace,
-      );
+      const entryResult = entryExecution?.result;
+      const decision: RouterDecision = safetyDecision
+        ?? (waitingFlow && priorityRoute !== "HUMAN"
+          ? { route: "DIAGNOSIS", confidence: 1, reasoning: "等待补充的配置诊断续跑" }
+          : entryResult?.action === "route"
+            ? { route: entryResult.target, confidence: 1, reasoning: "一级流程分流", source: "entry_flow" }
+            : entryResult?.action === "continue"
+              ? await this.router.classifyFromL2(userMessage, historyMessages, lfTrace)
+              : await this.router.classify(userMessage, historyMessages, lfTrace));
+      if (scope.controller.shouldStop) return;
 
       logger.info(
         {
@@ -427,7 +499,7 @@ export class AgentRuntimeService {
         "Router classified message",
       );
 
-      const source = decision.reasoning.includes("关键词命中")
+      const source = decision.source ?? (decision.reasoning.includes("关键词命中")
         ? "keyword"
         : decision.reasoning.includes("L2语义匹配")
           ? "l2_semantic"
@@ -435,7 +507,7 @@ export class AgentRuntimeService {
             ? "l3_fewshot"
             : decision.reasoning.includes("fallback")
               ? "fallback"
-              : "llm";
+              : "llm");
       agentRouteClassificationTotal.inc({
         route: decision.route,
         source,
@@ -478,6 +550,7 @@ export class AgentRuntimeService {
         withinServiceHours: withinHours,
         assistantMsgId,
         intent,
+        handoff: entryResult?.action === "route" ? entryResult.handoff : undefined,
       };
 
       // ── 5. Memory 注入（所有路由通用） ──
@@ -487,6 +560,7 @@ export class AgentRuntimeService {
       );
       context.memoryContext = memCtx;
       context.injectedMemories = mems;
+      if (scope.controller.shouldStop) return;
 
       // ── 6. 分发到对应 Agent ──
       const agent = this.resolveAgent(decision.route);
@@ -650,6 +724,7 @@ export class AgentRuntimeService {
           collectedCitations,
           traceBySeq,
         );
+        if (entryExecution && streamedAnswer) await entryRouteFlowService.linkAssistant(entryExecution.runId, assistantMsgId);
         lfTrace.update({
           output: { answer: streamedAnswer?.slice(0, 500) },
           metadata: { route: decision.route, status: "interrupted" },
@@ -686,6 +761,7 @@ export class AgentRuntimeService {
 
       // ── 引用卡片与过程时间轴落库（单点后置写）──
       await this.persistCitationMeta(assistantMsgId, collectedCitations, traceBySeq);
+      if (entryExecution && streamedAnswer) await entryRouteFlowService.linkAssistant(entryExecution.runId, assistantMsgId);
 
       // ── Close observability trace（正常完成）──
       lfTrace.update({
@@ -759,7 +835,9 @@ export class AgentRuntimeService {
     withinHours: boolean,
     intent: string,
     response: ChatResponse,
+    signal?: AbortSignal,
   ): AsyncGenerator<RouteStreamEvent> {
+    if (signal?.aborted) return;
     yield {
       type: "meta",
       message_id: assistantMsgId,
@@ -775,6 +853,7 @@ export class AgentRuntimeService {
     };
 
     for (const char of response.answer) {
+      if (signal?.aborted) return;
       yield {
         type: "token",
         content: char,
@@ -782,6 +861,7 @@ export class AgentRuntimeService {
       };
     }
 
+    if (signal?.aborted) return;
     yield {
       type: "done",
       message_id: assistantMsgId,

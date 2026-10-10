@@ -16,6 +16,7 @@ import { agentRoutes } from "./routes/agent.js";
 import { workflowRoutes } from "./routes/workflows.js";
 import { teamRoutes } from "./routes/teams.js";
 import { agentFlowRoutes } from "./routes/agent-flows.js";
+import { entryRouteFlowRoutes } from "./routes/entry-route-flows.js";
 import { debugDiagnosisRoutes } from "./routes/debug-diagnosis.js";
 import { healthRoutes } from "./routes/health.js";
 import { registerMetricsEndpoint } from "./observability/metrics.js";
@@ -66,6 +67,7 @@ export async function createApp() {
   app.route("/", workflowRoutes);     // /api/workflows/*, /api/workflows/runs/*
   app.route("/", teamRoutes);         // /api/teams/*, /api/teams/runs/*
   app.route("/", agentFlowRoutes);    // configuration API forwarded to Python
+  app.route("/", entryRouteFlowRoutes);
   app.route("/", debugDiagnosisRoutes); // /debug/diagnosis (public debug page)
 
   // 注册业务模块路由（可插拔：设置 enabled: false 即可禁用整个模块）

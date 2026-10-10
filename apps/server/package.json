@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:entry-flows:db": "node scripts/test-entry-flows-db.mjs",
     "worker": "tsx watch src/worker.ts",
     "clean": "rimraf dist"
   },

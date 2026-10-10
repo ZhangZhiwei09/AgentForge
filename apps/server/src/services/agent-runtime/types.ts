@@ -6,6 +6,7 @@ import type {
   ContentBlock,
   CitationCard,
   TraceStep,
+  EntryHandoff,
 } from "@agentforge/shared-types";
 import type { ExecutionScope } from "../../runtime/scope.js";
 
@@ -18,6 +19,7 @@ export interface RouterDecision {
   confidence: number; // 0.0 ~ 1.0
   reasoning: string; // 简短分类理由，用于审计/debug
   escalationReason?: string; // HUMAN 路由时的升级原因
+  source?: "entry_flow";
 }
 
 // ── KB 结果 ──
@@ -79,6 +81,8 @@ export interface RouteContext {
   intent: string;
   /** KnowledgeContext 结构化结果（由 KnowledgeContextBuilder 构建） */
   knowledge?: KnowledgeContext;
+  /** Trusted published entry-flow configuration; never supplied by a chat request. */
+  handoff?: EntryHandoff;
 }
 
 // ── SSE 流事件 ──

@@ -13,6 +13,7 @@ export {
   HUMAN_KEYWORDS,
   DIAGNOSIS_KEYWORDS,
   quickRouteScan,
+  safetyRouteScan,
 } from "./l1-keyword.js";
 export type { QuickRouteResult } from "./l1-keyword.js";
 

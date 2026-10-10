@@ -85,7 +85,9 @@ export class HumanAgent implements RouteAgent {
     };
 
     // 流式输出转接消息
-    const message = getHandoffMessage(withinServiceHours);
+    const message = context.handoff
+      ? (withinServiceHours ? context.handoff.withinHours : context.handoff.outsideHours)
+      : getHandoffMessage(withinServiceHours);
     yield* streamTokens(message, assistantMsgId);
 
     // 发送 done
@@ -94,7 +96,7 @@ export class HumanAgent implements RouteAgent {
       type: "done",
       message_id: assistantMsgId,
       usage: {},
-      suggestions: ["继续咨询其他问题", "关闭会话"],
+      suggestions: context.handoff?.suggestions ?? ["继续咨询其他问题", "关闭会话"],
       memory: { injected: 0, extracted: 0 },
       validated: true,
       route: "HUMAN",

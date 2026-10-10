@@ -577,6 +577,50 @@ model AgentFlowRun {
   @@map("agent_flow_runs")
 }
 
+model EntryRouteFlow {
+  id                String   @id @db.VarChar(36)
+  name              String   @db.VarChar(200)
+  draft             Json
+  draftRevision     Int      @default(1) @map("draft_revision")
+  published         Json?
+  publishedVersion  Int      @default(0) @map("published_version")
+  publishedRevision Int      @default(0) @map("published_revision")
+  enabled           Boolean  @default(false)
+  archived          Boolean  @default(false)
+  updatedBy         String   @map("updated_by") @db.VarChar(36)
+  createdAt         DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  runs              EntryRouteFlowRun[]
+
+  @@map("entry_route_flows")
+}
+
+model EntryRouteFlowRun {
+  id                 String   @id @db.VarChar(36)
+  flowId             String   @map("flow_id") @db.VarChar(36)
+  version            Int
+  draftRevision      Int?     @map("draft_revision")
+  snapshot           Json
+  actorId            String   @map("actor_id") @db.VarChar(36)
+  conversationId     String?  @map("conversation_id") @db.VarChar(36)
+  assistantMessageId String?  @map("assistant_message_id") @db.VarChar(36)
+  test               Boolean  @default(false)
+  status             String   @default("running") @db.VarChar(20)
+  inputSummary       String   @default("") @map("input_summary") @db.VarChar(2000)
+  records            Json     @default("[]")
+  output             Json?
+  terminalNodeId     String?  @map("terminal_node_id") @db.VarChar(100)
+  error              String?
+  durationMs         Int      @default(0) @map("duration_ms")
+  createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  flow               EntryRouteFlow @relation(fields: [flowId], references: [id], onDelete: Restrict)
+
+  @@index([flowId, createdAt, id])
+  @@index([conversationId])
+  @@map("entry_route_flow_runs")
+}
+
 model alembic_version {
   version_num String @id(map: "alembic_version_pkc") @db.VarChar(32)
 }

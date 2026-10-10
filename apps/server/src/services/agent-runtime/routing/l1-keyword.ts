@@ -76,13 +76,8 @@ export interface QuickRouteResult {
  */
 export function quickRouteScan(message: string): QuickRouteResult | null {
   // SAFETY 优先 —— 安全合规不能有任何延迟
-  if (SAFETY_KEYWORDS.some((p) => p.test(message))) {
-    return {
-      route: "SAFETY",
-      confidence: 1.0,
-      reasoning: "安全关键词命中",
-    };
-  }
+  const safety = safetyRouteScan(message);
+  if (safety) return safety;
 
   // HUMAN —— 明确要求转人工
   if (HUMAN_KEYWORDS.some((p) => p.test(message))) {
@@ -103,4 +98,16 @@ export function quickRouteScan(message: string): QuickRouteResult | null {
   }
 
   return null; // → Router LLM
+}
+
+export function safetyRouteScan(message: string): QuickRouteResult | null {
+  if (SAFETY_KEYWORDS.some((p) => p.test(message))) {
+    return {
+      route: "SAFETY",
+      confidence: 1.0,
+      reasoning: "安全关键词命中",
+    };
+  }
+
+  return null;
 }
