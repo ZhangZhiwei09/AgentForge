@@ -4,16 +4,14 @@ import { AuthGuard, client } from "@agentforge/ui";
 import { AppShell } from "./components/layout/AppShell";
 import { LoginPage } from "./components/auth/LoginPage";
 import { AdminDashboard } from "./components/analytics/AdminDashboard";
-import { AnalyticsPage } from "./components/analytics/AnalyticsPage";
+import { FeedbackPage } from "./components/knowledge/FeedbackPage";
 import { KnowledgeBaseList } from "./components/knowledge/KnowledgeBaseList";
 import { DocumentListPage } from "./components/knowledge/DocumentListPage";
 import { DocumentDetailPage } from "./components/knowledge/DocumentDetailPage";
-import { ObservabilityPage } from "./components/analytics/ObservabilityPage";
 import { HitTestingPage } from "./components/knowledge/HitTestingPage";
 import { AgentFlowList } from "./components/agent-flows/AgentFlowList";
 import { AgentFlowEditor } from "./components/agent-flows/AgentFlowEditor";
 import { EntryAdminGate } from "./components/entry-route-flows/EntryAdminGate";
-import { EntryRouteFlowList } from "./components/entry-route-flows/EntryRouteFlowList";
 import { EntryRouteFlowEditor } from "./components/entry-route-flows/EntryRouteFlowEditor";
 import { Loader2 } from "lucide-react";
 
@@ -72,6 +70,7 @@ export default function App() {
         >
           {/* 知识库路由（V2 重构） */}
           <Route path="cs/knowledge" element={<KnowledgeBaseList />} />
+          <Route path="cs/knowledge/feedback" element={<FeedbackPage />} />
           <Route path="cs/knowledge/bases" element={<Navigate to="/admin/cs/knowledge" replace />} />
 
           <Route
@@ -87,10 +86,10 @@ export default function App() {
           {/* 其他模块 */}
           <Route path="cs/agent-flows" element={<AgentFlowList />} />
           <Route path="cs/agent-flows/:flowId" element={<AgentFlowEditor />} />
-          <Route path="cs/entry-route-flows" element={<EntryAdminGate><EntryRouteFlowList /></EntryAdminGate>} />
+          <Route path="cs/entry-route-flows" element={<EntryAdminGate><Navigate to="/admin/cs/agent-flows" replace /></EntryAdminGate>} />
           <Route path="cs/entry-route-flows/:flowId" element={<EntryAdminGate><EntryRouteFlowEditor /></EntryAdminGate>} />
-          <Route path="cs/analytics" element={<AnalyticsPage />} />
-          <Route path="cs/observability" element={<ObservabilityPage />} />
+          <Route path="cs/analytics" element={<Navigate to="/admin/cs/knowledge/feedback" replace />} />
+          <Route path="cs/observability" element={<Navigate to="/admin/cs/knowledge" replace />} />
           <Route index element={<Navigate to="cs/knowledge" replace />} />
         </Route>
         <Route path="/*" element={<Navigate to="/admin" replace />} />

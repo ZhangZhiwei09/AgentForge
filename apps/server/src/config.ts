@@ -44,7 +44,7 @@ export const settings = {
   port: parseInt(process.env.PORT || "8000", 10),
   // Redis 连接 URL（可选，用于限流存储等场景）
   redisUrl: process.env.REDIS_URL || "redis://localhost:6379",
-  // 视觉模型（VideoParser / ImageParser 知识库文档解析使用）
+  // 图片 OCR 模型；保留 VIDEO_MODEL 环境变量以兼容已有配置
   videoModel: process.env.VIDEO_MODEL || "gpt-4o-mini",
   // Langfuse LLM Observability（自托管）
   langfuseEnabled: process.env.LANGFUSE_ENABLED !== "false",

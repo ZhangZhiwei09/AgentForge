@@ -89,30 +89,6 @@ export const mcpCallError = new Counter({
   registers: [registry],
 });
 
-// ---- Workflow Metrics (V6) ----
-
-export const workflowRunsTotal = new Counter({
-  name: "workflow_runs_total",
-  help: "Total number of workflow runs",
-  labelNames: ["status"], // status = running | completed | failed | cancelled
-  registers: [registry],
-});
-
-export const workflowStepDurationMs = new Histogram({
-  name: "workflow_step_duration_ms",
-  help: "Workflow step execution duration in milliseconds",
-  labelNames: ["step_type"], // step_type = agent | tool | condition | parallel | human_approval | transform
-  buckets: [100, 500, 1000, 2500, 5000, 10000, 30000, 60000, 120000],
-  registers: [registry],
-});
-
-export const workflowSuccessRate = new Gauge({
-  name: "workflow_success_rate",
-  help: "Workflow success rate (0.0 to 1.0)",
-  labelNames: [] as const,
-  registers: [registry],
-});
-
 // ---- Agent Runtime Metrics ----
 
 /** Agent Runtime 消息路由分类统计 */

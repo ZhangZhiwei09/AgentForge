@@ -1,4 +1,4 @@
-"""Start the platform runtime with the public server's database and JWT config."""
+"""Start the platform runtime with the public server's database, auth and model."""
 
 import argparse
 import os
@@ -15,15 +15,26 @@ def platform_environment(
     environment: Mapping[str, str], server_env: Path = SERVER_ENV,
 ) -> dict[str, str]:
     configured = dotenv_values(server_env)
+    shared = {**configured, **environment}
     database = environment.get("DATABASE_URL") or configured.get("DATABASE_URL")
     database = database or "postgresql://postgres:postgres@127.0.0.1:5434/agentforge"
     scheme, separator, address = database.partition("://")
     if not separator or scheme not in {"postgres", "postgresql", "postgresql+asyncpg"}:
         raise ValueError("Platform DATABASE_URL must use PostgreSQL")
+    model = shared.get("DEFAULT_MODEL") or "gpt-4o-mini"
+    deepseek = model.startswith("deepseek") and shared.get("DEEPSEEK_API_KEY")
+    api_key = shared.get("DEEPSEEK_API_KEY") if deepseek else shared.get("OPENAI_API_KEY")
+    base_url = (
+        shared.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com/v1"
+        if deepseek else shared.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+    )
     return {
         "DATABASE_URL": f"postgresql+asyncpg://{address}",
         "JWT_SECRET": environment.get("JWT_SECRET") or configured.get("JWT_SECRET")
         or "agentforge-dev-secret-change-in-production",
+        "DEFAULT_MODEL": model,
+        "OPENAI_API_KEY": environment.get("OPENAI_API_KEY", api_key or ""),
+        "OPENAI_BASE_URL": environment.get("OPENAI_BASE_URL", base_url),
     }
 
 

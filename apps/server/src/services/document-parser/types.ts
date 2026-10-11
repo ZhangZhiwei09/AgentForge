@@ -58,10 +58,6 @@ export interface ParsedDocumentMetadata {
   segmentCount?: number;
   /** 资产数量 */
   assetCount?: number;
-  /** 视频时长（秒），仅视频文件 */
-  videoDurationSec?: number;
-  /** 音频时长（秒），仅音频文件 */
-  audioDurationSec?: number;
   /** OCR 置信度，仅图片文件 */
   ocrConfidence?: number;
   /** 解析器名称 */

@@ -101,7 +101,6 @@ describe("authMiddleware", () => {
       "/api/agent/chat/history",
       "/api/agent/chat/conversations",
       "/api/agent/chat/rate",
-      "/debug/diagnosis",
     ];
 
     it.each(publicPaths)("allows %s without a token", async (path) => {
@@ -182,6 +181,11 @@ describe("authMiddleware", () => {
   // ====================================================================
 
   describe("protected routes — missing token", () => {
+    it("does not allow the retired diagnosis debug page without authentication", async () => {
+      const res = await app.request("/debug/diagnosis");
+      expect(res.status).toBe(401);
+    });
+
     it("returns 401 when no token is provided", async () => {
       const res = await app.request("/api/protected");
       expect(res.status).toBe(401);

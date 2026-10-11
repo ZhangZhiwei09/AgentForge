@@ -1,5 +1,5 @@
 // Built-in Team Templates
-// Users can instantiate these via GET /api/teams/templates
+// Internal templates used by the default diagnosis executor.
 import type { TeamTemplate } from "@agentforge/shared-types";
 
 // ---- Identity Diagnosis Team ----

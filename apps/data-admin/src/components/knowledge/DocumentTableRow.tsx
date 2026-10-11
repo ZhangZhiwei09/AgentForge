@@ -69,7 +69,7 @@ function relativeTime(dateStr: string): string {
   return `${years} 年前`;
 }
 
-// ── 根据文档计算阶段状态（复用 KnowledgePanel 逻辑） ──
+// ── 根据文档计算阶段状态 ──
 
 function getProcessingPhases(doc: KnowledgeDocumentDTO): PhaseItem[] {
   // API 返回字段多于 KnowledgeDocumentDTO 定义，安全扩展访问

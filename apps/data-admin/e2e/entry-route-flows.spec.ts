@@ -79,6 +79,8 @@ test("real editor config, dry run, published chat, handoff and rollback", async 
   expect((await request.get("/api/entry-route-flows", { headers: userAuth() })).status()).toBe(403);
   await page.addInitScript((value) => localStorage.setItem("accessToken", value), token);
   await page.goto("/admin/cs/entry-route-flows");
+  await expect(page).toHaveURL(/\/admin\/cs\/agent-flows$/);
+  await page.getByLabel("流程类型", { exact: true }).selectOption("entry");
   await page.getByLabel("新流程名称").fill("一级流程浏览器验收");
   await page.getByRole("button", { name: "新建一级流程" }).click();
   await page.waitForURL("**/entry-route-flows/*");

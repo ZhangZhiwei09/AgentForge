@@ -24,6 +24,13 @@
 .af-table-row { display: grid; grid-template-columns: minmax(200px, 2fr) 100px 110px minmax(160px, 1fr) 75px; align-items: center; gap: 16px; padding: 15px 8px; border-bottom: 1px solid hsl(var(--border)); }
 .af-table-head { font-size: 11px; color: hsl(var(--muted-foreground)); padding-top: 10px; padding-bottom: 10px; }
 .af-flow-name { display: flex; align-items: center; gap: 9px; font-weight: 500; overflow-wrap: anywhere; }
+.af-management .af-create { flex-wrap: wrap; }
+.af-management .af-create input { max-width: 100%; }
+.af-management .af-create select { width: 170px; }
+.af-flow-entry { min-width: 0; display: grid; gap: 5px; }
+.af-flow-entry .af-flow-name svg { flex-shrink: 0; }
+.af-flow-kind { font-size: 11px; color: hsl(var(--muted-foreground)); padding-left: 25px; }
+.af-flow-state { display: contents; }
 .af-table time { font-size: 12px; color: hsl(var(--muted-foreground)); }
 .af-dot { display: inline-block; width: 6px; height: 6px; background: #aaa; border-radius: 50%; margin-right: 6px; }
 .af-dot-on { background: #269272; }
@@ -107,4 +114,13 @@
   .af-panel-fieldset, .af-node-panel, .af-run-panel { width: min(350px, 88%); }
   .af-panel-fieldset, .af-run-panel { position: absolute; right: 0; top: 0; bottom: 0; z-index: 6; box-shadow: -5px 0 15px #10251b0d; }
   .af-page { padding: 16px; }
+  .af-management .af-table-row { grid-template-columns: minmax(0, 1fr) 60px 76px 64px; gap: 8px; }
+  .af-management .af-create { align-items: stretch; }
+}
+@media (max-width: 600px) {
+  .af-management .af-table-row { grid-template-columns: minmax(0, 1fr) 64px; gap: 10px 8px; }
+  .af-management .af-table-head { display: none; }
+  .af-management .af-flow-entry { grid-column: 1; grid-row: 1; }
+  .af-management .af-flow-state { display: flex; gap: 16px; grid-column: 1; grid-row: 2; padding-left: 25px; white-space: nowrap; }
+  .af-management .af-actions { grid-column: 2; grid-row: 1 / span 2; }
 }

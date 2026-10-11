@@ -43,7 +43,7 @@ pnpm dev:agent-flows
 
 启动器读取 `apps/server/.env`，统一业务数据库和 JWT 密钥，不覆盖任何 `.env` 文件。当前平台默认使用 DeepSeek 时，将其配置映射到 Python 已有的 OpenAI 兼容 Provider。
 
-常规 `pnpm dev` 也会通过 `python -m src.dev` 启动 Python 平台后端，读取 TS 的数据库和 JWT 配置（显式环境变量优先），不再误用独立的 `agentforge_py` 库。此启动方式不改写两端 `.env`，Python 独立启动 `python -m src.main` 仍使用自己的配置。更新启动命令后，需要重启开发服务。
+常规 `pnpm dev` 也会通过 `python -m src.dev` 启动 Python 平台后端，读取 TS 的数据库、JWT 和默认模型配置（显式环境变量优先），不再误用独立的 `agentforge_py` 库或另一套默认模型。默认模型使用 DeepSeek 时，其地址和凭据映射到 Python 的 OpenAI 兼容 Provider。此启动方式不改写两端 `.env`，Python 独立启动 `python -m src.main` 仍使用自己的配置。更新启动命令后，需要重启开发服务。
 
 启动器默认选择 Python `8005`、TS `8001`、管理端 `5201`；端口已占用时使用其他空闲端口。实际地址打印在终端。
 

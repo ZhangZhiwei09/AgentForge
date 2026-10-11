@@ -272,9 +272,9 @@ RouteContext 仅按需新增可选的可信人工话术字段，缺省不影响�
 | `packages/database/prisma/schema.prisma` 与一个新 migration | 两张新表、关联和约束 | 不改旧表数据，不部署无关待执行迁移 |
 | 新增 `packages/shared-types/src/entry-route-flow.ts` 与入口导出 | DSL、DTO、运行与决策契约 | 与 AgentFlow / Workflow 类型隔离 |
 | `packages/sdk/src/client.ts` | 新增一级流程 CRUD、校验与试运行方法 | 复用认证和错误处理 |
-| `apps/data-admin/src/App.tsx` | 一级流程列表和编辑页面路由 | 登录、导航与直接地址访问 |
-| `apps/data-admin/src/components/analytics/AdminDashboard.tsx` | 增加“一级路由流程”入口 | 管理员入口与窄屏布局 |
-| 新增 `apps/data-admin/src/components/entry-route-flows/` | 列表、画布、五类节点表单、试运行、发布启停和记录 | 错误节点定位、状态、拖拽和视口稳定 |
+| `apps/data-admin/src/App.tsx` | 一级流程编辑页面路由；旧列表地址跳转统一流程列表 | 登录、导航与直接地址访问 |
+| `apps/data-admin/src/components/analytics/AdminDashboard.tsx`、`agent-flows/AgentFlowList.tsx` | 两类流程合并到“Agent 流程”板块；统一列表、类型标签和新建类型选择 | 管理员权限、两类编辑入口、返回列表与窄屏布局 |
+| 新增 `apps/data-admin/src/components/entry-route-flows/` | 画布、五类节点表单、试运行、发布启停和记录 | 错误节点定位、状态、拖拽和视口稳定 |
 | 对应单测、数据库集成测试、管理端 E2E | 覆盖新增行为与入口回归 | 见第 10 节 |
 
 ### 8.2 仅按实际需要调整

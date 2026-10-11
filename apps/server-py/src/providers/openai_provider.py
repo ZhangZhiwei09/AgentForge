@@ -9,8 +9,9 @@ Python 新概念：async generator（async def + yield）
 """
 
 from collections.abc import AsyncIterator
+from urllib.parse import urlsplit
 
-from openai import AsyncOpenAI
+from openai import APIConnectionError, AsyncOpenAI
 
 from src.schemas.chat import ChatMessage, ChatSyncResult, StreamChunk
 
@@ -24,6 +25,13 @@ class OpenAIProvider:
 
     def __init__(self, api_key: str, base_url: str = "https://api.openai.com/v1"):
         self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+
+    def _connection_message(self, model: str) -> str:
+        host = urlsplit(str(self.client.base_url)).hostname or "unknown"
+        return (
+            f"模型服务连接失败（{host}，模型 {model}），"
+            "请检查模型地址、网络和代理设置。"
+        )
 
     # ---- 模型列表 ----
     def list_models(self) -> list[dict]:
@@ -70,7 +78,10 @@ class OpenAIProvider:
         if tools:
             params["tools"] = tools
 
-        response = await self.client.chat.completions.create(**params)  # type: ignore[arg-type]
+        try:
+            response = await self.client.chat.completions.create(**params)  # type: ignore[arg-type]
+        except APIConnectionError as exc:
+            raise RuntimeError(self._connection_message(model)) from exc
 
         return ChatSyncResult(
             content=response.choices[0].message.content.strip() or "",
@@ -122,7 +133,10 @@ class OpenAIProvider:
         if tools:
             params["tools"] = tools
 
-        stream = await self.client.chat.completions.create(**params)  # type: ignore[arg-type]
+        try:
+            stream = await self.client.chat.completions.create(**params)  # type: ignore[arg-type]
+        except APIConnectionError as exc:
+            raise RuntimeError(self._connection_message(model)) from exc
 
         prompt_tokens = 0
         completion_tokens = 0

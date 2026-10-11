@@ -1,7 +1,8 @@
 // 知识库列表页 —— 网格布局 / 卡片 / 空状态 / 创建按钮
 import { useState, useCallback } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Database, Loader2, RefreshCw } from "lucide-react";
+import { Plus, Database, MessageSquare, RefreshCw } from "lucide-react";
 import { client } from "@agentforge/ui";
 import { KnowledgeBaseCard } from "./KnowledgeBaseCard";
 import { CreateKnowledgeBaseDialog } from "./CreateKnowledgeBaseDialog";
@@ -69,9 +70,9 @@ export function KnowledgeBaseList() {
 
   return (
     <div className="flex-1 overflow-y-auto bg-[hsl(var(--background))]">
-      <div className="max-w-6xl mx-auto px-6 py-6">
+      <div className="max-w-6xl mx-auto px-4 py-6 sm:px-6">
         {/* 页面标题 */}
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-6">
           <div className="flex items-center gap-2.5">
             <Database className="h-5 w-5 text-muted-foreground" />
             <h1 className="text-base font-semibold text-foreground">
@@ -85,6 +86,14 @@ export function KnowledgeBaseList() {
           </div>
 
           <div className="flex items-center gap-2">
+            <Link
+              to="/admin/cs/knowledge/feedback"
+              aria-label="用户反馈"
+              title="用户反馈"
+              className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--accent))] transition-colors"
+            >
+              <MessageSquare className="h-4 w-4" aria-hidden="true" />
+            </Link>
             <button
               onClick={() => refetch()}
               className="rounded-md p-1.5 text-muted-foreground hover:text-foreground hover:bg-[hsl(var(--accent))] transition-colors"

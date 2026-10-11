@@ -1,6 +1,6 @@
 // ── 智能客服共享类型 ──
 // 统一 KnowledgeResult, ToolCallRecord, CSMessage 等类型定义
-// 避免在 useCustomerChatStream / CustomerChat / CustomerChatPage 中重复定义
+// 对话内容与知识检索的共享数据结构
 
 import type { ContentBlock } from "./content-block";
 

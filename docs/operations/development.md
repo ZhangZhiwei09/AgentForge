@@ -10,7 +10,7 @@
 ### Infrastructure
 
 ```bash
-pnpm infra:up        # Start PostgreSQL + pgAdmin + Milvus (Docker)
+pnpm infra:up        # Start services from infra/docker/docker-compose.yml
 pnpm infra:down      # Stop infrastructure
 pnpm infra:restart   # Restart infrastructure
 ```
@@ -19,17 +19,16 @@ pnpm infra:restart   # Restart infrastructure
 
 ```bash
 pnpm install         # Install all dependencies
-pnpm dev             # Start backend + frontend concurrently
+pnpm dev             # Start TS API + Python flow runtime + both frontends
 pnpm server:dev      # Backend only on :8000 (TS Hono, tsx watch)
-pnpm web:dev         # Frontend only on :5173
+pnpm cs:dev          # Diagnosis frontend on :5173
+pnpm admin:dev       # Administration frontend on :5200
+pnpm py:dev          # Python configured-flow runtime on :8004 (requires uv + Python 3.12+)
 
 # Single package dev — from root
-pnpm --filter @agentforge/web dev
-pnpm --filter @agentforge/web build
+pnpm --filter @agentforge/customer-service dev
+pnpm --filter @agentforge/customer-service build
 pnpm --filter @agentforge/server dev
-
-# One-click script (Windows only)
-pnpm start           # infra + setup + dev all at once
 ```
 
 ### Quality
@@ -62,14 +61,17 @@ pnpm infra:up
 pnpm db:generate
 pnpm db:migrate
 
-# 3rd terminal: Start backend
-pnpm server:dev
-
-# 4th terminal: Start frontend
-pnpm web:dev
+# 3rd terminal: Start both backends and frontends
+pnpm dev
 ```
 
-This way you can restart the backend without touching the DB, rebuild the frontend without restarting the server, etc.
+For independent restarts, use the per-service commands above. The Python launcher
+inherits the database, JWT secret and model configuration from `apps/server/.env`;
+the TypeScript API uses `AGENT_FLOW_BACKEND_URL` (default `http://127.0.0.1:8004`).
+
+The administration UI has two modules: knowledge management (including feedback)
+and Agent flows (including entry routing). Langfuse opens as an external link;
+set `VITE_LANGFUSE_URL` in `apps/data-admin/.env.local` to change its destination.
 
 ## Database Workflow
 

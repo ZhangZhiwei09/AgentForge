@@ -27,8 +27,7 @@
     "db:migrate": "pnpm --filter @agentforge/database db:migrate",
     "db:seed": "pnpm --filter @agentforge/database db:seed",
     "db:studio": "pnpm --filter @agentforge/database db:studio",
-    "db:generate": "pnpm --filter @agentforge/database db:generate",
-    "start": "powershell -ExecutionPolicy Bypass -File start.ps1"
+    "db:generate": "pnpm --filter @agentforge/database db:generate"
   },
   "devDependencies": {
     "prettier": "^3.4.2",

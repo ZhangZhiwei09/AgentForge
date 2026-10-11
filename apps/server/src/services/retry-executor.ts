@@ -1,5 +1,5 @@
 // 通用重试执行器 —— 为 Agent 的 LLM 调用和工具执行提供自动重试能力
-// 退避算法复用自 workflows/dag-executor.ts 的 calculateRetryDelay 逻辑
+// 使用指数退避与抖动，避免并发失败时集中重试
 import { logger } from "@agentforge/logger";
 import { classifyError } from "./error-classifier.js";
 import type { ClassifiedError, ErrorCategory } from "./error-classifier.js";

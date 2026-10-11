@@ -15,7 +15,6 @@ const PUBLIC_PATHS = [
   "/api/agent/chat/history", // Load session history
   "/api/agent/chat/conversations", // List conversations (auth-aware internally)
   "/api/agent/chat/rate", // Submit satisfaction rating
-  "/debug/diagnosis", // Debug: DiagnosisMode visual verification page
 ];
 
 // Prefix-based public paths (any path starting with these is public)

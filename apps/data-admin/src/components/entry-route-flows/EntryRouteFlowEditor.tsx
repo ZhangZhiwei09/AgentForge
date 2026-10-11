@@ -183,7 +183,7 @@ function Editor({ initial }: { initial: EntryRouteFlowDTO }) {
   }
   return <div className="af-editor er-editor">
     <header className="af-editor-header">
-      <Link className="af-icon" title="返回流程列表" aria-label="返回流程列表" to="/admin/cs/entry-route-flows" onClick={(event) => {
+      <Link className="af-icon" title="返回流程列表" aria-label="返回流程列表" to="/admin/cs/agent-flows" onClick={(event) => {
         if ((dirty || busy) && !window.confirm("离开此页面？未保存修改将丢失。")) event.preventDefault();
       }}><ArrowLeft size={18} /></Link>
       <input className="af-name-input" aria-label="流程名称" value={name} maxLength={200} disabled={busy} onChange={(e) => setName(e.target.value)} />
