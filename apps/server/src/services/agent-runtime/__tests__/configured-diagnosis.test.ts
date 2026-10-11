@@ -1,14 +1,14 @@
 import { createHmac } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { configuredDiagnosis, hasConfiguredDiagnosis, hasWaitingConfiguredDiagnosis } from "../configured-diagnosis.js";
+import { configuredDiagnosis, hasConfiguredDiagnosis, hasWaitingConfiguredDiagnosis, cancelWaitingConfiguredDiagnosis } from "../configured-diagnosis.js";
 import { DiagnosisRouteAgent } from "../diagnosis-agent.js";
 import type { RouteContext, RouteStreamEvent } from "../types.js";
 import type { ExecutionScope } from "../../../runtime/scope.js";
 
-const { query, instantiate } = vi.hoisted(() => ({
-  query: vi.fn(), instantiate: vi.fn(),
+const { query, instantiate, executeRaw } = vi.hoisted(() => ({
+  query: vi.fn(), instantiate: vi.fn(), executeRaw: vi.fn(),
 }));
-vi.mock("../../../db.js", () => ({ prisma: { $queryRaw: query } }));
+vi.mock("../../../db.js", () => ({ prisma: { $queryRaw: query, $executeRaw: executeRaw } }));
 vi.mock("../../../teams/service.js", () => ({ teamService: { instantiate } }));
 vi.mock("@agentforge/logger", () => ({
   logger: { error: vi.fn(), warn: vi.fn(), info: vi.fn() },
@@ -101,5 +101,19 @@ describe("configured diagnosis bridge", () => {
     expect(await hasConfiguredDiagnosis("conversation-1")).toBe(true);
     expect(await hasWaitingConfiguredDiagnosis("conversation-1")).toBe(true);
     expect(query.mock.calls[0][1]).toBe("conversation-1");
+  });
+  it.each([0, 1, 2])("acknowledges only changed waiting rows: %s", async (count) => {
+    executeRaw.mockResolvedValueOnce(count);
+    expect(await cancelWaitingConfiguredDiagnosis("owned-conversation")).toBe(count > 0);
+    const [sql, conversationId] = executeRaw.mock.calls.at(-1)!;
+    expect(conversationId).toBe("owned-conversation");
+    expect(sql.join("?")).toMatch(/WHERE conversation_id = \?/);
+    expect(sql.join("?")).toContain("test = false AND status = 'waiting_input'");
+    expect(sql.join("?")).toContain("status = 'cancelled', cancel_requested = true");
+    expect(sql.join("?")).not.toMatch(/snapshot\s*=/);
+  });
+  it("propagates a cancellation database failure without a false acknowledgement", async () => {
+    executeRaw.mockRejectedValueOnce(new Error("database unavailable"));
+    await expect(cancelWaitingConfiguredDiagnosis("owned-conversation")).rejects.toThrow("database unavailable");
   });
 });

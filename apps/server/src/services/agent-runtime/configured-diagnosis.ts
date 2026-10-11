@@ -25,6 +25,17 @@ export async function hasWaitingConfiguredDiagnosis(conversationId: string): Pro
   return rows[0]?.active ?? false;
 }
 
+/** The caller must first verify ownership of the conversation. */
+export async function cancelWaitingConfiguredDiagnosis(conversationId: string): Promise<boolean> {
+  const changed = await prisma.$executeRaw`
+    UPDATE agent_flow_runs
+    SET status = 'cancelled', cancel_requested = true, updated_at = NOW()
+    WHERE conversation_id = ${conversationId}
+      AND test = false AND status = 'waiting_input'
+  `;
+  return changed > 0;
+}
+
 export async function* configuredDiagnosis(
   context: RouteContext,
   scope?: ExecutionScope,

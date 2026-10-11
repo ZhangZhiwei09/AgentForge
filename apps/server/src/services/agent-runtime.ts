@@ -1,9 +1,9 @@
-// Agent Runtime 服务 —— Router + Agent 编排器
+// Agent Runtime 服务 —— 企业入口决策 + Agent 编排器
 //
 // 编排器职责：
 //   1. Session 管理（获取/创建会话、加载历史）
-//   2. 传统对话快速通道（正则零延迟匹配问候/感谢/道别）
-//   3. QueryRouter 分类（Rule First + LLM Fallback → SAFETY|CHAT|TASK|HUMAN）
+//   2. 安全、控制、等待诊断、配置与精确问候规则
+//   3. 未命中规则时进行一次咨询/排查分类，不明确则澄清
 //   4. 分发到对应 Agent 执行
 //   5. 后处理（保存消息、提取记忆）
 //
@@ -20,20 +20,21 @@ import {
   agentRouteClassificationTotal,
   agentRouteConfidence,
   agentRequestDurationMs,
+  agentEntryDecisionsTotal,
 } from "../observability/metrics.js";
-import { intentDetector } from "./intent-detector.js";
 import { checkContentSafety } from "../middleware/content-safety.js";
 import { createExecutionScope } from "../runtime/scope.js";
 import { getObservabilityProvider } from "../observability/index.js";
 
-import { QueryRouter } from "./agent-runtime/router.js";
 import { SafetyAgent } from "./agent-runtime/safety-agent.js";
 import { ChatAgent } from "./agent-runtime/chat-agent.js";
 import { AgentExecutor } from "./agent-runtime/agent-executor.js";
 import { HumanAgent } from "./agent-runtime/human-agent.js";
 import { DiagnosisRouteAgent } from "./agent-runtime/diagnosis-agent.js";
-import { hasWaitingConfiguredDiagnosis } from "./agent-runtime/configured-diagnosis.js";
-import { quickRouteScan, safetyRouteScan } from "./agent-runtime/routing/l1-keyword.js";
+import { hasWaitingConfiguredDiagnosis, cancelWaitingConfiguredDiagnosis } from "./agent-runtime/configured-diagnosis.js";
+import { decideEntry } from "./agent-runtime/entry-decision.js";
+import type { ObservabilityTrace } from "../observability/provider.js";
+import { safetyRouteScan } from "./agent-runtime/routing/l1-keyword.js";
 import { entryRouteFlowService, type EntryRunExecution } from "./entry-route-flows/service.js";
 
 import { injectMemories } from "./agent-runtime/knowledge-context.js";
@@ -51,7 +52,7 @@ import type {
   RouteStreamEvent,
   RouteAgent,
   KnowledgeChunkResult,
-  RouterDecision,
+  EntryDecision,
 } from "./agent-runtime/types.js";
 import {
   SORRY_TEMPLATE,
@@ -129,7 +130,6 @@ const CONVERSATIONAL_RULES: ConversationalRule[] = [
 
 export class AgentRuntimeService {
   private modelId: string | null;
-  private router: QueryRouter;
   private safetyAgent: SafetyAgent;
   private chatAgent: ChatAgent;
   private agentExecutor: AgentExecutor;
@@ -143,7 +143,6 @@ export class AgentRuntimeService {
 
   constructor(modelId?: string | null) {
     this.modelId = modelId || null;
-    this.router = new QueryRouter(modelId);
     this.safetyAgent = new SafetyAgent();
     this.chatAgent = new ChatAgent(AGENTFORGE_PERSONA);
     this.agentExecutor = new AgentExecutor();
@@ -310,7 +309,7 @@ export class AgentRuntimeService {
       const { providerName, modelId: resolvedModel } = resolveModel(this.modelId);
       const withinHours = this.isWithinServiceHours();
 
-      const { intent } = intentDetector.detect(userMessage);
+      let intent = "enterprise";
 
       // 加载历史
       const history = await prisma.message.findMany({
@@ -336,17 +335,6 @@ export class AgentRuntimeService {
         },
       });
 
-      if (intent !== "其他咨询") {
-        try {
-          await prisma.conversation.update({
-            where: { id: conversation.id },
-            data: { intent },
-          });
-        } catch {
-          /* 字段可能未迁移 */
-        }
-      }
-
       const assistantMsgId = randomUUID();
 
       // ── Update trace with session metadata ──
@@ -367,175 +355,80 @@ export class AgentRuntimeService {
       });
       scope.controller.start();
 
-      // ── 2. 传统对话快速通道（零延迟） ──
+      // ── 2. 统一企业入口决策 ──
       const waitingFlow = await hasWaitingConfiguredDiagnosis(conversation.id);
       const safetyDecision = safetyRouteScan(userMessage) ?? (
         !checkContentSafety(userMessage).safe
           ? { route: "SAFETY" as const, confidence: 1, reasoning: "安全关键词命中" }
           : null
       );
-      // Waiting diagnosis and safety bypass entry configuration, including DB loading.
-      const snapshot = waitingFlow || safetyDecision ? null : await entryRouteFlowService.activeSnapshot();
       if (scope.controller.shouldStop) return;
       let entryExecution: EntryRunExecution | undefined;
-      if (snapshot) {
-        entryExecution = await entryRouteFlowService.execute(snapshot, userMessage, userId, {
-          conversationId: conversation.id, signal: scope.context.signal,
-        });
-      }
-      if (scope.controller.shouldStop) return;
-      if (entryExecution?.result.action === "reply") {
-        const result = entryExecution.result;
-        let answer = "";
-        let saved = false;
-        const persistReply = async () => {
-          if (saved || !answer) return;
-          await prisma.message.create({
-            data: {
-              id: assistantMsgId, conversationId: conversation.id, role: "assistant", content: answer,
-              model: resolvedModel,
-              metadata: {
-                suggestions: result.suggestions,
-                entryRoute: { flowId: entryExecution!.flowId, runId: entryExecution!.runId, version: entryExecution!.version },
-              },
-            },
-          });
-          saved = true;
-          await entryRouteFlowService.linkAssistant(entryExecution!.runId, assistantMsgId);
-        };
-        agentRouteClassificationTotal.inc({ route: "CHAT", source: "entry_flow" });
-        agentRouteConfidence.observe({ route: "CHAT" }, 1);
-        await prisma.routeClassificationLog.create({
-          data: {
-            id: randomUUID(), sessionId: conversation.sessionId, conversationId: conversation.id,
-            userMessage: userMessage.slice(0, 2000), route: "CHAT", confidence: 1,
-            source: "entry_flow", latencyMs: entryExecution.durationMs,
-          },
-        }).catch(() => {});
-        const started = Date.now();
-        try {
-          for await (const event of this.streamConversationalMatch(
-            assistantMsgId, conversation.id, conversation.sessionId, resolvedModel, providerName,
-            withinHours, intent, result, scope.context.signal,
-          )) {
-            if (scope.controller.shouldStop) break;
-            if (event.type === "token") {
-              if (!answer) agentRequestDurationMs.observe({ route: "CHAT", phase: "ttft" }, Date.now() - started);
-              answer += event.content;
-            }
-            if (event.type === "done") await persistReply();
-            yield event;
-          }
-        } finally {
-          // Closing the generator on disconnect must also preserve delivered text.
-          await persistReply();
-        }
-        agentRequestDurationMs.observe({ route: "CHAT", phase: "ttlt" }, Date.now() - started);
-        lfTrace.update({ output: { answer }, metadata: { route: "CHAT", source: "entry_flow" } });
-        return;
-      }
-      const convMatch = waitingFlow || safetyDecision || snapshot ? null : this.matchConversational(userMessage);
-      if (convMatch && checkContentSafety(userMessage).safe) {
-        const convStartTime = Date.now();
-
-        yield* this.streamConversationalMatch(
-          assistantMsgId,
-          conversation.id,
-          conversation.sessionId,
-          resolvedModel,
-          providerName,
-          withinHours,
-          intent,
-          convMatch,
-          scope.context.signal,
-        );
-
-        agentRequestDurationMs.observe(
-          { route: "CHAT", phase: "ttft" },
-          Date.now() - convStartTime,
-        );
-        agentRequestDurationMs.observe(
-          { route: "CHAT", phase: "ttlt" },
-          Date.now() - convStartTime,
-        );
-
-        await prisma.message.create({
-          data: {
-            id: assistantMsgId,
-            conversationId: conversation.id,
-            role: "assistant",
-            content: convMatch.answer,
-            model: resolvedModel,
-          },
-        });
-
-        // ── Close observability trace（快通道：无 LLM 调用）──
-        lfTrace.update({ output: { answer: convMatch.answer } });
-        lfTrace.end();
-
-        return;
-      }
-
-      // ── 3. QueryRouter 分类 ──
       const classifyStart = Date.now();
-      const priorityRoute = quickRouteScan(userMessage)?.route;
-      const entryResult = entryExecution?.result;
-      const decision: RouterDecision = safetyDecision
-        ?? (waitingFlow && priorityRoute !== "HUMAN"
-          ? { route: "DIAGNOSIS", confidence: 1, reasoning: "等待补充的配置诊断续跑" }
-          : entryResult?.action === "route"
-            ? { route: entryResult.target, confidence: 1, reasoning: "一级流程分流", source: "entry_flow" }
-            : entryResult?.action === "continue"
-              ? await this.router.classifyFromL2(userMessage, historyMessages, lfTrace)
-              : await this.router.classify(userMessage, historyMessages, lfTrace));
+      let decision: EntryDecision;
+      try {
+        decision = await decideEntry({
+          message: userMessage, history: historyMessages, safetyDecision,
+          waitingDiagnosis: waitingFlow, modelId: this.modelId, trace: lfTrace,
+          signal: scope.context.signal,
+          conversationalReply: this.matchConversational(userMessage),
+          cancelWaitingDiagnosis: () => cancelWaitingConfiguredDiagnosis(conversation.id),
+          loadEntryResult: async () => {
+            const active = await entryRouteFlowService.activeSnapshot();
+            scope.context.signal.throwIfAborted();
+            if (!active) return null;
+            entryExecution = await entryRouteFlowService.execute(active, userMessage, userId, {
+              conversationId: conversation.id, signal: scope.context.signal,
+            });
+            return entryExecution.result;
+          },
+        });
+      } catch (error) {
+        if (scope.controller.shouldStop) return;
+        throw error;
+      }
+      if (scope.controller.shouldStop) return;
+      agentEntryDecisionsTotal.inc({ action: decision.action, source: decision.source });
+      const route = decision.action === "dispatch" ? decision.route : "CHAT";
+      agentRouteClassificationTotal.inc({ route, source: decision.source });
+      if (decision.source !== "business_llm") {
+        agentRouteConfidence.observe({ route }, 1);
+      }
+      await this.recordEntryAudit(
+        conversation.id, conversation.sessionId, userMessage, route,
+        decision.source, Date.now() - classifyStart,
+      );
+      if (scope.controller.shouldStop) return;
+      if (decision.action !== "dispatch") {
+        yield* this.streamEntryResponse(decision, {
+          assistantMsgId, conversationId: conversation.id, sessionId: conversation.sessionId,
+          resolvedModel, providerName, withinServiceHours: withinHours, intent,
+        }, scope.context.signal, lfTrace, entryExecution);
+        return;
+      }
+      intent = decision.businessIntent ?? decision.route.toLowerCase();
+      lfTrace.update({ metadata: { intent } });
+      if (decision.businessIntent) {
+        await prisma.conversation.update({
+          where: { id: conversation.id }, data: { intent },
+        }).catch((error: unknown) => {
+          logger.warn({ errorCode: ErrorCode.AR_MSG_PERSIST_FAILED, error }, "Failed to update enterprise conversation intent");
+        });
+      }
       if (scope.controller.shouldStop) return;
 
+      // ── 3. 入口分发记录 ──
       logger.info(
         {
           route: decision.route,
-          confidence: decision.confidence,
+          source: decision.source,
           sessionId: conversation.sessionId,
         },
-        "Router classified message",
+        "Enterprise entry dispatched message",
       );
-
-      const source = decision.source ?? (decision.reasoning.includes("关键词命中")
-        ? "keyword"
-        : decision.reasoning.includes("L2语义匹配")
-          ? "l2_semantic"
-          : decision.reasoning.includes("L3少样本增强")
-            ? "l3_fewshot"
-            : decision.reasoning.includes("fallback")
-              ? "fallback"
-              : "llm");
-      agentRouteClassificationTotal.inc({
-        route: decision.route,
-        source,
-      });
-      agentRouteConfidence.observe(
-        { route: decision.route },
-        decision.confidence,
-      );
-
-      // ── 路由分类审计日志（非阻塞，失败静默忽略）──
-      const classifyLatencyMs = Date.now() - (classifyStart ?? Date.now());
-      prisma.routeClassificationLog.create({
-        data: {
-          id: randomUUID(),
-          sessionId: conversation.sessionId,
-          conversationId: conversation.id,
-          userMessage: userMessage.slice(0, 2000),
-          route: decision.route,
-          confidence: decision.confidence,
-          source,
-          latencyMs: classifyLatencyMs,
-        },
-      }).catch(() => {
-        // 非关键路径，不影响路由流程
-      });
 
       // ── 4. 构建 RouteContext ──
-      let context: RouteContext = {
+      const context: RouteContext = {
         conversationId: conversation.id,
         sessionId: conversation.sessionId,
         userMessage,
@@ -550,7 +443,8 @@ export class AgentRuntimeService {
         withinServiceHours: withinHours,
         assistantMsgId,
         intent,
-        handoff: entryResult?.action === "route" ? entryResult.handoff : undefined,
+        resolvedQuery: decision.resolvedQuery,
+        handoff: decision.handoff,
       };
 
       // ── 5. Memory 注入（所有路由通用） ──
@@ -777,6 +671,98 @@ export class AgentRuntimeService {
       if (AgentRuntimeService.sessionLocks.get(lockKey) === currentLock) {
         AgentRuntimeService.sessionLocks.delete(lockKey);
       }
+    }
+  }
+
+  private async recordEntryAudit(
+    conversationId: string, sessionId: string | null, userMessage: string,
+    route: RouteName, source: EntryDecision["source"], latencyMs: number,
+  ): Promise<void> {
+    try {
+      await prisma.routeClassificationLog.create({
+        data: {
+          id: randomUUID(), conversationId, sessionId, userMessage: userMessage.slice(0, 2000),
+          route, source, confidence: source === "business_llm" ? 0 : 1, latencyMs,
+        },
+      });
+    } catch (error) {
+      logger.warn({ errorCode: ErrorCode.AR_ROUTE_AUDIT_FAILED, error }, "Failed to persist entry audit");
+    }
+  }
+
+  private async *streamEntryResponse(
+    decision: Exclude<EntryDecision, { action: "dispatch" }>,
+    context: Pick<RouteContext, "assistantMsgId" | "conversationId" | "sessionId" | "resolvedModel" | "providerName" | "withinServiceHours" | "intent">,
+    signal: AbortSignal,
+    trace: ObservabilityTrace,
+    execution?: EntryRunExecution,
+  ): AsyncGenerator<RouteStreamEvent> {
+    let answer = "";
+    let saved = false;
+    let clarificationDelivered = false;
+    let completed = false;
+    const started = Date.now();
+    const clarification = {
+      intent: "unclear", missingFields: ["business_intent"], promptMessage: decision.answer, hints: [],
+    };
+    const persist = async () => {
+      if (saved || (!answer && !clarificationDelivered)) return;
+      await prisma.message.create({
+        data: {
+          id: context.assistantMsgId, conversationId: context.conversationId,
+          role: "assistant", content: answer, model: context.resolvedModel,
+          metadata: {
+            suggestions: decision.suggestions,
+            entryDecision: { action: decision.action, source: decision.source, reasoning: decision.reasoning },
+            ...(clarificationDelivered ? { clarification } : {}),
+            ...(execution ? { entryRoute: { flowId: execution.flowId, runId: execution.runId, version: execution.version } } : {}),
+          },
+        },
+      });
+      saved = true;
+      if (execution) await entryRouteFlowService.linkAssistant(execution.runId, context.assistantMsgId);
+    };
+    try {
+      for await (const event of this.streamConversationalMatch(
+        context.assistantMsgId, context.conversationId, context.sessionId,
+        context.resolvedModel, context.providerName, context.withinServiceHours,
+        decision.action === "clarify" ? "unclear" : context.intent, decision, signal,
+      )) {
+        if (signal.aborted) break;
+        if (event.type === "token") {
+          if (!answer) agentRequestDurationMs.observe({ route: "CHAT", phase: "ttft" }, Date.now() - started);
+          answer += event.content;
+        }
+        if (event.type === "done") {
+          await persist();
+          if (signal.aborted) break;
+          completed = true;
+          yield { ...event, route: "CHAT", conversational: decision.action === "reply", validated: decision.action !== "unavailable" };
+        } else if (event.type === "meta") {
+          yield { ...event, route: "CHAT", conversational: decision.action === "reply" };
+          if (signal.aborted) break;
+          if (decision.action === "clarify") {
+            clarificationDelivered = true;
+            yield {
+              type: "clarification_needed", message_id: context.assistantMsgId, intent: clarification.intent,
+              missing_fields: clarification.missingFields, prompt_message: clarification.promptMessage, hints: clarification.hints,
+            };
+          } else if (decision.action === "unavailable") {
+            yield { type: "error", content: decision.answer };
+          }
+        } else {
+          yield event;
+        }
+      }
+    } finally {
+      await persist();
+      agentRequestDurationMs.observe({ route: "CHAT", phase: "ttlt" }, Date.now() - started);
+      trace.update({
+        output: { answer }, metadata: {
+          action: decision.action, source: decision.source, reasoning: decision.reasoning,
+          status: completed ? "completed" : "interrupted",
+        },
+      });
     }
   }
 

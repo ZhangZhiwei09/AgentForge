@@ -99,6 +99,28 @@ export const agentRouteClassificationTotal = new Counter({
   registers: [registry],
 });
 
+export const agentEntryDecisionsTotal = new Counter({
+  name: "agent_entry_decisions_total",
+  help: "Enterprise entry decisions by action and explicit source",
+  labelNames: ["action", "source"],
+  registers: [registry],
+});
+
+export const agentBusinessClassificationCallsTotal = new Counter({
+  name: "agent_business_classification_calls_total",
+  help: "Business classification provider calls by outcome",
+  labelNames: ["outcome"],
+  registers: [registry],
+});
+
+export const agentBusinessClassificationDurationMs = new Histogram({
+  name: "agent_business_classification_duration_ms",
+  help: "Business classification provider call duration",
+  labelNames: ["outcome"],
+  buckets: [10, 50, 100, 250, 500, 1000, 2500, 5000, 10000],
+  registers: [registry],
+});
+
 /** Agent Runtime 路由分类置信度分布 */
 export const agentRouteConfidence = new Histogram({
   name: "agent_route_confidence",

@@ -40,7 +40,7 @@ vi.mock("../../../../db.js", () => ({
 const mockKBSearch = vi.fn();
 vi.mock("../../../knowledge.js", () => ({
   KnowledgeService: class {
-    search = mockKBSearch;
+    searchWithRerank = mockKBSearch;
   },
 }));
 

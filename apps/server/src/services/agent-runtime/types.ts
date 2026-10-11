@@ -7,6 +7,7 @@ import type {
   CitationCard,
   TraceStep,
   EntryHandoff,
+  EntryRouteResult,
 } from "@agentforge/shared-types";
 import type { ExecutionScope } from "../../runtime/scope.js";
 
@@ -14,12 +15,62 @@ import type { ExecutionScope } from "../../runtime/scope.js";
 
 export type RouteName = "SAFETY" | "CHAT" | "TASK" | "HUMAN" | "DIAGNOSIS";
 
+export type BusinessIntent = "consultation" | "diagnosis";
+export type EntryDecisionSource =
+  | "safety_rule"
+  | "control_rule"
+  | "session_state"
+  | "entry_flow"
+  | "conversational_rule"
+  | "business_llm";
+
+export type BusinessIntentResult =
+  | { intent: BusinessIntent; resolvedQuery: string; reasoning: string }
+  | { intent: "unclear"; resolvedQuery: string; reasoning: string; clarification: string };
+
+export type BusinessClassificationResult =
+  | { status: "valid"; result: BusinessIntentResult }
+  | { status: "unavailable"; reason: "provider_error" | "invalid_response" };
+
+export type EntryDecision = {
+  source: EntryDecisionSource;
+  reasoning: string;
+} & (
+  | {
+      action: "dispatch";
+      route: RouteName;
+      businessIntent?: BusinessIntent;
+      resolvedQuery?: string;
+      handoff?: EntryHandoff;
+    }
+  | { action: "reply" | "clarify" | "unavailable"; answer: string; suggestions: string[] }
+);
+
+export interface EntryDecisionInput {
+  message: string;
+  history: ChatMessage[];
+  safetyDecision: RouterDecision | null;
+  waitingDiagnosis: boolean;
+  loadEntryResult: () => Promise<EntryRouteResult | null>;
+  cancelWaitingDiagnosis: () => Promise<boolean>;
+  conversationalReply: { answer: string; suggestions: string[] } | null;
+  modelId: string | null;
+  trace?: import("../../observability/provider.js").ObservabilityTrace;
+  signal?: AbortSignal;
+  classify?: (
+    message: string,
+    history: ChatMessage[],
+    modelId: string | null,
+    trace?: import("../../observability/provider.js").ObservabilityTrace,
+  ) => Promise<BusinessClassificationResult>;
+}
+
 export interface RouterDecision {
   route: RouteName;
   confidence: number; // 0.0 ~ 1.0
   reasoning: string; // 简短分类理由，用于审计/debug
   escalationReason?: string; // HUMAN 路由时的升级原因
-  source?: "entry_flow";
+  source?: EntryDecisionSource;
 }
 
 // ── KB 结果 ──
@@ -79,6 +130,8 @@ export interface RouteContext {
   withinServiceHours: boolean;
   assistantMsgId: string;
   intent: string;
+  /** Query resolved from the same entry classification; consumed by consultation. */
+  resolvedQuery?: string;
   /** KnowledgeContext 结构化结果（由 KnowledgeContextBuilder 构建） */
   knowledge?: KnowledgeContext;
   /** Trusted published entry-flow configuration; never supplied by a chat request. */

@@ -1,9 +1,10 @@
 # AgentForge 路由架构
 
-> **可配置一级流程 + L2～L5 智能路由**，保留 SAFETY / CHAT / TASK / HUMAN / DIAGNOSIS 五个处理入口。
+> **规则优先 + 一次业务模型分类**，默认使用企业知识咨询与故障排查入口。
 >
-> 未启用一级流程时使用原问候快通道和完整 L1～L5；启用后由发布快照返回 reply、route 或 continue。
-> 安全检查及等待补充的诊断优先。一级流程加载或记录保存失败明确报错。
+> 新入口直接替换旧五层路由，不需要环境开关。SAFETY / CHAT / TASK / HUMAN / DIAGNOSIS 保留为执行与协议标签。
+> 规则优先级：安全 → 明确人工/取消 → 等待诊断 → 已发布配置 → 精确问候 → 模型分类。
+> 模型区分 consultation / diagnosis / unclear；不明确则澄清，服务失败则提示不可用。
 
 ---
 
@@ -15,26 +16,30 @@
   ▼
 AgentRuntimeService.streamChat()
   │
-  ├── 安全检查 → SAFETY；等待补充 → 原诊断续跑（保留 HUMAN 例外）
+  ├── 安全检查 → SAFETY
+  ├── 明确转人工 → HUMAN；取消排查 → 取消本会话等待任务并如实回复
+  ├── 等待补充 → 原诊断快照续跑
   │
-  ├── 已启用一级流程 → TS 确定性条件图
+  ├── 已发布一级流程 → TS 确定性条件图
   │   ├─ reply → 配置正文、建议问题、保存历史；无模型/工具/记忆注入
-  │   ├─ route → 直接分发 CHAT / TASK / HUMAN / DIAGNOSIS
-  │   └─ continue → classifyFromL2()
+  │   ├─ route → 校验请求与配置分流一致后分发；冲突则明确提示配置错误
+  │   └─ continue → 一次业务模型分类
   │
-  └── 未启用一级流程 → 原问候快通道 → classify()
-      └─ L1：SAFETY > HUMAN > DIAGNOSIS 关键词扫描
+  └── 没有已发布流程 → 精确问候直接回复；其余进入一次业务模型分类
   │
   ▼
-共享后续管线：
-  L2：语义样本检索 → 高置信度直接返回
-  L3：中置信度且有样本 → Few-Shot 模型
-  L4：模型分类
-  L5：IntentDetector 正则兜底
+classifyBusinessIntent(当前消息 + 最近四条用户/助手历史)：
+  consultation → TASK
+  diagnosis → DIAGNOSIS
+  unclear → Runtime 直接澄清
+  provider 错误或非法输出 → Runtime 明确提示不可用
   │
   ▼
 resolveAgent(route) → 现有 Agent 执行 → 消息与引用等后处理
 ```
+
+入口不再实例化 QueryRouter，也不调用 L2 意图向量分类或电商 IntentDetector。
+知识库向量检索仍保留。当前 TASK 仍复用 AgentExecutor，其内部复杂度分类将在后续咨询执行器改造中移除；入口一次分类不等于完整请求只调用一次模型。
 
 ---
 
@@ -44,11 +49,12 @@ resolveAgent(route) → 现有 Agent 执行 → 消息与引用等后处理
 |---|---|
 | `apps/server/src/services/entry-route-flows/` | 条件 DSL、图校验、执行、发布快照和运行记录 |
 | `apps/server/src/routes/entry-route-flows.ts` | TS 原生管理员配置与试运行接口 |
-| `apps/server/src/services/agent-runtime/routing/pipeline.ts` | 共享 L1～L5 管线及 L2 起点 |
-| `apps/server/src/services/agent-runtime/router.ts` | 兼容导出 |
-| `apps/server/src/services/agent-runtime.ts` | 会话管理、一级决策、Agent 分发和消息保存 |
+| `apps/server/src/services/agent-runtime/entry-decision.ts` | 安全、控制、状态、配置、问候与一次业务分类的统一决策 |
+| `apps/server/src/services/agent-runtime/routing/business-classifier.ts` | 中文模型提示词、最近四条历史、输出结构校验 |
+| `apps/server/src/services/agent-runtime/routing/l1-keyword.ts` | 主入口复用 safetyRouteScan；旧业务关键词扫描不参与主入口 |
+| `apps/server/src/services/agent-runtime.ts` | 会话管理、统一入口、Agent 分发、SSE、审计和消息保存 |
 | `apps/server/src/services/agent-runtime/types.ts` | 内部上下文和 SSE 契约 |
-| `apps/server/src/services/intent-detector.ts` | L5 意图兜底 |
+| `apps/server/src/services/intent-detector.ts` | 仍有 analytics 消费者，主入口不调用 |
 | `apps/server/src/services/agent-runtime/task-intent.ts` | TASK 内部二次分类 |
 | `apps/server/src/services/agent-runtime/safety-agent.ts` | 安全拒绝 |
 | `apps/server/src/services/agent-runtime/chat-agent.ts` | 普通问答 |
@@ -69,16 +75,16 @@ export type RouteName = "SAFETY" | "CHAT" | "TASK" | "HUMAN" | "DIAGNOSIS";
 | 路由 | 触发条件 | 执行 Agent | LLM 调用 |
 |---|---|---|---|
 | **SAFETY** | 越狱、攻击、辱骂、诈骗、色情、暴力 | SafetyAgent | 无（静态拒绝） |
-| **CHAT** | 问候、感谢、道别、能力询问、闲聊 | ChatAgent | 1 次 (chatSync, jsonMode) |
-| **TASK** | 业务问题、知识查询、需要工具的任务 | AgentExecutor (ReAct) | N 次 (ReAct 循环) |
-| **HUMAN** | 明确要求转人工、投诉升级 | HumanAgent | 无（消息模板） |
-| **DIAGNOSIS** | 核身故障、错误码及系统排查 | DiagnosisRouteAgent | N 次（多阶段分析） |
+| **CHAT** | 固定回复、精确问候、澄清与不可用输出；也支持有效配置分发 | Runtime 直接响应；配置分发时 ChatAgent | 直接响应无调用；配置分发时 1 次 |
+| **TASK** | consultation 或已发布配置的咨询分流 | 当前 AgentExecutor | 内部分类及回答/工具调用，尚待专用咨询执行器改造 |
+| **HUMAN** | 明确请求人工支持 | HumanAgent | 无（消息模板） |
+| **DIAGNOSIS** | 具体故障排查意图、等待排查续跑或有效配置分流 | DiagnosisRouteAgent | N 次（多阶段分析） |
 
 ---
 
-## 4. 兼容管线详解
+## 4. 历史模块
 
-本节描述一级流程未启用时的兼容路径。启用后仅 SAFETY 和等待诊断的生命周期例外保留，业务 L1 与问候快通道由一级流程取代。
+本节记录仓库仍存在的旧分类模块，供独立测试与脚本定位。它们已经退出主聊天入口，无法通过环境开关或停用一级流程恢复为聊天主链。以下算法和阈值是历史模块行为，不代表当前请求流程。
 
 L2 为 Embedding 样本检索：置信度 >= 0.8 直接采纳；0.5～0.8 且有样本时进入 L3 Few-Shot。L3 和 L4 的普通路由门槛为 0.5，DIAGNOSIS 为 0.7。未获得可接受结果时进入 L5，原算法、提示词和阈值均保持。
 
@@ -86,7 +92,7 @@ L2 为 Embedding 样本检索：置信度 >= 0.8 直接采纳；0.5～0.8 且有
 
 **位置**: `agent-runtime.ts:85-111`
 
-未启用一级流程且没有安全命中或等待任务时，用精确正则匹配问候/感谢/告别：
+当前无发布流程、没有安全命中或等待任务时，精确问候仍由统一决策处理。历史问候快通道曾独立于入口保存消息，现在固定回复统一经 `streamEntryResponse` 保存：
 
 ```typescript
 const CONVERSATIONAL_RULES: ConversationalRule[] = [
@@ -97,7 +103,7 @@ const CONVERSATIONAL_RULES: ConversationalRule[] = [
 ```
 
 - 命中 → 直接流式返回静态文案，跳过路由器和所有 Agent
-- 不命中 → 进入路由器分类管线
+- 不命中 → 当前入口进入一次业务模型分类
 - 设计意图：最常见的社交消息走零延迟通道，避免浪费 LLM Token
 
 ### 4.2 第一层：Rule First（quickRouteScan）
@@ -234,24 +240,20 @@ const INTENT_TO_ROUTE: Record<string, RouteName> = {
 
 ## 5. 分类来源标记与可观测性
 
-每次分类完成后，`agent-runtime.ts:390-402` 记录分类来源：
+统一入口返回显式 `action` 和 `source`，Runtime 直接使用来源标签：
 
 ```typescript
-const source = decision.source ?? (decision.reasoning.includes("关键词命中")
-  ? "keyword"
-  : decision.reasoning.includes("L2语义匹配") ? "l2_semantic"
-  : decision.reasoning.includes("L3少样本增强") ? "l3_fewshot"
-  : decision.reasoning.includes("fallback") ? "fallback"
-  : "llm");
-
-agentRouteClassificationTotal.inc({ route: decision.route, source });
-agentRouteConfidence.observe({ route: decision.route }, decision.confidence);
+const route = decision.action === "dispatch" ? decision.route : "CHAT";
+agentEntryDecisionsTotal.inc({ action: decision.action, source: decision.source });
+agentRouteClassificationTotal.inc({ route, source: decision.source });
+if (decision.source !== "business_llm") {
+  agentRouteConfidence.observe({ route }, 1);
+}
 ```
 
-配置分流与固定回复显式使用 `source=entry_flow`；固定回复兼容 CHAT 指标，运行记录另存 `action=reply`。确定性判断的 1.0 置信度不代表答案质量。`continue` 保留实际后续分类来源。原有指标继续可用：
-- **keyword** — 规则命中率（追求高比例 = 降低 LLM 成本）
-- **llm** — LLM 分类率（正常补充）
-- **fallback** — 降级率（告警阈值，表示 LLM 调用质量异常）
+来源包括 `safety_rule`、`control_rule`、`session_state`、`entry_flow`、`conversational_rule` 和 `business_llm`。直接回复兼容 CHAT 标签，动作由入口指标及消息 metadata 区分。
+
+`recordEntryAudit` 保存路由来源，写入失败记录日志并继续响应；取消发生在审计期间则停止分发。模型结果的旧 confidence 必填列记为 0，表示未知占位，不作为概率，也不计入 confidence histogram。分类模型次数及耗时由独立指标记录。
 
 ---
 
@@ -334,19 +336,18 @@ type RouteStreamEvent =
 
 | 维度 | 纯 LLM | Rule First + LLM Fallback |
 |---|---|---|
-| **SAFETY 延迟** | ~500ms（LLM 调用） | < 1ms（正则匹配） |
-| **HUMAN 延迟** | ~500ms | < 1ms |
-| **SAFETY 可靠性** | LLM 可能被注入绕过 | 正则确定性匹配，不可绕过 |
-| **CHAT/TASK 区分** | 需要 LLM 语义理解 | 规则做不了，交给 LLM |
-| **成本** | 每条消息都调 LLM | 规则命中时不调 LLM（~15-30% 消息） |
-| **降级保障** | LLM 挂了全挂 | 三层保障，LLM 挂了还有正则兜底 |
+| **明确控制请求** | 依赖模型识别 | 规则直接处理人工与取消 |
+| **等待任务** | 可能重新分类 | 可信会话状态优先恢复 |
+| **安全检查** | 依赖模型判断 | 复用安全规则；规则覆盖范围仍需验证 |
+| **咨询/排查区分** | 模型判断 | 规则未确定时，结合历史做一次模型分类 |
+| **成本** | 每条消息都分类 | 命中确定规则时不调用分类模型；比例未测量 |
+| **模型失败** | 需要设计异常处理 | 明确提示不可用，不伪装咨询成功或回旧路由 |
 
-### 为何五路由而非两路由（TASK / NON_TASK）？
+### 两个业务意图与五个执行标签
 
-1. **SAFETY 需要独立路径** — 安全拦截不能与普通路由混在一起，需要独立的审计日志和零延迟保证
-2. **HUMAN 需要状态变更** — 转人工不只是消息回复，还需要更新会话状态为 `escalated`、记录升级事件
-3. **CHAT 与 TASK 资源消耗不同** — CHAT 不需要 KB 搜索和工具调用，独立路径可避免不必要的资源开销
-4. **DIAGNOSIS 需要独立分析流程** — 身份诊断涉及多阶段分析和不同的 Prompt 策略，与 TASK 的 ReAct 循环模式不同
+业务分类只有 consultation、diagnosis，以及意图不明时的 unclear。SAFETY、HUMAN 和固定回复属于控制与响应行为；五个执行标签保留已有 API 与 Agent 注册表契约，不表示仍使用五层分类。
+
+现有诊断执行器与知识咨询能力继续复用；统一咨询执行、监控事实契约和业务可读报告属于后续单元，本次入口替换不代表这些能力已经完成。
 
 ---
 

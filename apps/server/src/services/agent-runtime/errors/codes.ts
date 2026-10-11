@@ -50,6 +50,7 @@ export const ErrorCode = {
   AR_SESSION_LOCK_TIMEOUT: "AR_SESSION_LOCK_TIMEOUT",
   /** 编排器持久化助手消息失败（可能 Agent 已写入） */
   AR_MSG_PERSIST_FAILED: "AR_MSG_PERSIST_FAILED",
+  AR_ROUTE_AUDIT_FAILED: "AR_ROUTE_AUDIT_FAILED",
 
   // ── Router ──
   /** L2 SemanticClassifier 分类异常，降级到 LLM Router */
@@ -66,6 +67,7 @@ export const ErrorCode = {
   RT_L4_LLM_FAILED: "RT_L4_LLM_FAILED",
   /** L4 置信度过低，降级到 L5 */
   RT_L4_LOW_CONFIDENCE: "RT_L4_LOW_CONFIDENCE",
+  RT_BUSINESS_CLASSIFY_FAILED: "RT_BUSINESS_CLASSIFY_FAILED",
 
   // ── HumanAgent ──
   /** 人工转接时更新会话状态失败（非阻塞） */
