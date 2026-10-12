@@ -1,0 +1,60 @@
+# Python Backend Migration
+
+The Python backend is being expanded to replace the TypeScript API. The first
+completed capability is public authentication: signup, signin, refresh rotation,
+signout, current user and API key management. These use the existing PostgreSQL
+`users`, `refresh_tokens` and `api_keys` tables; existing passwords and tokens are
+supported. Signout revokes all refresh sessions for the authenticated user.
+Existing access tokens remain valid until expiry.
+
+Python also owns the entry-route flow management API and enterprise entry
+decisions for authenticated chat. The editor keeps its existing camelCase DTOs,
+draft revisions, publication, activation, test runs and redacted audit records.
+Signed-in chat applies safety and explicit controls first, resumes owned waiting
+diagnoses, executes a published entry flow, then makes at most one business
+classification call. Fixed replies do not need a model provider. Replies retain
+entry provenance and clarification/diagnosis metadata in message history.
+
+Configured diagnosis runs reuse the existing Python flow runtime directly.
+TASK consultation still uses the existing executor pending complete knowledge
+consultation parity. Anonymous chat, session/approval APIs, the complete
+citation/timeline/cancellation contract, knowledge administration, ingestion
+workers and other public APIs remain to migrate. The default `pnpm dev` continues
+to start both backends until the complete public API has passed acceptance.
+
+From this directory:
+
+```powershell
+uv sync
+uv run python -m src.dev --public
+```
+
+The public Python entry defaults to port `8000`. If occupied, select another:
+
+```powershell
+uv run python -m src.dev --public --port 8006 --no-reload
+```
+
+Configuration precedence is process environment, `apps/server-py/.env`, root
+`.env`, then `apps/server/.env` as a temporary migration fallback. The Python
+entry can run with only its own configuration; it does not contact the Node
+server. `DATABASE_URL` accepts PostgreSQL URLs and is normalized to `asyncpg`.
+Use `JWT_SECRET` matching existing credentials when retaining user sessions.
+Set `CORS_ORIGINS` to a comma-separated list of frontend origins; an empty value
+disables cross-origin access.
+
+The existing flow entry remains `uv run python -m src.dev`, on port `8004`.
+From the repository root, `pnpm py:api` starts the migrating public Python entry
+and `pnpm py:dev` starts the flow service.
+
+Focused validation:
+
+```powershell
+uv run pytest -p no:cacheprovider tests/test_auth.py tests/test_auth_api.py tests/test_platform_dev.py tests/test_config.py
+uv run pytest -p no:cacheprovider tests/test_entry_flows.py tests/test_entry_flow_api.py tests/test_entry_decision.py tests/test_business_classifier.py tests/test_entry_chat_api.py
+```
+
+HTTP authentication and entry/chat tests create isolated SQLite databases.
+They never migrate or modify the configured PostgreSQL database. PostgreSQL
+activation locks, diagnosis checkpoints and complete frontend acceptance are
+still required before the full backend cutover.

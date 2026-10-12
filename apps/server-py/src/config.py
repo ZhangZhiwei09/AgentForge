@@ -7,13 +7,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """应用配置，每个环境变量一个字段，均有合理默认值。"""
 
-    model_config = SettingsConfigDict(env_file=".env")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     # ── 数据库 ──────────────────────────────────────────
     # 端口 5434 与 TS 项目保持一致，避免冲突
     # 使用 +asyncpg 指定异步驱动（sync 连接用 psycopg2，async 用 asyncpg）
     database_url: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@localhost:5434/agentforge_py"
+        default="postgresql+asyncpg://postgres:postgres@localhost:5434/agentforge"
     )
 
     # ── Redis ───────────────────────────────────────────
@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     # ── Server ──────────────────────────────────────────
     port: int = Field(default=8000)
     debug: bool = Field(default=False)
+    cors_origins: str = Field(default=(
+        "http://localhost:5173,http://localhost:5174,http://localhost:5175,"
+        "http://localhost:5200,http://localhost:5201,http://localhost:3000"
+    ))
 
 
 # 模块级单例 —— import 即加载 .env，进程内唯一

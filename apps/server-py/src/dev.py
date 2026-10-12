@@ -1,4 +1,4 @@
-"""Start the platform runtime with the public server's database, auth and model."""
+"""Start Python as a flow service or the migrating public backend."""
 
 import argparse
 import os
@@ -9,12 +9,19 @@ from pathlib import Path
 from dotenv import dotenv_values
 
 SERVER_ENV = Path(__file__).resolve().parents[2] / "server" / ".env"
+PYTHON_ENV = Path(__file__).resolve().parents[1] / ".env"
+ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
 
 
 def platform_environment(
     environment: Mapping[str, str], server_env: Path = SERVER_ENV,
+    *, env_files: tuple[Path, ...] | None = None,
 ) -> dict[str, str]:
-    configured = dotenv_values(server_env)
+    configured: dict[str, str] = {}
+    for path in env_files if env_files is not None else (server_env,):
+        configured.update({
+            key: value for key, value in dotenv_values(path).items() if value is not None
+        })
     shared = {**configured, **environment}
     database = environment.get("DATABASE_URL") or configured.get("DATABASE_URL")
     database = database or "postgresql://postgres:postgres@127.0.0.1:5434/agentforge"
@@ -29,6 +36,8 @@ def platform_environment(
         if deepseek else shared.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
     )
     return {
+        **configured,
+        **{key: environment[key] for key in configured if key in environment},
         "DATABASE_URL": f"postgresql+asyncpg://{address}",
         "JWT_SECRET": environment.get("JWT_SECRET") or configured.get("JWT_SECRET")
         or "agentforge-dev-secret-change-in-production",
@@ -40,18 +49,32 @@ def platform_environment(
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--port", type=int, default=8004)
+    parser.add_argument("--port", type=int)
+    parser.add_argument(
+        "--public", action="store_true",
+        help="Use Python-owned configuration and public port (default 8000). "
+        "Business API migration is still in progress.",
+    )
     parser.add_argument("--no-reload", action="store_true")
     arguments = parser.parse_args()
-    # Reload workers inherit these overrides; standalone src.main keeps its own .env.
-    os.environ.update(platform_environment(os.environ))
+    files = (SERVER_ENV, ROOT_ENV, PYTHON_ENV) if arguments.public else (SERVER_ENV,)
+    overrides = platform_environment(os.environ, env_files=files)
+    # Process environment always wins over files, including non-model settings.
+    os.environ.update({key: value for key, value in overrides.items() if key not in os.environ})
+    # These fields additionally normalize URL schemes and provider credentials.
+    for key in ("DATABASE_URL", "JWT_SECRET", "DEFAULT_MODEL", "OPENAI_API_KEY", "OPENAI_BASE_URL"):
+        os.environ[key] = overrides[key]
+    port = arguments.port
+    if port is None:
+        port = int(os.environ.get("PORT", "8000")) if arguments.public else 8004
+    os.environ["PORT"] = str(port)
     if sys.platform == "win32":
         import asyncio
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     import uvicorn
     uvicorn.run(
-        "src.main:app", host="0.0.0.0", port=arguments.port,
-        reload=not arguments.no_reload, loop="none",
+        "src.main:app", host="0.0.0.0", port=port,
+        reload=not arguments.no_reload, loop="none", access_log=False,
     )
 
 

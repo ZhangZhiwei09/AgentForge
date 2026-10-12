@@ -92,13 +92,16 @@ async def create_run(
     return run
 
 
-async def claim_diagnosis(context: RouteContext, actor_id: str) -> tuple[AgentFlowRun | None, bool]:
+async def claim_diagnosis(
+    context: RouteContext, actor_id: str, *, require_waiting: bool = False,
+) -> tuple[AgentFlowRun | None, bool]:
     async with async_session() as db:
         # A transaction-scoped lock serializes flow selection/resume across workers.
         from sqlalchemy import text
-        await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {
-            "key": f"agent-flow-conversation:{context.conversation_id}",
-        })
+        if db.get_bind().dialect.name == "postgresql":
+            await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {
+                "key": f"agent-flow-conversation:{context.conversation_id}",
+            })
         waiting = (await db.execute(select(AgentFlowRun).where(
             AgentFlowRun.conversation_id == context.conversation_id,
             AgentFlowRun.actor_id == actor_id, AgentFlowRun.test.is_(False),
@@ -108,6 +111,8 @@ async def claim_diagnosis(context: RouteContext, actor_id: str) -> tuple[AgentFl
             waiting.status = "running"
             await db.commit()
             return waiting, True
+        if require_waiting:
+            raise HTTPException(409, "等待排查状态已变化，请重新发送")
         running = (await db.execute(select(AgentFlowRun.id).where(
             AgentFlowRun.conversation_id == context.conversation_id,
             AgentFlowRun.test.is_(False), AgentFlowRun.status == "running",

@@ -2,8 +2,6 @@
 
 import os
 
-import pytest
-
 from src.config import Settings
 
 
@@ -70,3 +68,9 @@ class TestSettings:
     def test_model_config_env_file(self):
         """应配置从 .env 文件加载。"""
         assert Settings.model_config.get("env_file") == ".env"
+
+    def test_shared_env_accepts_not_yet_migrated_settings(self, tmp_path):
+        config = tmp_path / "shared.env"
+        config.write_text("ELASTICSEARCH_URL=http://localhost:9200\nMINIO_BUCKET=documents\n")
+        loaded = Settings(_env_file=config)
+        assert loaded.port == 8000

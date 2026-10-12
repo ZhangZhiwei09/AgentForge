@@ -108,7 +108,7 @@ class ContextBuilder:
         )
 
     async def build(
-        self, conversation_id: str, user_message: str
+        self, conversation_id: str, user_message: str, *, exclude_message_id: str | None = None
     ) -> ContextResult:
         """组装 Agent 上下文。
 
@@ -124,6 +124,8 @@ class ContextBuilder:
 
         # ── 2. 加载最近消息（Redis 窗口优先，miss/stale/异常 → PG）──
         recent_messages = await self._load_recent_messages_or_redis(conversation_id)
+        if exclude_message_id is not None:
+            recent_messages = [msg for msg in recent_messages if msg.id != exclude_message_id]
 
         # ── 3. 构建 System Prompt ──
         system_content = self._system_prompt

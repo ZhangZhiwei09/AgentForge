@@ -39,6 +39,7 @@ def _serialize_message(m: Message) -> dict:
         "type": m.type,
         "content": m.content,
         "timestamp": m.created_at.isoformat(),
+        "metadata": m.msg_metadata,
     }
 
 

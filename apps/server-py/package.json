@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "uv run python -m src.dev",
+    "dev:public": "uv run python -m src.dev --public",
     "test": "uv run pytest",
     "lint": "uv run ruff check src/ tests/"
   }

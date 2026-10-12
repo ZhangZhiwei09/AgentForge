@@ -100,3 +100,84 @@ def test_platform_reads_openai_credentials_for_other_models(tmp_path):
     result = platform_environment({}, config)
     assert result["OPENAI_API_KEY"] == "openai-test-key"
     assert result["OPENAI_BASE_URL"] == "https://compatible.example.com/v1"
+
+
+def test_python_config_overrides_legacy_and_root_files_without_modifying_them(tmp_path):
+    legacy, root, python = (tmp_path / name for name in ("legacy.env", "root.env", "python.env"))
+    legacy.write_text("JWT_SECRET=legacy\nDEFAULT_MODEL=legacy-model\nREDIS_URL=redis://legacy\n")
+    root.write_text("JWT_SECRET=root\nDEFAULT_MODEL=root-model\n")
+    python.write_text("JWT_SECRET=python\nDEFAULT_MODEL=python-model\nCORS_ORIGINS=http://localhost:5200\n")
+    contents = [path.read_text() for path in (legacy, root, python)]
+    result = platform_environment({}, env_files=(legacy, root, python))
+    assert result["JWT_SECRET"] == "python"
+    assert result["DEFAULT_MODEL"] == "python-model"
+    assert result["REDIS_URL"] == "redis://legacy"
+    assert result["CORS_ORIGINS"] == "http://localhost:5200"
+    assert [path.read_text() for path in (legacy, root, python)] == contents
+
+
+def test_public_config_does_not_require_node_server_env(tmp_path):
+    python = tmp_path / "python.env"
+    python.write_text("DATABASE_URL=postgresql://python:password@localhost/platform\nJWT_SECRET=python\n")
+    result = platform_environment(
+        {}, env_files=(tmp_path / "missing-legacy.env", tmp_path / "missing-root.env", python),
+    )
+    assert result["DATABASE_URL"] == "postgresql+asyncpg://python:password@localhost/platform"
+    assert result["JWT_SECRET"] == "python"
+
+
+def test_non_model_process_configuration_has_highest_priority(tmp_path):
+    python = tmp_path / "python.env"
+    python.write_text("REDIS_URL=redis://file\nCORS_ORIGINS=http://file\nDEBUG=false\n")
+    result = platform_environment(
+        {"REDIS_URL": "redis://process", "CORS_ORIGINS": "http://process", "DEBUG": "true"},
+        env_files=(python,),
+    )
+    assert result["REDIS_URL"] == "redis://process"
+    assert result["CORS_ORIGINS"] == "http://process"
+    assert result["DEBUG"] == "true"
+
+
+def test_public_launch_uses_python_config_and_explicit_port(tmp_path, monkeypatch):
+    import sys
+
+    import uvicorn
+
+    from src import dev
+
+    python = tmp_path / "python.env"
+    python.write_text("PORT=8123\nJWT_SECRET=python-file\nREDIS_URL=redis://python\n")
+    monkeypatch.setattr(dev, "SERVER_ENV", tmp_path / "missing-legacy.env")
+    monkeypatch.setattr(dev, "ROOT_ENV", tmp_path / "missing-root.env")
+    monkeypatch.setattr(dev, "PYTHON_ENV", python)
+    monkeypatch.setattr(sys, "argv", ["dev", "--public", "--no-reload", "--port", "8124"])
+    calls = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+    # main writes process configuration; keep it isolated from later tests.
+    monkeypatch.setattr("os.environ", {})
+    dev.main()
+    assert calls == [(("src.main:app",), {
+        "host": "0.0.0.0", "port": 8124, "reload": False, "loop": "none", "access_log": False,
+    })]
+    assert dev.os.environ["PORT"] == "8124"
+    assert dev.os.environ["JWT_SECRET"] == "python-file"
+    assert dev.os.environ["REDIS_URL"] == "redis://python"
+
+
+def test_legacy_flow_launch_keeps_8004_even_when_server_env_has_public_port(tmp_path, monkeypatch):
+    import sys
+
+    import uvicorn
+
+    from src import dev
+
+    legacy = tmp_path / "legacy.env"
+    legacy.write_text("PORT=8000\n")
+    monkeypatch.setattr(dev, "SERVER_ENV", legacy)
+    monkeypatch.setattr(sys, "argv", ["dev", "--no-reload"])
+    calls = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+    monkeypatch.setattr("os.environ", {})
+    dev.main()
+    assert calls[0][1]["port"] == 8004
+    assert dev.os.environ["PORT"] == "8004"

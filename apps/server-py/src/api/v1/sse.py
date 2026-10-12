@@ -6,6 +6,7 @@
 import functools
 import json
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 
 from src.agent.types import (
     ClarificationNeeded,
@@ -48,6 +49,8 @@ def _(event: StreamDone) -> dict:
         "validated": event.validated,
         "fallback_used": event.fallback_used,
         "route": event.route,
+        "source": event.source,
+        "conversational": event.conversational,
     }
 
 
@@ -69,6 +72,8 @@ def _(event: StreamMeta) -> dict:
         "intent": getattr(event, "intent", ""),
         "within_service_hours": getattr(event, "within_service_hours", None),
         "memory_count": getattr(event, "memory_count", 0),
+        "source": event.source,
+        "conversational": event.conversational,
     }
 
 
@@ -117,6 +122,7 @@ def _(event: DiagnosisWaitingInput) -> dict:
 
 async def _to_sse(events: AsyncIterator) -> AsyncIterator[str]:
     """将 Agent 事件流转为 SSE 格式字符串流。"""
-    async for event in events:
-        payload = json.dumps(_sse_payload(event), ensure_ascii=False)
-        yield f"data: {payload}\n\n"
+    async with aclosing(events):
+        async for event in events:
+            payload = json.dumps(_sse_payload(event), ensure_ascii=False)
+            yield f"data: {payload}\n\n"

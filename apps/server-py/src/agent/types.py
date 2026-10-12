@@ -53,6 +53,8 @@ class StreamMeta:
     intent: str = ""
     within_service_hours: bool = True
     memory_count: int = 0
+    source: str = ""
+    conversational: bool = False
 
 
 @dataclass(slots=True)
@@ -73,6 +75,8 @@ class StreamDone:
     validated: bool = True
     fallback_used: bool = False
     route: str = ""
+    source: str = ""
+    conversational: bool = False
 
 
 @dataclass(slots=True)

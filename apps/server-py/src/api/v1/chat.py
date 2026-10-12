@@ -2,7 +2,7 @@
 
 流程:
     用户消息 → get_or_create_conversation → 保存用户消息
-    → Router(L1关键词) → AgentExecutor(ReAct) → SSE Stream
+    → 企业入口决策 → 现有 AgentExecutor / 配置诊断 → SSE Stream
     → 保存助手消息 → 异步触发压缩检查
 
 路由:
@@ -20,49 +20,65 @@ import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from datetime import UTC, datetime
-from typing import TypeVar, cast
+from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from pydantic import Field as PydField
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.agent.chat_agent import ChatAgent
 from src.agent.context_builder import ContextBuilder
-from src.agent.diagnosis.route_agent import DiagnosisRouteAgent
+from src.agent.diagnosis.route_agent import DiagnosisRouteAgent, _check_info_sufficiency
 from src.agent.executor import AgentExecutor
+from src.agent.flows.diagnosis import diagnosis_events
+from src.agent.flows.service import claim_diagnosis
 from src.agent.redis_memory import mirror_message
-from src.agent.router.pipeline import QueryRouter
+from src.agent.router.entry_decision import (
+    EntryDecision,
+    conversational_reply,
+    decide_entry,
+    explicit_entry_control,
+    safety_route_scan,
+)
 from src.agent.tools.registry import tool_registry
 from src.agent.types import (
+    ClarificationNeeded,
+    DiagnosisCompleted,
+    DiagnosisWaitingInput,
     RouteContext,
     RouteName,
     RouterDecision,
     StreamDone,
+    StreamError,
+    StreamMeta,
     StreamToken,
 )
 from src.api.deps import get_current_user, get_db
 from src.api.v1.conversations import _find_conversation
 from src.api.v1.sse import _to_sse
 from src.config import settings
+from src.models.agent_flow import AgentFlowRun
 from src.models.chat import Conversation, Message
+from src.models.entry_flow import EntryRouteFlowRun
 from src.models.user import User
 from src.providers.registry import resolve_model
 from src.schemas.chat import ChatMessage, ChatRequest
+from src.services.entry_flows import EntryRouteFlowService, RunExecution
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar("T")
-
 # ── 模块级单例 ──
 _singletons: dict[type, object] = {}
 
 
-def _get_singleton(cls: type[T]) -> T:
+def _get_singleton[T](cls: type[T]) -> T:
     """惰性初始化并复用进程内单例。"""
     instance = _singletons.get(cls)
     if instance is None:
@@ -91,36 +107,6 @@ def _acquire_lock(conversation_id: str) -> asyncio.Lock:
     if conversation_id not in _conversation_locks:
         _conversation_locks[conversation_id] = asyncio.Lock()
     return _conversation_locks[conversation_id]
-
-
-def _to_router_history(msgs: list) -> list[ChatMessage]:
-    """从 ContextBuilder 组装的消息列表提取路由历史（供 L3/L4 用）。
-
-    - 跳过 SystemMessage（系统提示不是对话历史）
-    - 丢弃末尾当前用户消息（classify(message, history) 单独传 message，
-      L3/L4 会把它追加为最后一条，避免重复）
-    - 截取最近 router_llm_history_window 条
-    """
-    from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
-
-    out: list[ChatMessage] = []
-    for m in msgs:
-        if isinstance(m, SystemMessage):
-            continue
-        if isinstance(m, HumanMessage):
-            role = "user"
-        elif isinstance(m, AIMessage):
-            role = "assistant"
-        else:
-            role = getattr(m, "role", "")
-        content = str(m.content) if m.content else ""
-        if role and content:
-            out.append(ChatMessage(role=role, content=content))
-
-    if out and out[-1].role == "user":
-        out.pop()
-
-    return out[-settings.router_llm_history_window:]
 
 
 # ── 常量 ──────────────────────────────────────────────────────
@@ -212,6 +198,7 @@ def _select_events(
     resolved_model: str,
     provider_name: str,
     assistant_msg_id: str,
+    intent: str | None = None,
 ) -> AsyncIterator:
     """按路由决策选择对应的事件流。
 
@@ -255,7 +242,7 @@ def _select_events(
         resolved_model=resolved_model,
         provider_name=provider_name,
         assistant_msg_id=assistant_msg_id,
-        intent=route.value,
+        intent=intent or route.value,
     )
     return _get_executor().execute(context)
 
@@ -294,6 +281,8 @@ async def _save_assistant_message(
     assistant_msg_id: str,
     model_id: str,
     streamed_answer: list[str],
+    metadata: dict | None = None,
+    entry_run_id: str | None = None,
 ) -> None:
     """保存助手回复并镜像到 Redis；无输出时跳过。"""
     final_answer = "".join(streamed_answer)
@@ -307,12 +296,74 @@ async def _save_assistant_message(
         type="text",
         content=final_answer,
         model=model_id,
+        msg_metadata=metadata,
     )
     db.add(assistant_msg)
+    if entry_run_id is not None:
+        await db.execute(update(EntryRouteFlowRun).where(
+            EntryRouteFlowRun.id == entry_run_id,
+        ).values(assistant_message_id=assistant_msg_id))
     await db.commit()
 
     # 镜像到 Redis 短期记忆窗口（尽力而为，失败零影响）
     await mirror_message(db, conversation_id, assistant_msg)
+
+
+async def _waiting_diagnosis(db: AsyncSession, conversation_id: str, actor_id: str) -> bool:
+    return await db.scalar(select(AgentFlowRun.id).where(
+        AgentFlowRun.conversation_id == conversation_id, AgentFlowRun.actor_id == actor_id,
+        AgentFlowRun.test.is_(False), AgentFlowRun.status == "waiting_input",
+    ).limit(1)) is not None
+
+
+async def _cancel_waiting_diagnosis(db: AsyncSession, conversation_id: str, actor_id: str) -> bool:
+    ids = list(await db.scalars(update(AgentFlowRun).where(
+        AgentFlowRun.conversation_id == conversation_id, AgentFlowRun.actor_id == actor_id,
+        AgentFlowRun.test.is_(False), AgentFlowRun.status == "waiting_input",
+    ).values(status="cancelled", cancel_requested=True).returning(AgentFlowRun.id)))
+    await db.commit()
+    return bool(ids)
+
+
+async def _stream_entry_response(decision: EntryDecision, assistant_msg_id: str) -> AsyncIterator:
+    if decision.action == "clarify":
+        yield ClarificationNeeded(
+            message_id=assistant_msg_id, intent="unclear", missing_fields=["business_intent"],
+            prompt_message=decision.answer,
+        )
+    elif decision.action == "unavailable":
+        yield StreamError(content=decision.answer)
+    yield StreamToken(content=decision.answer, message_id=assistant_msg_id)
+    yield StreamDone(
+        message_id=assistant_msg_id, route="CHAT", usage={}, suggestions=decision.suggestions,
+        validated=decision.action != "unavailable", conversational=decision.action == "reply",
+    )
+
+
+async def _stream_diagnosis(context: RouteContext, actor_id: str, *, waiting: bool, cancel: asyncio.Event) -> AsyncIterator:
+    if not waiting:
+        info = _check_info_sufficiency(context.user_message)
+        if not info["sufficient"]:
+            yield ClarificationNeeded(
+                message_id=context.assistant_msg_id, intent=info["intent"],
+                missing_fields=info["missing_fields"], prompt_message=info["prompt_message"],
+                hints=info["hints"],
+            )
+            yield StreamToken(message_id=context.assistant_msg_id, content=info["prompt_message"])
+            yield StreamDone(message_id=context.assistant_msg_id, route="DIAGNOSIS", usage={})
+            return
+    run, resume = await claim_diagnosis(context, actor_id, require_waiting=waiting)
+    if waiting and (run is None or not resume):
+        # Do not start a different run if a waiting run was cancelled concurrently.
+        raise HTTPException(409, "等待排查状态已变化，请重新发送")
+    if run is not None:
+        async with aclosing(diagnosis_events(run, context, tool_registry, cancel, resume=resume)) as events:
+            async for event in events:
+                yield event
+    else:
+        async with aclosing(_get_diagnosis_agent().execute(context, tool_registry)) as events:
+            async for event in events:
+                yield event
 
 
 async def _handle_chat(
@@ -325,7 +376,6 @@ async def _handle_chat(
     """共享聊天处理：持久化 → Router → AgentExecutor → SSE → 保存回复。"""
     from src.observability import get_observability
 
-    resolved = resolve_model(model)
     assistant_msg_id = str(uuid.uuid4())
 
     # ── 1. 会话管理 ──
@@ -337,53 +387,150 @@ async def _handle_chat(
 
     async def _persisted_events():
         async with lock:
-            # ── 1. ContextBuilder 组装上下文（含摘要 + Token Budget）──
-            builder = ContextBuilder(db)
-            ctx_result = await builder.build(actual_conv_id, message)
-
-            # ── 2. 保存用户消息 ──
-            await _save_user_message(db, conv, message, resolved["model_id"])
-
-            # ── 3. 路由 + 选择 Agent 事件流 ──
-            # 按请求构造 router（携带 resolved model，供 L3/L4 LLM 分类）
-            router = QueryRouter(resolved["model_id"])
-            decision = await router.classify(
-                message, _to_router_history(ctx_result.messages)
-            )
-            events = _select_events(
-                decision,
-                conversation_id=actual_conv_id,
-                user_message=message,
-                prebuilt_messages=ctx_result.messages,
-                resolved_model=resolved["model_id"],
-                provider_name=resolved["provider_name"],
-                assistant_msg_id=assistant_msg_id,
-            )
-
-            # ── 4. Langfuse Trace + 流式输出 ──
-            obs = get_observability()
+            history_rows = list(await db.scalars(select(Message).where(
+                Message.conversation_id == actual_conv_id,
+                Message.role.in_(["user", "assistant"]), Message.type == "text",
+            ).order_by(Message.created_at.desc(), Message.id.desc()).limit(4)))
+            history = [ChatMessage(role=row.role, content=row.content) for row in reversed(history_rows)]
+            model_id = model or settings.default_model
+            user_message = await _save_user_message(db, conv, message, model_id)
+            service = EntryRouteFlowService(db)
+            entry_execution: RunExecution | None = None
+            cancel = asyncio.Event()
             streamed_answer: list[str] = []
+            metadata: dict = {}
+            saved = False
 
+            async def load_entry_result():
+                nonlocal entry_execution
+                snapshot = await service.active_snapshot()
+                if snapshot is None:
+                    return None
+                entry_execution = await service.execute(
+                    snapshot, message, user.id, conversation_id=actual_conv_id, cancel=cancel,
+                )
+                return entry_execution.execution.result
+
+            async def persist():
+                nonlocal saved
+                if saved or not streamed_answer:
+                    return
+                if entry_execution is not None:
+                    metadata["entryRoute"] = {
+                        "flowId": entry_execution.flow_id, "runId": entry_execution.run_id,
+                        "version": entry_execution.version,
+                    }
+                await _save_assistant_message(
+                    db, actual_conv_id, assistant_msg_id, model_id, streamed_answer, metadata,
+                    entry_execution.run_id if entry_execution is not None else None,
+                )
+                saved = True
+
+            obs = get_observability()
             async with obs.create_trace(
-                "chat-request",
-                input=message,
-                metadata={
-                    "route": decision.route.value,
-                    "model": resolved["model_id"],
-                    "conversation_id": actual_conv_id,
-                },
+                "chat-request", input=message, metadata={"conversation_id": actual_conv_id},
             ):
-                async for event in events:
-                    if isinstance(event, StreamToken):
-                        streamed_answer.append(event.content)
-                    yield event
-
-            # ── 5. 保存助手消息 ──
-            await _save_assistant_message(
-                db, actual_conv_id, assistant_msg_id, resolved["model_id"], streamed_answer
-            )
-
-            # ── 6. 异步压缩检查（非阻塞，失败不影响主流程）──
+                try:
+                    safety = safety_route_scan(message)
+                    waiting = False if safety or explicit_entry_control(message) == "human" else await _waiting_diagnosis(db, actual_conv_id, user.id)
+                    decision = await decide_entry(
+                        message, history, model, safety_decision=safety,
+                        waiting_diagnosis=waiting, load_entry_result=load_entry_result,
+                        cancel_waiting_diagnosis=lambda: _cancel_waiting_diagnosis(db, actual_conv_id, user.id),
+                        conversational=conversational_reply(message), cancel=cancel,
+                    )
+                except Exception as exc:  # noqa: BLE001 - Configuration/state failures must stop dispatch.
+                    await db.rollback()
+                    logger.warning("Entry decision unavailable conversation_id=%s error_type=%s", actual_conv_id, type(exc).__name__)
+                    decision = EntryDecision(
+                        "unavailable", "entry_flow", "配置加载或记录保存失败",
+                        answer="入口配置或运行记录暂不可用，请联系管理员检查配置。",
+                    )
+                route = decision.route
+                intent = decision.business_intent or ("unclear" if decision.action == "clarify" else route.value.lower())
+                metadata["entryDecision"] = {
+                    "action": decision.action, "source": decision.source, "reasoning": decision.reasoning,
+                }
+                events = None
+                provider_name = ""
+                try:
+                    if decision.action != "dispatch":
+                        events = _stream_entry_response(decision, assistant_msg_id)
+                    elif route in (RouteName.SAFETY, RouteName.HUMAN):
+                        events = _stream_safety(assistant_msg_id) if route == RouteName.SAFETY else _stream_human(assistant_msg_id)
+                    else:
+                        query = decision.resolved_query or message
+                        # Insufficient diagnoses can ask for information without a provider.
+                        needs_model = route != RouteName.DIAGNOSIS or waiting or _check_info_sufficiency(query)["sufficient"]
+                        if needs_model:
+                            resolved = resolve_model(model)
+                            model_id, provider_name = resolved["model_id"], resolved["provider_name"]
+                        prebuilt = []
+                        if route in (RouteName.TASK, RouteName.CHAT):
+                            built = await ContextBuilder(db).build(actual_conv_id, query, exclude_message_id=user_message.id)
+                            prebuilt = built.messages
+                        if decision.business_intent:
+                            conv.intent = decision.business_intent
+                            await db.commit()
+                        context = _build_route_context(
+                            conversation_id=actual_conv_id, user_message=query,
+                            resolved_model=model_id, provider_name=provider_name,
+                            assistant_msg_id=assistant_msg_id, intent=intent, prebuilt_messages=prebuilt,
+                        )
+                        if route == RouteName.DIAGNOSIS:
+                            events = _stream_diagnosis(context, user.id, waiting=waiting, cancel=cancel)
+                        else:
+                            events = _select_events(
+                                RouterDecision(route, 1, decision.reasoning),
+                                conversation_id=actual_conv_id, user_message=query, prebuilt_messages=prebuilt,
+                                resolved_model=model_id, provider_name=provider_name, assistant_msg_id=assistant_msg_id,
+                                intent=intent,
+                            )
+                    yield StreamMeta(
+                        message_id=assistant_msg_id, conversation_id=actual_conv_id,
+                        model=model_id if provider_name else "", provider=provider_name,
+                        route=route.value, intent=intent, source=decision.source,
+                        conversational=decision.action == "reply",
+                    )
+                    async with aclosing(events):
+                        async for event in events:
+                            if isinstance(event, StreamMeta):
+                                continue
+                            if isinstance(event, StreamToken):
+                                streamed_answer.append(event.content)
+                            elif isinstance(event, ClarificationNeeded):
+                                metadata["clarification"] = {
+                                    "intent": event.intent, "missingFields": event.missing_fields,
+                                    "promptMessage": event.prompt_message, "hints": event.hints,
+                                }
+                            elif isinstance(event, DiagnosisCompleted):
+                                metadata["diagnosis"] = event.output
+                            elif isinstance(event, DiagnosisWaitingInput):
+                                metadata["diagnosisWaitingInput"] = {
+                                    "message": event.message, "missing_fields": event.missing_fields,
+                                }
+                            elif isinstance(event, StreamDone):
+                                metadata["suggestions"] = event.suggestions or []
+                                event.source = decision.source
+                                await persist()
+                            yield event
+                except asyncio.CancelledError:
+                    cancel.set()
+                    raise
+                except Exception as exc:  # noqa: BLE001 - Convert execution failures to the public SSE contract.
+                    await db.rollback()
+                    logger.warning("Chat execution failed conversation_id=%s error_type=%s", actual_conv_id, type(exc).__name__)
+                    failure = "处理请求失败，请稍后重试。"
+                    metadata["executionError"] = True
+                    yield StreamError(content=failure)
+                    if not streamed_answer:
+                        streamed_answer.append(failure)
+                        yield StreamToken(content=failure, message_id=assistant_msg_id)
+                    await persist()
+                    yield StreamDone(message_id=assistant_msg_id, route=route.value, source=decision.source, validated=False)
+                finally:
+                    cancel.set()
+                    await persist()
             _spawn_compression(db, actual_conv_id)
 
     return StreamingResponse(
@@ -442,8 +589,8 @@ async def _maybe_compress(db: AsyncSession, conversation_id: str) -> None:
 @router.post("/chat")
 async def chat(
     body: ChatRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """流式聊天端点 —— POST /api/v1/chat。"""
     return await _handle_chat(body.message, body.model, db, user)
@@ -455,8 +602,15 @@ async def chat(
 
 
 class AgentChatRequest(BaseModel):
-    message: str = PydField(min_length=1)
+    message: str = PydField(min_length=1, max_length=16000)
     conversation_id: str | None = None
+
+    @field_validator("message")
+    @classmethod
+    def nonblank_message(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("消息不能为空")
+        return value
 
 
 agent_router = APIRouter(prefix="/api/agent", tags=["agent-chat"])
@@ -465,8 +619,8 @@ agent_router = APIRouter(prefix="/api/agent", tags=["agent-chat"])
 @agent_router.post("/chat")
 async def agent_chat(
     body: AgentChatRequest,
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     """Agent 聊天端点 —— 需要认证，支持会话持久化和历史记忆。"""
     return await _handle_chat(body.message, None, db, user, body.conversation_id)

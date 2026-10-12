@@ -1,5 +1,7 @@
 """测试：Agent 模块 (Step 10)。"""
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 from src.agent.router.pipeline import QueryRouter, quick_route_scan
@@ -119,8 +121,15 @@ class TestToolRegistry:
         assert result["status"] == "failed"
 
     @pytest.mark.asyncio
-    async def test_execute_search_knowledge(self):
+    async def test_execute_search_knowledge(self, monkeypatch):
         """执行 search_knowledge_base 应返回模拟结果。"""
+        search = AsyncMock(return_value=[
+            {"docTitle": "Test document", "content": "Test evidence", "score": 0.9},
+        ])
+        monkeypatch.setattr(settings, "pgvector_enabled", True)
+        monkeypatch.setattr(
+            "src.agent.tools.builtins.search_knowledge._semantic_search", search,
+        )
         self.registry.init()
         result = await self.registry.execute(
             "search_knowledge_base",
@@ -129,3 +138,4 @@ class TestToolRegistry:
         )
         assert result["status"] == "success"
         assert "found" in str(result.get("output", ""))
+        search.assert_awaited_once_with("测试查询")

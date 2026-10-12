@@ -2,11 +2,13 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
+from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.models.base import Base, TimestampMixin
+
+flow_json = JSONB().with_variant(JSON(), "sqlite")
 
 
 class AgentFlow(Base, TimestampMixin):
@@ -16,9 +18,9 @@ class AgentFlow(Base, TimestampMixin):
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
     scene: Mapped[str] = mapped_column(String(30), default="diagnosis")
-    draft: Mapped[dict] = mapped_column(JSONB)
+    draft: Mapped[dict] = mapped_column(flow_json)
     draft_revision: Mapped[int] = mapped_column(Integer, default=1)
-    published: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    published: Mapped[dict | None] = mapped_column(flow_json, nullable=True)
     published_version: Mapped[int] = mapped_column(Integer, default=0)
     published_revision: Mapped[int] = mapped_column(Integer, default=0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -33,13 +35,13 @@ class AgentFlowRun(Base):
     flow_id: Mapped[str] = mapped_column(String(36), ForeignKey("agent_flows.id"))
     version: Mapped[int] = mapped_column(Integer)
     draft_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    snapshot: Mapped[dict] = mapped_column(JSONB)
+    snapshot: Mapped[dict] = mapped_column(flow_json)
     actor_id: Mapped[str] = mapped_column(String(36))
     conversation_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     test: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(30), default="running")
-    records: Mapped[dict] = mapped_column(JSONB, default=dict)
-    output: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    records: Mapped[dict] = mapped_column(flow_json, default=dict)
+    output: Mapped[dict | None] = mapped_column(flow_json, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     cancel_requested: Mapped[bool] = mapped_column(Boolean, default=False)
     duration_ms: Mapped[int] = mapped_column(Integer, default=0)

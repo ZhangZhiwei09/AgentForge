@@ -1,18 +1,26 @@
 import asyncio
+import logging
 import sys
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 from src.agent.checkpoint import close_checkpointer, get_checkpointer
-from src.api.v1.auth import router as auth_router
 from src.api.v1.agent_flows import router as agent_flows_router
-from src.api.v1.chat import agent_router, router as chat_router
+from src.api.v1.auth import router as auth_router
+from src.api.v1.chat import agent_router
+from src.api.v1.chat import router as chat_router
 from src.api.v1.conversations import agent_chat_router, conversations_router
 from src.api.v1.dev import router as dev_router
+from src.api.v1.entry_route_flows import router as entry_route_flows_router
 from src.api.v1.health import router as health_router
 from src.api.v1.knowledge import router as knowledge_router
+from src.config import settings
 from src.observability import init_observability, shutdown_observability
+
+logger = logging.getLogger(__name__)
 
 # Windows 下 psycopg（AsyncConnectionPool，AsyncPostgresSaver 后端）不能运行在
 # 默认的 ProactorEventLoop 上。这里显式切换到 SelectorEventLoop：
@@ -35,6 +43,29 @@ async def lifespan(app: FastAPI):
 
 def create_app() -> FastAPI:
     app = FastAPI(title="AgentForge", version="0.0.1", lifespan=lifespan)
+
+    @app.middleware("http")
+    async def request_id(request: Request, call_next):
+        correlation_id = request.headers.get("x-request-id") or str(uuid.uuid4())
+        request.state.request_id = correlation_id
+        response = await call_next(request)
+        response.headers["X-Request-ID"] = correlation_id
+        # Do not log query parameters: existing clients may send api_key there.
+        logger.info(
+            "request method=%s path=%s status=%s request_id=%s",
+            request.method, request.url.path, response.status_code, correlation_id,
+        )
+        return response
+
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[origin.strip() for origin in settings.cors_origins.split(",") if origin.strip()],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization", "X-Request-ID"],
+        expose_headers=["X-Request-ID"],
+        max_age=86400,
+    )
     app.include_router(health_router)
     app.include_router(chat_router)
     app.include_router(agent_router)
@@ -43,6 +74,7 @@ def create_app() -> FastAPI:
     app.include_router(knowledge_router)
     app.include_router(auth_router)
     app.include_router(agent_flows_router)
+    app.include_router(entry_route_flows_router)
     app.include_router(dev_router)
     return app
 
@@ -71,4 +103,5 @@ if __name__ == "__main__":
         port=settings.port,
         reload=True,
         loop="none",
+        access_log=False,
     )

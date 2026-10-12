@@ -9,6 +9,7 @@ from src.api.v1.auth import _create_tokens
 from src.config import settings
 from src.lib.auth import decode_access_token
 from src.models.user import User
+from src.services.auth import hash_password, verify_password
 
 
 def _make_token(payload: dict, expires_in: int = 3600) -> str:
@@ -53,6 +54,27 @@ class TestJWT:
     def test_decode_empty_token(self):
         """空字符串应返回 None。"""
         assert decode_access_token("") is None
+
+    @pytest.mark.parametrize("payload", [
+        {"type": "access", "exp": int(time.time()) + 60},
+        {"type": "access", "sub": "", "exp": int(time.time()) + 60},
+        {"type": "access", "sub": "user"},
+    ])
+    def test_rejects_missing_identity_or_expiration(self, payload):
+        token = jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
+        assert decode_access_token(token) is None
+
+
+def test_bcrypt_compatibility_for_long_utf8_passwords():
+    password = "\u4e2d" * 25
+    stored = hash_password(password)
+    assert verify_password(password, stored) == (True, False)
+    assert verify_password("wrong", stored) == (False, False)
+
+
+def test_existing_bcryptjs_2a_password_hash_is_supported():
+    stored = hash_password("existing-password").replace("$2b$", "$2a$", 1)
+    assert verify_password("existing-password", stored) == (True, False)
 
 
 class TestCreateTokensContract:

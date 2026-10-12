@@ -10,19 +10,20 @@ Python 端使用按路由显式声明依赖：
 这是 FastAPI 的风格——不走全局中间件，每个需要认证的路由自己声明 Depends。
 """
 
-from fastapi import Depends, HTTPException, status
+from typing import Annotated
+
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import async_session
-from src.lib.auth import decode_access_token
 from src.models.user import User
+from src.services.auth import authenticate
 
 # ---- Token 提取器 ----
 # HTTPBearer 自动从 Authorization: Bearer <token> 头提取 token
-# 如果请求没有 Bearer token，FastAPI 自动返回 403
-security = HTTPBearer()
+# 缺少凭证由依赖统一返回 401；兼容已有 api_key 查询参数。
+security = HTTPBearer(auto_error=False)
 
 
 # ---- 数据库会话 ----
@@ -39,8 +40,9 @@ async def get_db():
 
 # ---- 当前用户 ----
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
-    db: AsyncSession = Depends(get_db),
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+    db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
     """从 Bearer Token 解析当前用户。
 
@@ -52,19 +54,18 @@ async def get_current_user(
         async def me(user: User = Depends(get_current_user)):
             return {"id": user.id, "email": user.email}
     """
-    payload = decode_access_token(credentials.credentials)
-    if payload is None:
+    token = credentials.credentials if credentials else request.query_params.get("api_key")
+    if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token",
+            detail="Unauthorized - missing token",
+            headers={"WWW-Authenticate": "Bearer"},
         )
-
-    result = await db.execute(select(User).where(User.id == payload["sub"]))
-    user = result.scalar_one_or_none()
+    user = await authenticate(db, token)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found",
+            detail="Invalid or expired token",
         )
 
     return user

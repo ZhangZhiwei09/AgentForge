@@ -15,14 +15,18 @@ class SignUpRequest(BaseModel):
     zod z.string().email() 允许该域名。这里保持与 TS 一致。
     """
 
-    email: str
+    email: str = Field(
+        max_length=255, pattern=r"^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$",
+    )
     password: str = Field(min_length=6, description="密码最少 6 位")
 
 
 class SignInRequest(BaseModel):
     """登录请求，对应 TS signInSchema。"""
 
-    email: str
+    email: str = Field(
+        max_length=255, pattern=r"^[^@\s]+@[^@\s.]+(?:\.[^@\s.]+)+$",
+    )
     password: str = Field(min_length=1)
 
 
@@ -37,3 +41,11 @@ class TokenResponse(BaseModel):
     user: dict
     accessToken: str
     refreshToken: str
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str = Field(min_length=1)
+
+
+class ApiKeyRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=100)

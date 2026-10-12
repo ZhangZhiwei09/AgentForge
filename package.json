@@ -22,6 +22,7 @@
     "server:worker": "pnpm --filter @agentforge/server worker",
     "cs:dev": "pnpm --filter @agentforge/customer-service dev",
     "py:dev": "pnpm --filter @agentforge/server-py dev",
+    "py:api": "pnpm --filter @agentforge/server-py dev:public",
     "py:test": "pnpm --filter @agentforge/server-py test",
     "admin:dev": "pnpm --filter @agentforge/data-admin dev",
     "db:migrate": "pnpm --filter @agentforge/database db:migrate",
