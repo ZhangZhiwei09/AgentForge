@@ -39,8 +39,7 @@ resumption. Final task text is checked and masked before being emitted.
 Interrupted tasks fail without replaying tools with uncertain external outcomes;
 process death may leave a running session requiring operator reconciliation.
 Chat TASK integration, complete retrieval/citation production and cancellation
-acceptance, knowledge ingestion,
-workers and other public APIs remain to migrate. The default `pnpm dev` continues
+acceptance and other public APIs remain to migrate. The default `pnpm dev` continues
 to start both backends until the complete public API has passed acceptance.
 
 Knowledge administration now supports base CRUD, document reads/deletion,
@@ -51,9 +50,35 @@ ingestion splitter with fixed separators, explicit zero overlap and parent/child
 chunks. Chunk edits require a finite 1024-dimensional embedding and commit it
 with the text; provider failures preserve the existing chunk. Elasticsearch
 sync is optional through `ELASTICSEARCH_URL`; failures are logged and SQL remains
-authoritative. Upload, document creation/processing and hybrid retrieval remain
-subsequent migration units. All knowledge administration and ingest endpoints
+authoritative. Hybrid retrieval remains a subsequent migration unit.
+All knowledge administration and ingest endpoints
 require authentication.
+
+Document creation, batches, multipart upload and explicit processing use a shared
+Python ingestion pipeline. Upload with `?process=false` preserves a pending
+document until `/api/knowledge/bases/{id}/process` is called, allowing the editor
+to save settings first. The pipeline extracts PDF text, DOCX paragraphs/tables,
+UTF-8 text and images through the existing vision provider. Encrypted/scanned
+PDFs, legacy `.doc` files (convert to `.docx`) and extraction failures retain
+their error status. Uploads are limited to 15 MB. Binary originals use
+`KNOWLEDGE_STORAGE_ROOT` (defaulting to the old server storage directory) or the
+existing MinIO credentials. Existing absolute local paths and MinIO object keys
+remain readable. Chunk replacement is atomic; failed retries preserve old chunks.
+
+Processing is synchronous by default. Set `INGESTION_ASYNC_ENABLED=true` and
+`REDIS_URL` to use the durable ARQ queue, then run a separate worker from this
+directory:
+
+```powershell
+uv run python -m src.worker
+```
+
+Queue outages return 503 while retaining the pending document. Jobs retry
+transient failures at most three times; SQL claims prevent overlapping workers.
+An expired claim can be recovered after `INGESTION_LEASE_SECONDS` (at least the
+job timeout plus 30 seconds). Redis persistence must be enabled for restart
+durability. Failed or expired documents can be dispatched again through the
+ingestion service; the bulk process endpoint selects pending documents.
 
 From this directory:
 
@@ -88,6 +113,7 @@ uv run pytest -p no:cacheprovider tests/test_entry_flows.py tests/test_entry_flo
 uv run pytest -p no:cacheprovider tests/test_chat_compatibility.py tests/test_conversation_history.py
 uv run pytest -p no:cacheprovider tests/test_agent_tasks_api.py
 uv run pytest -p no:cacheprovider tests/test_knowledge_management_api.py tests/test_rag_splitter.py
+uv run pytest -p no:cacheprovider tests/test_knowledge_ingestion_api.py
 ```
 
 HTTP authentication and entry/chat tests create isolated SQLite databases.
@@ -100,3 +126,5 @@ database. Set `AGENTFORGE_TEST_POSTGRES_URL` to an asyncpg URL whose database is
 `agentforge_python_migration` or starts with `agentforge_test_`, with the `vector`
 extension installed. Each test creates and drops its own uniquely named schema;
 existing tables and the public schema are preserved.
+Set `AGENTFORGE_TEST_REDIS_URL` to an isolated Redis instance to additionally
+exercise actual ARQ enqueue/worker consumption with a unique test queue.

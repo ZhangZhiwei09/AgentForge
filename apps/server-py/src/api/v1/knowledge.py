@@ -4,11 +4,13 @@ POST /api/knowledge/ingest —— 摄入文档（split → embed → store）
 """
 
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_current_user
+from src.api.deps import get_current_user, get_db
 from src.rag.ingestion import ingest_document
 
 logger = logging.getLogger(__name__)
@@ -23,9 +25,9 @@ class IngestRequest(BaseModel):
 
     kb_id: str = Field(..., min_length=1, description="知识库 ID")
     title: str = Field(..., min_length=1, max_length=500, description="文档标题")
-    content: str = Field(..., min_length=1, description="文档正文（纯文本）")
-    chunk_size: int | None = Field(default=None, description="分片 token 数（可选）")
-    chunk_overlap: int | None = Field(default=None, description="重叠 token 数（可选）")
+    content: str = Field(..., min_length=1, max_length=15 * 1024 * 1024, description="文档正文（纯文本）")
+    chunk_size: int | None = Field(default=None, ge=50, le=4000, description="分片 token 数（可选）")
+    chunk_overlap: int | None = Field(default=None, ge=0, description="重叠 token 数（可选）")
 
 
 class IngestResponse(BaseModel):
@@ -37,7 +39,7 @@ class IngestResponse(BaseModel):
 
 
 @router.post("/ingest", response_model=IngestResponse)
-async def ingest(body: IngestRequest):
+async def ingest(body: IngestRequest, db: Annotated[AsyncSession, Depends(get_db)]):
     """摄入文档：分片 → 向量化 → 存储。
 
     V1 只接受纯文本 content 字段，不做文件上传和格式解析。
@@ -47,6 +49,7 @@ async def ingest(body: IngestRequest):
             kb_id=body.kb_id,
             title=body.title,
             content=body.content,
+            db=db,
             chunk_size=body.chunk_size,
             chunk_overlap=body.chunk_overlap,
         )
@@ -55,8 +58,10 @@ async def ingest(body: IngestRequest):
             chunk_count=result["chunk_count"],
             status=result["status"],
         )
+    except HTTPException:
+        raise
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
-        logger.error("Ingest failed: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}") from exc
+        logger.exception("Ingest failed")
+        raise HTTPException(status_code=500, detail="Ingestion failed") from exc

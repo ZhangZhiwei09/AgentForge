@@ -5,6 +5,7 @@ Phase B: 提供 EmbeddingProvider Protocol + OpenAIEmbeddingProvider。
 """
 
 import logging
+import math
 from collections.abc import Awaitable
 from typing import Protocol
 
@@ -14,6 +15,16 @@ from openai import AsyncOpenAI
 from src.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def validate_embeddings(vectors: list[list[float]], count: int) -> None:
+    """The shared PostgreSQL schema stores finite vector(1024) values."""
+    if len(vectors) != count or any(
+        len(vector) != 1024 or any(
+            not isinstance(value, (int, float)) or not math.isfinite(value) for value in vector
+        ) for vector in vectors
+    ):
+        raise ValueError("Embedding response must contain one finite 1024-dimensional vector per input")
 
 
 # ═══════════════════════════════════════════════════════════

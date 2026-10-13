@@ -2,7 +2,6 @@
 
 import json
 import logging
-import math
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
@@ -12,7 +11,7 @@ from sqlalchemy.orm import noload
 
 from src.config import settings
 from src.models.knowledge import KnowledgeBase, KnowledgeChunk, KnowledgeDocument
-from src.rag.embeddings import get_embedding_provider
+from src.rag.embeddings import get_embedding_provider, validate_embeddings
 from src.rag.splitter import RecursiveTokenTextSplitter, estimate_tokens
 from src.schemas.knowledge import ChunkSettings
 from src.services import knowledge_index
@@ -130,9 +129,7 @@ async def edit_chunk(db: AsyncSession, chunk_id: str, content: str) -> Knowledge
         raise HTTPException(503, "No embedding provider configured")
     try:
         vectors = await provider.embed([content])
-        if (len(vectors) != 1 or len(vectors[0]) != 1024
-                or any(not isinstance(value, (int, float)) or not math.isfinite(value) for value in vectors[0])):
-            raise ValueError("Embedding must contain one finite 1024-dimensional vector")
+        validate_embeddings(vectors, 1)
     except Exception as exc:
         logger.exception("Chunk embedding failed chunk=%s", chunk_id)
         raise HTTPException(503, "Chunk embedding failed") from exc

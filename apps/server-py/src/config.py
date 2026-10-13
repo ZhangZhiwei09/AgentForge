@@ -48,6 +48,19 @@ class Settings(BaseSettings):
     pgvector_enabled: bool = Field(default=False)
     elasticsearch_url: str = Field(default="")
 
+    # Knowledge storage and durable Python ingestion.
+    knowledge_storage_root: str = Field(default="../server/data/knowledge-files")
+    minio_endpoint: str = Field(default="")
+    minio_port: int = Field(default=9000)
+    minio_access_key: str = Field(default="")
+    minio_secret_key: str = Field(default="")
+    minio_bucket: str = Field(default="agentforge-docs")
+    minio_use_ssl: bool = Field(default=False)
+    video_model: str = Field(default="gpt-4o-mini")
+    ingestion_async_enabled: bool = Field(default=False)
+    ingestion_job_timeout_seconds: int = Field(default=300, ge=30)
+    ingestion_lease_seconds: int = Field(default=360, ge=60)
+
     # ── Langfuse ────────────────────────────────────────
     langfuse_enabled: bool = Field(default=False)
     langfuse_public_key: str = Field(default="")
