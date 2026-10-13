@@ -234,6 +234,7 @@ def runtime_events(monkeypatch, events):
                 event.message_id = context.assistant_msg_id
             yield event
     monkeypatch.setattr(chat, "_get_executor", lambda: SimpleNamespace(execute=execute))
+    monkeypatch.setattr(chat, "stream_chat_task", lambda db, context: execute(context))
 
 
 async def test_citations_trace_updates_and_clear_stream_survive_history(entry_api, dependencies, monkeypatch):
@@ -291,6 +292,7 @@ async def test_disconnect_cancellation_finishes_sql_write_and_releases_lock(entr
         await sleep_forever()
 
     monkeypatch.setattr(chat, "_get_executor", lambda: SimpleNamespace(execute=execute))
+    monkeypatch.setattr(chat, "stream_chat_task", lambda db, context: execute(context))
 
     async def consume():
         async with sessions() as db:

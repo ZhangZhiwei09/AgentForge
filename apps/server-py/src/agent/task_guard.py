@@ -1,5 +1,6 @@
 """Task guard policy shared by initial execution and durable resumption."""
 
+import json
 import re
 
 from pydantic import BaseModel, Field
@@ -41,6 +42,20 @@ def model_rates(model: str) -> tuple[float, float]:
 
 
 def sanitize_response(content: str, config: TaskGuardConfig) -> tuple[str, bool]:
+    candidate = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip())
+    if candidate.startswith("{") and candidate.endswith("}"):
+        try:
+            decision = json.loads(candidate)
+        except ValueError:
+            decision = None  # Non-JSON prose still passes through the normal guards.
+        if isinstance(decision, dict) and (
+            {"observation", "analysis", "plan"}.issubset(decision)
+            or decision.get("action") in ("tool_call", "ask_user", "respond")
+        ):
+            if decision.get("action") == "respond" and isinstance(decision.get("content"), str):
+                content = decision["content"]
+            else:
+                return "暂时无法处理此请求，请补充信息或联系人工客服。", True
     blocked = config.content_safety_enabled and safety_route_scan(content) is not None
     if blocked:
         return "[内容已被安全过滤器拦截]", True

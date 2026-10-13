@@ -104,6 +104,8 @@ async def decide_entry(
     conversational: dict | None = None,
     classify: Callable[..., Awaitable[dict]] | None = None,
     cancel: asyncio.Event | None = None,
+    waiting_task: bool = False,
+    cancel_waiting_task: Callable[[], Awaitable[bool]] | None = None,
 ) -> EntryDecision:
     check_cancel(cancel)
     if safety_decision is not None:
@@ -113,12 +115,17 @@ async def decide_entry(
         return EntryDecision("dispatch", "control_rule", "明确请求人工支持", RouteName.HUMAN)
     if control == "cancel":
         cancelled = waiting_diagnosis and await cancel_waiting_diagnosis()
+        task_cancelled = await cancel_waiting_task() if waiting_task and cancel_waiting_task else False
         check_cancel(cancel)
         return EntryDecision("reply", "control_rule", "取消等待补充的排查",
-                             answer="已取消当前等待补充的排查。" if cancelled else "当前没有可取消的等待排查。")
+                             answer="已取消当前等待中的任务。" if task_cancelled else
+                             "已取消当前等待补充的排查。" if cancelled else "当前没有可取消的等待排查。")
     if waiting_diagnosis:
         return EntryDecision("dispatch", "session_state", "等待补充的配置诊断续跑",
                              RouteName.DIAGNOSIS, business_intent="diagnosis")
+    if waiting_task:
+        return EntryDecision("dispatch", "session_state", "等待补充或审批的任务续跑",
+                             RouteName.TASK, business_intent="consultation")
     configured = await load_entry_result()
     check_cancel(cancel)
     if configured and configured["action"] == "reply":

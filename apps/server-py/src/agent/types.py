@@ -77,6 +77,9 @@ class StreamDone:
     route: str = ""
     source: str = ""
     conversational: bool = False
+    citation: dict | None = None
+    agent_session_id: str | None = None
+    task_status: str | None = None
 
 
 @dataclass(slots=True)

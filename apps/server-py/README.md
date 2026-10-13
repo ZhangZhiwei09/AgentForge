@@ -28,8 +28,7 @@ requests finish saving emitted output and release their conversation locks.
 Citation retrieval/generation parity remains part of knowledge consultation work.
 
 Configured diagnosis runs reuse the existing Python flow runtime directly.
-TASK consultation still uses the existing executor pending complete knowledge
-consultation parity. Authenticated task APIs (`/api/agent/run`, `/respond`,
+TASK chat and authenticated task APIs (`/api/agent/run`, `/respond`,
 `/approve`, `/approvals` and `/api/agent-sessions`) now use the same ReAct graph
 with durable session state and approval policy. Resumption preserves the session,
 model, tool restrictions, budget and completed tool calls. Paused legacy TS
@@ -38,8 +37,8 @@ rejections never execute the tool, and conditional SQL writes prevent duplicate
 resumption. Final task text is checked and masked before being emitted.
 Interrupted tasks fail without replaying tools with uncertain external outcomes;
 process death may leave a running session requiring operator reconciliation.
-Chat TASK integration, complete retrieval/citation production and cancellation
-acceptance and other public APIs remain to migrate. The default `pnpm dev` continues
+Complete frontend acceptance and other public APIs remain to migrate.
+The default `pnpm dev` continues
 to start both backends until the complete public API has passed acceptance.
 
 Knowledge administration now supports base CRUD, document reads/deletion,
@@ -147,3 +146,19 @@ prompt snapshots use Chinese. Interrupted runs are marked failed. Focused tests:
 ```powershell
 uv run pytest -p no:cacheprovider tests/test_knowledge_retrieval_api.py tests/test_rag_pgvector.py
 ```
+
+Chat consultation preloads ranked knowledge through the shared retrieval
+service, then uses the same persisted task graph as `/api/agent/run`. Tool
+search uses that service too; document-level fallback that bypassed chunk
+state has been removed. Numbered citation cards retain real document IDs and
+score types. Sentence support uses embeddings with a keyword fallback, removes
+unknown citation indexes and marks weakly supported claims before text is sent.
+Internal decision JSON is filtered before output.
+
+Chat task pauses persist their model, budgets, messages and tool outcomes.
+Follow-up messages resume the same ask-user task; mutations require the same
+approval API as standalone tasks. Explicit cancellation revokes a paused task's
+pending approvals. Chat owns one assistant message per request and saves
+citations, trace updates and the task session reference in history. Model
+disconnects mark running tasks failed without replaying uncertain tool effects.
+Focused validation: `tests/test_chat_tasks_api.py` and `tests/test_agent_tasks_api.py`.

@@ -44,7 +44,7 @@ def _(event: StreamToken) -> dict:
 
 @_sse_payload.register
 def _(event: StreamDone) -> dict:
-    return {
+    payload = {
         "type": "done",
         "message_id": event.message_id,
         "usage": event.usage,
@@ -55,6 +55,11 @@ def _(event: StreamDone) -> dict:
         "source": event.source,
         "conversational": event.conversational,
     }
+    for field in ("citation", "agent_session_id", "task_status"):
+        value = getattr(event, field)
+        if value is not None:
+            payload[field] = value
+    return payload
 
 
 @_sse_payload.register

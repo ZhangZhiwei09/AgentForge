@@ -36,6 +36,12 @@ from src.agent.tools.registry import ToolRegistry, tool_registry
 from src.models.agent_session import AgentApproval, AgentSession
 from src.models.chat import Conversation, Message
 from src.providers.registry import get_provider, resolve_model
+from src.services.citations import (
+    citation_cards,
+    parse_sources,
+    source_context,
+    verify_answer,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +152,9 @@ def restore_state(session: AgentSession) -> tuple[dict, AgentState]:
     }
 
 
-async def claim_resume(db: AsyncSession, session: AgentSession, response: str) -> AgentState:
+async def claim_resume(
+    db: AsyncSession, session: AgentSession, response: str, *, persist_user: bool = True,
+) -> AgentState:
     runtime, state = restore_state(session)
     if session.status != "paused":
         raise HTTPException(400, f"Agent session is {session.status}, not paused")
@@ -164,9 +172,10 @@ async def claim_resume(db: AsyncSession, session: AgentSession, response: str) -
     if result.rowcount != 1:
         await db.rollback()
         raise HTTPException(409, "Session has already been resumed")
-    db.add(Message(
-        id=str(uuid.uuid4()), conversation_id=session.conversation_id, role="user", content=response,
-    ))
+    if persist_user:
+        db.add(Message(
+            id=str(uuid.uuid4()), conversation_id=session.conversation_id, role="user", content=response,
+        ))
     await db.commit()
     await db.refresh(session)
     return state
@@ -247,6 +256,7 @@ class TaskLifecycle:
     def __init__(
         self, db: AsyncSession, session: AgentSession, registry: ToolRegistry,
         runtime: dict, model: ProviderChatModel,
+        *, persist_assistant: bool = True,
     ) -> None:
         self.db = db
         self.session = session
@@ -256,6 +266,7 @@ class TaskLifecycle:
         self.guard = TaskGuardConfig.model_validate(runtime.get("guard", {}))
         self.paused = False
         self.summary = ""
+        self.persist_assistant = persist_assistant
 
     def emit(self, kind: str, **data) -> None:
         get_stream_writer()({"type": kind, **data})
@@ -338,10 +349,11 @@ class TaskLifecycle:
                 self.paused = True
                 self.runtime["pause_kind"] = "user"
                 self.session.status = "paused"
-                self.db.add(Message(
-                    id=str(uuid.uuid4()), conversation_id=self.session.conversation_id,
-                    role="assistant", content=question, model=self.model.model_name,
-                ))
+                if self.persist_assistant:
+                    self.db.add(Message(
+                        id=str(uuid.uuid4()), conversation_id=self.session.conversation_id,
+                        role="assistant", content=question, model=self.model.model_name,
+                    ))
             elif action == "respond":
                 if not isinstance(details.get("content"), str):
                     raise RuntimeError("Invalid agent response")
@@ -353,6 +365,11 @@ class TaskLifecycle:
             content, blocked = sanitize_response(str(response.content), self.guard)
             if not content.strip():
                 raise RuntimeError("Agent returned an empty response")
+            if self.runtime.get("verify_citations"):
+                sources = self.runtime.get("knowledge_results", [])
+                content, report = await verify_answer(content, sources)
+                self.runtime["citation_report"] = report
+                self.emit("agent_citations", items=citation_cards(sources))
             response = AIMessage(content=content)
             self.summary = sanitize_response(self.summary or content, self.guard)[0]
             self.record(next_state, {"action": "respond", "content": content, "summary": self.summary}, details)
@@ -430,6 +447,13 @@ class TaskLifecycle:
 
     async def after_tool(self, state: AgentState, call: dict, result: dict) -> None:
         content = str(result.get("output", result.get("error", json.dumps(result, ensure_ascii=False))))
+        if call["name"] == "search_knowledge_base":
+            sources = parse_sources(content)
+            self.runtime["knowledge_results"] = sources
+            self.runtime["verify_citations"] = True
+            # Numbered context follows the tool observation and survives durable resumption.
+            state["messages"].append(SystemMessage(content=source_context(sources)))
+            self.emit("agent_citations", items=citation_cards(sources))
         scratchpad = copy.deepcopy(self.session.scratchpad)
         for step in reversed(scratchpad):
             if step["step"] == state["iteration_count"] and step["decision"].get("tool") == call["name"] and "result" not in step:
@@ -444,12 +468,13 @@ class TaskLifecycle:
         ):
             self.runtime.pop(key, None)
         await self.save(state)
-        self.emit("agent_observe", step=state["iteration_count"], result=content)
+        self.emit("agent_observe", step=state["iteration_count"], result=content, tool=call["name"])
 
 
 async def stream_task(
     db: AsyncSession, session: AgentSession, state: AgentState,
     registry: ToolRegistry | None = None,
+    *, persist_assistant: bool = True, message_id: str | None = None,
 ) -> AsyncIterator[dict]:
     registry = registry or tool_registry
     lifecycle = None
@@ -467,7 +492,7 @@ async def stream_task(
                  and (not guard.allowed_tools or name in guard.allowed_tools)]
         definitions = AgentExecutor._to_openai_tools(registry.get_definitions(names)) + [DECISION_TOOL]
         runtime.update(model=resolved["model_id"], provider=provider_name, tool_defs=definitions)
-        lifecycle = TaskLifecycle(db, session, registry, runtime, model)
+        lifecycle = TaskLifecycle(db, session, registry, runtime, model, persist_assistant=persist_assistant)
         yield {
             "type": "agent_meta", "session_id": session.id, "model": resolved["model_id"],
             "provider": provider_name, "max_iterations": runtime["max_iterations"],
@@ -496,11 +521,18 @@ async def stream_task(
         if not isinstance(last_message, AIMessage) or last_message.tool_calls:
             raise RuntimeError("Agent did not return a final answer")
         content = str(last_message.content)
-        message_id = str(uuid.uuid4())
-        db.add(Message(
-            id=message_id, conversation_id=session.conversation_id, role="assistant",
-            content=content, model=resolved["model_id"],
-        ))
+        message_id = message_id or str(uuid.uuid4())
+        if persist_assistant:
+            metadata = {}
+            if lifecycle.runtime.get("verify_citations"):
+                metadata = {
+                    "citations": citation_cards(lifecycle.runtime.get("knowledge_results", [])),
+                    "citation": lifecycle.runtime.get("citation_report"),
+                }
+            db.add(Message(
+                id=message_id, conversation_id=session.conversation_id, role="assistant",
+                content=content, model=resolved["model_id"], msg_metadata=metadata,
+            ))
         session.status = "completed"
         session.final_summary = lifecycle.summary or content
         session.completed_at = datetime.now(UTC)

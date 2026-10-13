@@ -75,6 +75,7 @@ from src.models.entry_flow import EntryRouteFlowRun
 from src.models.user import User
 from src.providers.registry import resolve_model
 from src.schemas.chat import ChatMessage, ChatRequest
+from src.services.chat_tasks import cancel_chat_task, paused_chat_task, stream_chat_task
 from src.services.entry_flows import EntryRouteFlowService, RunExecution
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
@@ -499,11 +500,14 @@ async def _handle_chat(
                 try:
                     safety = safety_route_scan(message)
                     waiting = False if safety or explicit_entry_control(message) == "human" else await _waiting_diagnosis(db, actual_conv_id, user.id)
+                    task = None if safety or explicit_entry_control(message) == "human" else await paused_chat_task(db, actual_conv_id)
                     decision = await decide_entry(
                         message, history, model, safety_decision=safety,
                         waiting_diagnosis=waiting, load_entry_result=load_entry_result,
                         cancel_waiting_diagnosis=lambda: _cancel_waiting_diagnosis(db, actual_conv_id, user.id),
                         conversational=conversational_reply(message), cancel=cancel,
+                        waiting_task=task is not None,
+                        cancel_waiting_task=lambda: cancel_chat_task(db, actual_conv_id),
                     )
                 except Exception as exc:  # noqa: BLE001 - Configuration/state failures must stop dispatch.
                     await db.rollback()
@@ -529,7 +533,8 @@ async def _handle_chat(
                         # Insufficient diagnoses can ask for information without a provider.
                         needs_model = route != RouteName.DIAGNOSIS or waiting or _check_info_sufficiency(query)["sufficient"]
                         if needs_model:
-                            resolved = resolve_model(model)
+                            task_model = (task.runtime_state or {}).get("model") if task is not None and route == RouteName.TASK else None
+                            resolved = resolve_model(task_model or model)
                             model_id, provider_name = resolved["model_id"], resolved["provider_name"]
                         prebuilt = []
                         if route in (RouteName.TASK, RouteName.CHAT):
@@ -546,6 +551,8 @@ async def _handle_chat(
                         )
                         if route == RouteName.DIAGNOSIS:
                             events = _stream_diagnosis(context, user.id, waiting=waiting, cancel=cancel)
+                        elif route == RouteName.TASK:
+                            events = stream_chat_task(db, context)
                         else:
                             events = _select_events(
                                 RouterDecision(route, 1, decision.reasoning),
@@ -602,6 +609,12 @@ async def _handle_chat(
                                     metadata["diagnosis"]["status"] = "error"
                             elif isinstance(event, StreamDone):
                                 metadata["suggestions"] = event.suggestions or []
+                                if event.citation is not None:
+                                    metadata["citation"] = event.citation
+                                if event.agent_session_id is not None:
+                                    metadata["agentSession"] = {
+                                        "id": event.agent_session_id, "status": event.task_status,
+                                    }
                                 event.source = decision.source
                                 await persist()
                             yield event

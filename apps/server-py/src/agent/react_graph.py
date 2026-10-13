@@ -18,7 +18,7 @@ import json as _json
 import logging
 from typing import Protocol
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 
 from src.agent.langchain_adapter import ProviderChatModel, _coerce_to_str
@@ -150,7 +150,7 @@ def build_react_graph(
         if not tc_list:
             return {"messages": []}
 
-        tool_messages: list[ToolMessage] = []
+        tool_messages: list[BaseMessage] = []
         completed = {message.tool_call_id for message in messages if isinstance(message, ToolMessage)}
         for tc in tc_list:
             tc_name = tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
@@ -182,9 +182,9 @@ def build_react_graph(
                 name=tc_name,
             ))
             if lifecycle is not None:
-                await lifecycle.after_tool(
-                    {**state, "messages": [*messages, *tool_messages]}, tc, result,
-                )
+                observed_state = {**state, "messages": [*messages, *tool_messages]}
+                await lifecycle.after_tool(observed_state, tc, result)
+                tool_messages = observed_state["messages"][len(messages):]
 
         return {"messages": tool_messages, "resume_tools": False}
 

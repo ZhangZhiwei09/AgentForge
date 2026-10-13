@@ -49,6 +49,7 @@ def dependencies(monkeypatch):
         yield StreamDone(message_id=context.assistant_msg_id, route="TASK", suggestions=["继续"])
 
     monkeypatch.setattr(chat, "_get_executor", lambda: SimpleNamespace(execute=execute))
+    monkeypatch.setattr(chat, "stream_chat_task", lambda db, context: execute(context))
     monkeypatch.setattr(chat, "_get_chat_agent", lambda: SimpleNamespace(execute=execute))
     return SimpleNamespace(resolve=resolve, classify=classify, executions=executions, legacy=legacy)
 
