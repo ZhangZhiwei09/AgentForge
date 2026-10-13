@@ -12,9 +12,7 @@ from src.models.base import Base
 
 # 加载所有模型，确保 Base.metadata 包含了全部表定义
 # 每新增一个模型文件，在这里加一行 import
-import src.models.user  # noqa: F401
-import src.models.knowledge  # noqa: F401
-import src.models.intent_sample  # noqa: F401
+import src.models  # noqa: F401
 
 # Alembic Config 对象，从 alembic.ini 读取配置
 config = context.config
@@ -24,7 +22,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # 把数据库 URL 设置到 alembic 配置中，覆盖 alembic.ini 里的占位符
-config.set_main_option("sqlalchemy.url", settings.database_url)
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 # target_metadata = 所有模型的"目录"，Alembic 对比这个和数据库实际结构来生成迁移
 target_metadata = Base.metadata
@@ -70,5 +68,7 @@ async def run_migrations_online() -> None:
 
 if context.is_offline_mode():
     run_migrations_offline()
+elif config.attributes.get("connection") is not None:
+    do_run_migrations(config.attributes["connection"])
 else:
     asyncio.run(run_migrations_online())

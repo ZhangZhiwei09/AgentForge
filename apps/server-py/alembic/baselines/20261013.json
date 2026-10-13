@@ -1,0 +1,618 @@
+{
+  "tables": {
+    "agent_flows": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "name": "VARCHAR(200)",
+        "scene": "VARCHAR(30)",
+        "draft": "JSONB",
+        "draft_revision": "INTEGER",
+        "published": "JSONB",
+        "published_version": "INTEGER",
+        "published_revision": "INTEGER",
+        "enabled": "BOOLEAN",
+        "archived": "BOOLEAN",
+        "updated_by": "VARCHAR(36)",
+        "created_at": "TIMESTAMP WITH TIME ZONE",
+        "updated_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "entry_route_flows": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "name": "VARCHAR(200)",
+        "draft": "JSONB",
+        "draft_revision": "INTEGER",
+        "published": "JSONB",
+        "published_version": "INTEGER",
+        "published_revision": "INTEGER",
+        "enabled": "BOOLEAN",
+        "archived": "BOOLEAN",
+        "updated_by": "VARCHAR(36)",
+        "created_at": "TIMESTAMP WITH TIME ZONE",
+        "updated_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "intent_samples": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "route": "VARCHAR(20)",
+        "text": "VARCHAR(2000)",
+        "embedding": "VECTOR(1024)",
+        "source": "VARCHAR(20)",
+        "active": "BOOLEAN",
+        "usage_count": "INTEGER",
+        "last_used_at": "TIMESTAMP WITHOUT TIME ZONE",
+        "created_at": "TIMESTAMP WITH TIME ZONE",
+        "updated_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "knowledge_bases": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "name": "VARCHAR(255)",
+        "description": "TEXT",
+        "category": "VARCHAR(100)",
+        "enabled": "BOOLEAN",
+        "chunk_size_tokens": "INTEGER",
+        "chunk_overlap_tokens": "INTEGER",
+        "separator_mode": "VARCHAR(20)",
+        "custom_separator": "VARCHAR(100)",
+        "chunk_structure": "VARCHAR(20)",
+        "child_chunk_size_tokens": "INTEGER",
+        "child_chunk_overlap_tokens": "INTEGER",
+        "remove_extra_spaces": "BOOLEAN",
+        "remove_urls_emails": "BOOLEAN",
+        "created_at": "TIMESTAMP WITH TIME ZONE",
+        "updated_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "knowledge_query_logs": {
+      "columns": {
+        "kb_id": "VARCHAR(36)",
+        "query": "VARCHAR(1000)",
+        "method": "VARCHAR(20)",
+        "results": "INTEGER",
+        "source": "VARCHAR(20)",
+        "elapsed_ms": "INTEGER",
+        "id": "VARCHAR(36)",
+        "created_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "knowledge_regression_test_sets": {
+      "columns": {
+        "kb_id": "VARCHAR(36)",
+        "name": "VARCHAR(255)",
+        "description": "TEXT",
+        "updated_at": "TIMESTAMP WITH TIME ZONE",
+        "id": "VARCHAR(36)",
+        "created_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "route_classification_logs": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "session_id": "VARCHAR(64)",
+        "conversation_id": "VARCHAR(36)",
+        "user_message": "VARCHAR(2000)",
+        "route": "VARCHAR(20)",
+        "confidence": "FLOAT",
+        "source": "VARCHAR(20)",
+        "top_matches": "JSONB",
+        "latency_ms": "INTEGER",
+        "created_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "users": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "email": "VARCHAR(255)",
+        "password_hash": "VARCHAR(255)",
+        "avatar_url": "VARCHAR(500)",
+        "role": "VARCHAR(20)",
+        "created_at": "TIMESTAMP WITH TIME ZONE",
+        "updated_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "agent_flow_runs": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "flow_id": "VARCHAR(36)",
+        "version": "INTEGER",
+        "draft_revision": "INTEGER",
+        "snapshot": "JSONB",
+        "actor_id": "VARCHAR(36)",
+        "conversation_id": "VARCHAR(36)",
+        "test": "BOOLEAN",
+        "status": "VARCHAR(30)",
+        "records": "JSONB",
+        "output": "JSONB",
+        "error": "TEXT",
+        "cancel_requested": "BOOLEAN",
+        "duration_ms": "INTEGER",
+        "created_at": "TIMESTAMP WITH TIME ZONE",
+        "updated_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "agent_teams": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "user_id": "VARCHAR(36)",
+        "name": "VARCHAR(200)",
+        "description": "TEXT",
+        "definition": "JSONB",
+        "tags": "JSONB",
+        "status": "VARCHAR(20)",
+        "version": "INTEGER",
+        "run_count": "INTEGER",
+        "last_run_at": "TIMESTAMP WITH TIME ZONE",
+        "created_at": "TIMESTAMP WITH TIME ZONE",
+        "updated_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "api_keys": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "user_id": "VARCHAR(36)",
+        "name": "VARCHAR(100)",
+        "key_hash": "VARCHAR(255)",
+        "last_used": "TIMESTAMP WITH TIME ZONE",
+        "expires_at": "TIMESTAMP WITH TIME ZONE",
+        "revoked": "BOOLEAN",
+        "created_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "conversations": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "title": "VARCHAR(255)",
+        "user_id": "VARCHAR(36)",
+        "type": "VARCHAR(32)",
+        "session_id": "VARCHAR(64)",
+        "intent": "VARCHAR(100)",
+        "rating": "VARCHAR(20)",
+        "status": "VARCHAR(20)",
+        "customer_meta": "JSON",
+        "created_at": "TIMESTAMP WITH TIME ZONE",
+        "updated_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "entry_route_flow_runs": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "flow_id": "VARCHAR(36)",
+        "version": "INTEGER",
+        "draft_revision": "INTEGER",
+        "snapshot": "JSONB",
+        "actor_id": "VARCHAR(36)",
+        "conversation_id": "VARCHAR(36)",
+        "assistant_message_id": "VARCHAR(36)",
+        "test": "BOOLEAN",
+        "status": "VARCHAR(20)",
+        "input_summary": "VARCHAR(2000)",
+        "records": "JSONB",
+        "output": "JSONB",
+        "terminal_node_id": "VARCHAR(100)",
+        "error": "TEXT",
+        "duration_ms": "INTEGER",
+        "created_at": "TIMESTAMP WITH TIME ZONE",
+        "updated_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "knowledge_documents": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "knowledge_base_id": "VARCHAR(36)",
+        "title": "VARCHAR(500)",
+        "content": "TEXT",
+        "chunk_count": "INTEGER",
+        "status": "VARCHAR(50)",
+        "enabled": "BOOLEAN",
+        "original_filename": "VARCHAR(500)",
+        "original_file_type": "VARCHAR(100)",
+        "original_file_size": "INTEGER",
+        "original_file_path": "VARCHAR(1000)",
+        "error_message": "VARCHAR(2000)",
+        "retry_count": "INTEGER",
+        "quality_label": "VARCHAR(20)",
+        "processing_detail": "TEXT",
+        "processing_started_at": "TIMESTAMP WITH TIME ZONE",
+        "downloading_completed_at": "TIMESTAMP WITH TIME ZONE",
+        "parsing_completed_at": "TIMESTAMP WITH TIME ZONE",
+        "normalizing_completed_at": "TIMESTAMP WITH TIME ZONE",
+        "chunking_completed_at": "TIMESTAMP WITH TIME ZONE",
+        "embedding_completed_at": "TIMESTAMP WITH TIME ZONE",
+        "created_at": "TIMESTAMP WITH TIME ZONE",
+        "updated_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "knowledge_regression_cases": {
+      "columns": {
+        "test_set_id": "VARCHAR(36)",
+        "kb_id": "VARCHAR(36)",
+        "name": "VARCHAR(255)",
+        "query": "VARCHAR(1000)",
+        "expected_top_k": "INTEGER",
+        "min_score": "FLOAT",
+        "search_method": "VARCHAR(20)",
+        "top_k": "INTEGER",
+        "reranking_enable": "BOOLEAN",
+        "score_threshold": "FLOAT",
+        "expected_doc_titles": "JSONB",
+        "expected_doc_ids": "JSONB",
+        "required_text": "JSONB",
+        "forbidden_text": "JSONB",
+        "prompt_required_context_text": "JSONB",
+        "updated_at": "TIMESTAMP WITH TIME ZONE",
+        "id": "VARCHAR(36)",
+        "created_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "knowledge_regression_runs": {
+      "columns": {
+        "test_set_id": "VARCHAR(36)",
+        "kb_id": "VARCHAR(36)",
+        "status": "VARCHAR(20)",
+        "total_cases": "INTEGER",
+        "passed_cases": "INTEGER",
+        "failed_cases": "INTEGER",
+        "hit_rate": "FLOAT",
+        "average_rank": "FLOAT",
+        "average_elapsed_ms": "FLOAT",
+        "completed_at": "TIMESTAMP WITH TIME ZONE",
+        "id": "VARCHAR(36)",
+        "created_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "refresh_tokens": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "user_id": "VARCHAR(36)",
+        "token_hash": "VARCHAR(255)",
+        "expires_at": "TIMESTAMP WITH TIME ZONE",
+        "revoked": "BOOLEAN",
+        "created_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "workflows": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "user_id": "VARCHAR(36)",
+        "name": "VARCHAR(200)",
+        "description": "TEXT",
+        "definition": "JSONB",
+        "version": "INTEGER",
+        "status": "VARCHAR(20)",
+        "tags": "VARCHAR[]",
+        "run_count": "INTEGER",
+        "last_run_at": "TIMESTAMP WITH TIME ZONE",
+        "created_at": "TIMESTAMP WITH TIME ZONE",
+        "updated_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "agent_sessions": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "conversation_id": "VARCHAR(36)",
+        "task": "TEXT",
+        "status": "VARCHAR(20)",
+        "scratchpad": "JSONB",
+        "final_summary": "TEXT",
+        "compressed_summary": "TEXT",
+        "runtime_state": "JSONB",
+        "started_at": "TIMESTAMP WITH TIME ZONE",
+        "completed_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "agent_team_runs": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "team_id": "VARCHAR(36)",
+        "user_id": "VARCHAR(36)",
+        "conversation_id": "VARCHAR(36)",
+        "task": "TEXT",
+        "status": "VARCHAR(20)",
+        "mode": "VARCHAR(20)",
+        "messages": "JSONB",
+        "blackboard": "JSONB",
+        "checkpoint": "JSONB",
+        "output": "JSONB",
+        "error": "TEXT",
+        "rounds_count": "INTEGER",
+        "duration_ms": "INTEGER",
+        "started_at": "TIMESTAMP WITH TIME ZONE",
+        "completed_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "conversation_memory": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "conversation_id": "VARCHAR(36)",
+        "summary": "TEXT",
+        "covered_until_message_id": "VARCHAR(36)",
+        "token_count": "INTEGER",
+        "memory_type": "VARCHAR(20)",
+        "created_at": "TIMESTAMP WITH TIME ZONE",
+        "updated_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "knowledge_chunks": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "document_id": "VARCHAR(36)",
+        "knowledge_base_id": "VARCHAR(36)",
+        "chunk_index": "INTEGER",
+        "content": "TEXT",
+        "token_count": "INTEGER",
+        "enabled": "BOOLEAN",
+        "source_type": "VARCHAR(20)",
+        "quality_label": "VARCHAR(20)",
+        "parent_chunk_id": "VARCHAR(36)",
+        "embedding": "VECTOR(1024)",
+        "created_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "knowledge_regression_run_items": {
+      "columns": {
+        "run_id": "VARCHAR(36)",
+        "case_id": "VARCHAR(36)",
+        "passed": "BOOLEAN",
+        "rank": "INTEGER",
+        "score": "FLOAT",
+        "matched_doc_id": "VARCHAR(36)",
+        "failure_reason": "VARCHAR(2000)",
+        "results_snapshot": "JSONB",
+        "prompt_snapshot": "TEXT",
+        "elapsed_ms": "INTEGER",
+        "id": "VARCHAR(36)",
+        "created_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "messages": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "conversation_id": "VARCHAR(36)",
+        "role": "VARCHAR(16)",
+        "type": "VARCHAR(20)",
+        "content": "TEXT",
+        "metadata": "JSON",
+        "model": "VARCHAR(64)",
+        "created_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "satisfaction_ratings": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "conversation_id": "VARCHAR(36)",
+        "message_id": "VARCHAR(36)",
+        "rating": "VARCHAR(20)",
+        "comment": "TEXT",
+        "created_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "workflow_runs": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "workflow_id": "VARCHAR(36)",
+        "user_id": "VARCHAR(36)",
+        "status": "VARCHAR(20)",
+        "input": "JSONB",
+        "output": "JSONB",
+        "checkpoint": "JSONB",
+        "current_step_id": "VARCHAR(100)",
+        "progress": "JSONB",
+        "error": "TEXT",
+        "duration_ms": "INTEGER",
+        "started_at": "TIMESTAMP WITH TIME ZONE",
+        "completed_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "agent_approvals": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "session_id": "VARCHAR(36)",
+        "conversation_id": "VARCHAR(36)",
+        "step_number": "INTEGER",
+        "tool_name": "VARCHAR(128)",
+        "tool_args": "JSONB",
+        "risk_level": "VARCHAR(20)",
+        "reason": "VARCHAR(500)",
+        "status": "VARCHAR(20)",
+        "approved_by": "VARCHAR(36)",
+        "modified_args": "JSONB",
+        "rejection_reason": "VARCHAR(500)",
+        "timeout_ms": "INTEGER",
+        "requested_at": "TIMESTAMP WITH TIME ZONE",
+        "decided_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    },
+    "workflow_step_logs": {
+      "columns": {
+        "id": "VARCHAR(36)",
+        "run_id": "VARCHAR(36)",
+        "step_id": "VARCHAR(100)",
+        "step_type": "VARCHAR(50)",
+        "status": "VARCHAR(20)",
+        "input": "JSONB",
+        "output": "JSONB",
+        "error": "TEXT",
+        "retry_count": "INTEGER",
+        "duration_ms": "INTEGER",
+        "tokens_used": "INTEGER",
+        "events": "JSONB",
+        "started_at": "TIMESTAMP WITH TIME ZONE",
+        "completed_at": "TIMESTAMP WITH TIME ZONE"
+      },
+      "primary_key": [
+        "id"
+      ]
+    }
+  },
+  "statements": [
+    "CREATE EXTENSION IF NOT EXISTS vector",
+    "CREATE TABLE IF NOT EXISTS agent_flows (\n\tid VARCHAR(36) NOT NULL, \n\tname VARCHAR(200) NOT NULL, \n\tscene VARCHAR(30) DEFAULT 'diagnosis' NOT NULL, \n\tdraft JSONB NOT NULL, \n\tdraft_revision INTEGER DEFAULT 1 NOT NULL, \n\tpublished JSONB, \n\tpublished_version INTEGER DEFAULT 0 NOT NULL, \n\tpublished_revision INTEGER DEFAULT 0 NOT NULL, \n\tenabled BOOLEAN DEFAULT false NOT NULL, \n\tarchived BOOLEAN DEFAULT false NOT NULL, \n\tupdated_by VARCHAR(36) NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tupdated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id)\n)",
+    "CREATE TABLE IF NOT EXISTS entry_route_flows (\n\tid VARCHAR(36) NOT NULL, \n\tname VARCHAR(200) NOT NULL, \n\tdraft JSONB NOT NULL, \n\tdraft_revision INTEGER DEFAULT 1 NOT NULL, \n\tpublished JSONB, \n\tpublished_version INTEGER DEFAULT 0 NOT NULL, \n\tpublished_revision INTEGER DEFAULT 0 NOT NULL, \n\tenabled BOOLEAN DEFAULT false NOT NULL, \n\tarchived BOOLEAN DEFAULT false NOT NULL, \n\tupdated_by VARCHAR(36) NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tupdated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tCONSTRAINT entry_route_flows_revisions CHECK (draft_revision > 0 AND published_version >= 0 AND published_revision >= 0 AND published_revision <= draft_revision), \n\tCONSTRAINT entry_route_flows_enabled_published CHECK (NOT enabled OR (published IS NOT NULL AND published_version > 0 AND NOT archived))\n)",
+    "CREATE TABLE IF NOT EXISTS intent_samples (\n\tid VARCHAR(36) NOT NULL, \n\troute VARCHAR(20) NOT NULL, \n\ttext VARCHAR(2000) NOT NULL, \n\tembedding VECTOR(1024), \n\tsource VARCHAR(20) DEFAULT 'manual' NOT NULL, \n\tactive BOOLEAN DEFAULT true NOT NULL, \n\tusage_count INTEGER DEFAULT 0 NOT NULL, \n\tlast_used_at TIMESTAMP WITHOUT TIME ZONE, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tupdated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id)\n)",
+    "CREATE TABLE IF NOT EXISTS knowledge_bases (\n\tid VARCHAR(36) NOT NULL, \n\tname VARCHAR(255) NOT NULL, \n\tdescription TEXT, \n\tcategory VARCHAR(100), \n\tenabled BOOLEAN DEFAULT true NOT NULL, \n\tchunk_size_tokens INTEGER, \n\tchunk_overlap_tokens INTEGER, \n\tseparator_mode VARCHAR(20) DEFAULT 'auto', \n\tcustom_separator VARCHAR(100), \n\tchunk_structure VARCHAR(20) DEFAULT 'paragraph', \n\tchild_chunk_size_tokens INTEGER, \n\tchild_chunk_overlap_tokens INTEGER, \n\tremove_extra_spaces BOOLEAN DEFAULT true NOT NULL, \n\tremove_urls_emails BOOLEAN DEFAULT false NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tupdated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id)\n)",
+    "CREATE TABLE IF NOT EXISTS knowledge_query_logs (\n\tkb_id VARCHAR(36) NOT NULL, \n\tquery VARCHAR(1000) NOT NULL, \n\tmethod VARCHAR(20) DEFAULT 'hybrid' NOT NULL, \n\tresults INTEGER DEFAULT 0 NOT NULL, \n\tsource VARCHAR(20) DEFAULT 'hit_testing' NOT NULL, \n\telapsed_ms INTEGER DEFAULT 0 NOT NULL, \n\tid VARCHAR(36) NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id)\n)",
+    "CREATE TABLE IF NOT EXISTS knowledge_regression_test_sets (\n\tkb_id VARCHAR(36) NOT NULL, \n\tname VARCHAR(255) NOT NULL, \n\tdescription TEXT, \n\tupdated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tid VARCHAR(36) NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id)\n)",
+    "CREATE TABLE IF NOT EXISTS route_classification_logs (\n\tid VARCHAR(36) NOT NULL, \n\tsession_id VARCHAR(64), \n\tconversation_id VARCHAR(36), \n\tuser_message VARCHAR(2000) NOT NULL, \n\troute VARCHAR(20) NOT NULL, \n\tconfidence FLOAT NOT NULL, \n\tsource VARCHAR(20) NOT NULL, \n\ttop_matches JSONB, \n\tlatency_ms INTEGER DEFAULT 0 NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id)\n)",
+    "CREATE TABLE IF NOT EXISTS users (\n\tid VARCHAR(36) NOT NULL, \n\temail VARCHAR(255) NOT NULL, \n\tpassword_hash VARCHAR(255), \n\tavatar_url VARCHAR(500), \n\trole VARCHAR(20) DEFAULT 'user' NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tupdated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tUNIQUE (email)\n)",
+    "CREATE TABLE IF NOT EXISTS agent_flow_runs (\n\tid VARCHAR(36) NOT NULL, \n\tflow_id VARCHAR(36) NOT NULL, \n\tversion INTEGER NOT NULL, \n\tdraft_revision INTEGER, \n\tsnapshot JSONB NOT NULL, \n\tactor_id VARCHAR(36) NOT NULL, \n\tconversation_id VARCHAR(36), \n\ttest BOOLEAN DEFAULT false NOT NULL, \n\tstatus VARCHAR(30) DEFAULT 'running' NOT NULL, \n\trecords JSONB DEFAULT '{}' NOT NULL, \n\toutput JSONB, \n\terror TEXT, \n\tcancel_requested BOOLEAN DEFAULT false NOT NULL, \n\tduration_ms INTEGER DEFAULT 0 NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tupdated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(flow_id) REFERENCES agent_flows (id)\n)",
+    "CREATE TABLE IF NOT EXISTS agent_teams (\n\tid VARCHAR(36) NOT NULL, \n\tuser_id VARCHAR(36) NOT NULL, \n\tname VARCHAR(200) NOT NULL, \n\tdescription TEXT, \n\tdefinition JSONB NOT NULL, \n\ttags JSONB DEFAULT '[]' NOT NULL, \n\tstatus VARCHAR(20) DEFAULT 'draft' NOT NULL, \n\tversion INTEGER DEFAULT 1 NOT NULL, \n\trun_count INTEGER DEFAULT 0 NOT NULL, \n\tlast_run_at TIMESTAMP WITH TIME ZONE, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tupdated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE\n)",
+    "CREATE TABLE IF NOT EXISTS api_keys (\n\tid VARCHAR(36) NOT NULL, \n\tuser_id VARCHAR(36) NOT NULL, \n\tname VARCHAR(100) NOT NULL, \n\tkey_hash VARCHAR(255) NOT NULL, \n\tlast_used TIMESTAMP WITH TIME ZONE, \n\texpires_at TIMESTAMP WITH TIME ZONE, \n\trevoked BOOLEAN DEFAULT false NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE\n)",
+    "CREATE TABLE IF NOT EXISTS conversations (\n\tid VARCHAR(36) NOT NULL, \n\ttitle VARCHAR(255) DEFAULT '\u65b0\u5bf9\u8bdd' NOT NULL, \n\tuser_id VARCHAR(36) NOT NULL, \n\ttype VARCHAR(32) DEFAULT 'agent_chat' NOT NULL, \n\tsession_id VARCHAR(64), \n\tintent VARCHAR(100), \n\trating VARCHAR(20), \n\tstatus VARCHAR(20) DEFAULT 'active', \n\tcustomer_meta JSON, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tupdated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(user_id) REFERENCES users (id)\n)",
+    "CREATE TABLE IF NOT EXISTS entry_route_flow_runs (\n\tid VARCHAR(36) NOT NULL, \n\tflow_id VARCHAR(36) NOT NULL, \n\tversion INTEGER NOT NULL, \n\tdraft_revision INTEGER, \n\tsnapshot JSONB NOT NULL, \n\tactor_id VARCHAR(36) NOT NULL, \n\tconversation_id VARCHAR(36), \n\tassistant_message_id VARCHAR(36), \n\ttest BOOLEAN DEFAULT false NOT NULL, \n\tstatus VARCHAR(20) DEFAULT 'running' NOT NULL, \n\tinput_summary VARCHAR(2000) DEFAULT '' NOT NULL, \n\trecords JSONB DEFAULT '[]' NOT NULL, \n\toutput JSONB, \n\tterminal_node_id VARCHAR(100), \n\terror TEXT, \n\tduration_ms INTEGER DEFAULT 0 NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tupdated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tCONSTRAINT entry_route_flow_runs_status CHECK (status IN ('running', 'completed', 'failed', 'cancelled')), \n\tFOREIGN KEY(flow_id) REFERENCES entry_route_flows (id) ON DELETE RESTRICT\n)",
+    "CREATE TABLE IF NOT EXISTS knowledge_documents (\n\tid VARCHAR(36) NOT NULL, \n\tknowledge_base_id VARCHAR(36) NOT NULL, \n\ttitle VARCHAR(500) NOT NULL, \n\tcontent TEXT NOT NULL, \n\tchunk_count INTEGER DEFAULT 0 NOT NULL, \n\tstatus VARCHAR(50) DEFAULT 'pending' NOT NULL, \n\tenabled BOOLEAN DEFAULT true NOT NULL, \n\toriginal_filename VARCHAR(500), \n\toriginal_file_type VARCHAR(100), \n\toriginal_file_size INTEGER, \n\toriginal_file_path VARCHAR(1000), \n\terror_message VARCHAR(2000), \n\tretry_count INTEGER DEFAULT 0 NOT NULL, \n\tquality_label VARCHAR(20), \n\tprocessing_detail TEXT, \n\tprocessing_started_at TIMESTAMP WITH TIME ZONE, \n\tdownloading_completed_at TIMESTAMP WITH TIME ZONE, \n\tparsing_completed_at TIMESTAMP WITH TIME ZONE, \n\tnormalizing_completed_at TIMESTAMP WITH TIME ZONE, \n\tchunking_completed_at TIMESTAMP WITH TIME ZONE, \n\tembedding_completed_at TIMESTAMP WITH TIME ZONE, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tupdated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(knowledge_base_id) REFERENCES knowledge_bases (id)\n)",
+    "CREATE TABLE IF NOT EXISTS knowledge_regression_cases (\n\ttest_set_id VARCHAR(36) NOT NULL, \n\tkb_id VARCHAR(36) NOT NULL, \n\tname VARCHAR(255) NOT NULL, \n\tquery VARCHAR(1000) NOT NULL, \n\texpected_top_k INTEGER DEFAULT 5 NOT NULL, \n\tmin_score FLOAT, \n\tsearch_method VARCHAR(20) DEFAULT 'hybrid' NOT NULL, \n\ttop_k INTEGER DEFAULT 10 NOT NULL, \n\treranking_enable BOOLEAN DEFAULT true NOT NULL, \n\tscore_threshold FLOAT DEFAULT 0 NOT NULL, \n\texpected_doc_titles JSONB DEFAULT '[]' NOT NULL, \n\texpected_doc_ids JSONB DEFAULT '[]' NOT NULL, \n\trequired_text JSONB DEFAULT '[]' NOT NULL, \n\tforbidden_text JSONB DEFAULT '[]' NOT NULL, \n\tprompt_required_context_text JSONB DEFAULT '[]' NOT NULL, \n\tupdated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tid VARCHAR(36) NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(test_set_id) REFERENCES knowledge_regression_test_sets (id) ON DELETE CASCADE\n)",
+    "CREATE TABLE IF NOT EXISTS knowledge_regression_runs (\n\ttest_set_id VARCHAR(36) NOT NULL, \n\tkb_id VARCHAR(36) NOT NULL, \n\tstatus VARCHAR(20) DEFAULT 'running' NOT NULL, \n\ttotal_cases INTEGER DEFAULT 0 NOT NULL, \n\tpassed_cases INTEGER DEFAULT 0 NOT NULL, \n\tfailed_cases INTEGER DEFAULT 0 NOT NULL, \n\thit_rate FLOAT DEFAULT 0 NOT NULL, \n\taverage_rank FLOAT, \n\taverage_elapsed_ms FLOAT, \n\tcompleted_at TIMESTAMP WITH TIME ZONE, \n\tid VARCHAR(36) NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(test_set_id) REFERENCES knowledge_regression_test_sets (id) ON DELETE CASCADE\n)",
+    "CREATE TABLE IF NOT EXISTS refresh_tokens (\n\tid VARCHAR(36) NOT NULL, \n\tuser_id VARCHAR(36) NOT NULL, \n\ttoken_hash VARCHAR(255) NOT NULL, \n\texpires_at TIMESTAMP WITH TIME ZONE NOT NULL, \n\trevoked BOOLEAN DEFAULT false NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE\n)",
+    "CREATE TABLE IF NOT EXISTS workflows (\n\tid VARCHAR(36) NOT NULL, \n\tuser_id VARCHAR(36) NOT NULL, \n\tname VARCHAR(200) NOT NULL, \n\tdescription TEXT, \n\tdefinition JSONB NOT NULL, \n\tversion INTEGER DEFAULT 1 NOT NULL, \n\tstatus VARCHAR(20) DEFAULT 'draft' NOT NULL, \n\ttags VARCHAR[] DEFAULT '{}' NOT NULL, \n\trun_count INTEGER DEFAULT 0 NOT NULL, \n\tlast_run_at TIMESTAMP WITH TIME ZONE, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tupdated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(user_id) REFERENCES users (id) ON DELETE CASCADE\n)",
+    "CREATE TABLE IF NOT EXISTS agent_sessions (\n\tid VARCHAR(36) NOT NULL, \n\tconversation_id VARCHAR(36) NOT NULL, \n\ttask TEXT NOT NULL, \n\tstatus VARCHAR(20) DEFAULT 'running' NOT NULL, \n\tscratchpad JSONB DEFAULT '[]' NOT NULL, \n\tfinal_summary TEXT, \n\tcompressed_summary TEXT, \n\truntime_state JSONB, \n\tstarted_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tcompleted_at TIMESTAMP WITH TIME ZONE, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id) ON DELETE CASCADE\n)",
+    "CREATE TABLE IF NOT EXISTS agent_team_runs (\n\tid VARCHAR(36) NOT NULL, \n\tteam_id VARCHAR(36) NOT NULL, \n\tuser_id VARCHAR(36) NOT NULL, \n\tconversation_id VARCHAR(36), \n\ttask TEXT NOT NULL, \n\tstatus VARCHAR(20) DEFAULT 'running' NOT NULL, \n\tmode VARCHAR(20) NOT NULL, \n\tmessages JSONB DEFAULT '[]' NOT NULL, \n\tblackboard JSONB DEFAULT '{}' NOT NULL, \n\tcheckpoint JSONB, \n\toutput JSONB, \n\terror TEXT, \n\trounds_count INTEGER DEFAULT 0 NOT NULL, \n\tduration_ms INTEGER, \n\tstarted_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tcompleted_at TIMESTAMP WITH TIME ZONE, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(user_id) REFERENCES users (id), \n\tFOREIGN KEY(team_id) REFERENCES agent_teams (id) ON DELETE CASCADE\n)",
+    "CREATE TABLE IF NOT EXISTS conversation_memory (\n\tid VARCHAR(36) NOT NULL, \n\tconversation_id VARCHAR(36) NOT NULL, \n\tsummary TEXT, \n\tcovered_until_message_id VARCHAR(36), \n\ttoken_count INTEGER DEFAULT 0 NOT NULL, \n\tmemory_type VARCHAR(20) DEFAULT 'summary' NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tupdated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tUNIQUE (conversation_id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id) ON DELETE CASCADE\n)",
+    "CREATE TABLE IF NOT EXISTS knowledge_chunks (\n\tid VARCHAR(36) NOT NULL, \n\tdocument_id VARCHAR(36) NOT NULL, \n\tknowledge_base_id VARCHAR(36) NOT NULL, \n\tchunk_index INTEGER NOT NULL, \n\tcontent TEXT NOT NULL, \n\ttoken_count INTEGER DEFAULT 0 NOT NULL, \n\tenabled BOOLEAN DEFAULT true NOT NULL, \n\tsource_type VARCHAR(20), \n\tquality_label VARCHAR(20), \n\tparent_chunk_id VARCHAR(36), \n\tembedding VECTOR(1024), \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(document_id) REFERENCES knowledge_documents (id), \n\tFOREIGN KEY(parent_chunk_id) REFERENCES knowledge_chunks (id) ON DELETE SET NULL, \n\tFOREIGN KEY(knowledge_base_id) REFERENCES knowledge_bases (id)\n)",
+    "CREATE TABLE IF NOT EXISTS knowledge_regression_run_items (\n\trun_id VARCHAR(36) NOT NULL, \n\tcase_id VARCHAR(36) NOT NULL, \n\tpassed BOOLEAN NOT NULL, \n\trank INTEGER, \n\tscore FLOAT, \n\tmatched_doc_id VARCHAR(36), \n\tfailure_reason VARCHAR(2000), \n\tresults_snapshot JSONB DEFAULT '[]' NOT NULL, \n\tprompt_snapshot TEXT, \n\telapsed_ms INTEGER DEFAULT 0 NOT NULL, \n\tid VARCHAR(36) NOT NULL, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(run_id) REFERENCES knowledge_regression_runs (id) ON DELETE CASCADE, \n\tFOREIGN KEY(case_id) REFERENCES knowledge_regression_cases (id) ON DELETE CASCADE\n)",
+    "CREATE TABLE IF NOT EXISTS messages (\n\tid VARCHAR(36) NOT NULL, \n\tconversation_id VARCHAR(36) NOT NULL, \n\trole VARCHAR(16) NOT NULL, \n\ttype VARCHAR(20) DEFAULT 'text' NOT NULL, \n\tcontent TEXT NOT NULL, \n\tmetadata JSON, \n\tmodel VARCHAR(64), \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id) ON DELETE CASCADE\n)",
+    "CREATE TABLE IF NOT EXISTS satisfaction_ratings (\n\tid VARCHAR(36) NOT NULL, \n\tconversation_id VARCHAR(36) NOT NULL, \n\tmessage_id VARCHAR(36), \n\trating VARCHAR(20) NOT NULL, \n\tcomment TEXT, \n\tcreated_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id) ON DELETE CASCADE\n)",
+    "CREATE TABLE IF NOT EXISTS workflow_runs (\n\tid VARCHAR(36) NOT NULL, \n\tworkflow_id VARCHAR(36) NOT NULL, \n\tuser_id VARCHAR(36) NOT NULL, \n\tstatus VARCHAR(20) DEFAULT 'running' NOT NULL, \n\tinput JSONB DEFAULT '{}' NOT NULL, \n\toutput JSONB, \n\tcheckpoint JSONB, \n\tcurrent_step_id VARCHAR(100), \n\tprogress JSONB DEFAULT '{}' NOT NULL, \n\terror TEXT, \n\tduration_ms INTEGER, \n\tstarted_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tcompleted_at TIMESTAMP WITH TIME ZONE, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(workflow_id) REFERENCES workflows (id) ON DELETE CASCADE, \n\tFOREIGN KEY(user_id) REFERENCES users (id)\n)",
+    "CREATE TABLE IF NOT EXISTS agent_approvals (\n\tid VARCHAR(36) NOT NULL, \n\tsession_id VARCHAR(36) NOT NULL, \n\tconversation_id VARCHAR(36) NOT NULL, \n\tstep_number INTEGER NOT NULL, \n\ttool_name VARCHAR(128) NOT NULL, \n\ttool_args JSONB NOT NULL, \n\trisk_level VARCHAR(20) NOT NULL, \n\treason VARCHAR(500) NOT NULL, \n\tstatus VARCHAR(20) DEFAULT 'pending' NOT NULL, \n\tapproved_by VARCHAR(36), \n\tmodified_args JSONB, \n\trejection_reason VARCHAR(500), \n\ttimeout_ms INTEGER DEFAULT 300000 NOT NULL, \n\trequested_at TIMESTAMP WITH TIME ZONE DEFAULT now() NOT NULL, \n\tdecided_at TIMESTAMP WITH TIME ZONE, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(session_id) REFERENCES agent_sessions (id) ON DELETE CASCADE, \n\tFOREIGN KEY(conversation_id) REFERENCES conversations (id) ON DELETE CASCADE\n)",
+    "CREATE TABLE IF NOT EXISTS workflow_step_logs (\n\tid VARCHAR(36) NOT NULL, \n\trun_id VARCHAR(36) NOT NULL, \n\tstep_id VARCHAR(100) NOT NULL, \n\tstep_type VARCHAR(50) NOT NULL, \n\tstatus VARCHAR(20) DEFAULT 'pending' NOT NULL, \n\tinput JSONB, \n\toutput JSONB, \n\terror TEXT, \n\tretry_count INTEGER DEFAULT 0 NOT NULL, \n\tduration_ms INTEGER, \n\ttokens_used INTEGER DEFAULT 0 NOT NULL, \n\tevents JSONB DEFAULT '[]' NOT NULL, \n\tstarted_at TIMESTAMP WITH TIME ZONE, \n\tcompleted_at TIMESTAMP WITH TIME ZONE, \n\tPRIMARY KEY (id), \n\tFOREIGN KEY(run_id) REFERENCES workflow_runs (id) ON DELETE CASCADE\n)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS entry_route_flows_one_enabled ON entry_route_flows ((true)) WHERE enabled = true",
+    "CREATE INDEX IF NOT EXISTS ix_intent_samples_active ON intent_samples (active)",
+    "CREATE INDEX IF NOT EXISTS ix_intent_samples_route ON intent_samples (route)",
+    "CREATE INDEX IF NOT EXISTS ix_query_log_created ON knowledge_query_logs (created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_query_log_kb ON knowledge_query_logs (kb_id)",
+    "CREATE INDEX IF NOT EXISTS ix_regression_test_sets_kb ON knowledge_regression_test_sets (kb_id)",
+    "CREATE INDEX IF NOT EXISTS ix_route_classification_log_created ON route_classification_logs (created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_route_classification_log_route ON route_classification_logs (route)",
+    "CREATE INDEX IF NOT EXISTS ix_route_classification_log_session ON route_classification_logs (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_route_classification_log_source ON route_classification_logs (source)",
+    "CREATE INDEX IF NOT EXISTS agent_flow_runs_conversation_id_status_idx ON agent_flow_runs (conversation_id, status)",
+    "CREATE INDEX IF NOT EXISTS agent_flow_runs_flow_id_created_at_idx ON agent_flow_runs (flow_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS agent_teams_status_idx ON agent_teams (status)",
+    "CREATE INDEX IF NOT EXISTS agent_teams_updated_at_idx ON agent_teams (updated_at)",
+    "CREATE INDEX IF NOT EXISTS agent_teams_user_id_idx ON agent_teams (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_api_keys_key_hash ON api_keys (key_hash)",
+    "CREATE INDEX IF NOT EXISTS ix_api_keys_user_id ON api_keys (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_conversations_session_id ON conversations (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_conversations_type_created ON conversations (type, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_conversations_user_id ON conversations (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_conversations_user_updated ON conversations (user_id, updated_at)",
+    "CREATE INDEX IF NOT EXISTS entry_route_flow_runs_conversation_id_idx ON entry_route_flow_runs (conversation_id)",
+    "CREATE INDEX IF NOT EXISTS entry_route_flow_runs_flow_id_created_at_id_idx ON entry_route_flow_runs (flow_id, created_at, id)",
+    "CREATE INDEX IF NOT EXISTS ix_knowledge_documents_kb_id ON knowledge_documents (knowledge_base_id)",
+    "CREATE INDEX IF NOT EXISTS ix_regression_cases_kb ON knowledge_regression_cases (kb_id)",
+    "CREATE INDEX IF NOT EXISTS ix_regression_cases_test_set ON knowledge_regression_cases (test_set_id)",
+    "CREATE INDEX IF NOT EXISTS ix_regression_runs_created ON knowledge_regression_runs (created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_regression_runs_kb ON knowledge_regression_runs (kb_id)",
+    "CREATE INDEX IF NOT EXISTS ix_regression_runs_test_set ON knowledge_regression_runs (test_set_id)",
+    "CREATE INDEX IF NOT EXISTS ix_refresh_tokens_token_hash ON refresh_tokens (token_hash)",
+    "CREATE INDEX IF NOT EXISTS ix_refresh_tokens_user_id ON refresh_tokens (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_workflows_user_id ON workflows (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_workflows_user_status ON workflows (user_id, status)",
+    "CREATE INDEX IF NOT EXISTS ix_agent_sessions_conversation_id ON agent_sessions (conversation_id)",
+    "CREATE INDEX IF NOT EXISTS agent_team_runs_started_at_idx ON agent_team_runs (started_at)",
+    "CREATE INDEX IF NOT EXISTS agent_team_runs_status_idx ON agent_team_runs (status)",
+    "CREATE INDEX IF NOT EXISTS agent_team_runs_team_id_idx ON agent_team_runs (team_id)",
+    "CREATE INDEX IF NOT EXISTS agent_team_runs_user_id_idx ON agent_team_runs (user_id)",
+    "CREATE INDEX IF NOT EXISTS ix_knowledge_chunks_doc_id ON knowledge_chunks (document_id)",
+    "CREATE INDEX IF NOT EXISTS ix_knowledge_chunks_embedding_cosine ON knowledge_chunks USING hnsw (embedding vector_cosine_ops)",
+    "CREATE INDEX IF NOT EXISTS ix_knowledge_chunks_kb_id ON knowledge_chunks (knowledge_base_id)",
+    "CREATE INDEX IF NOT EXISTS ix_regression_run_items_case ON knowledge_regression_run_items (case_id)",
+    "CREATE INDEX IF NOT EXISTS ix_regression_run_items_run ON knowledge_regression_run_items (run_id)",
+    "CREATE INDEX IF NOT EXISTS ix_messages_conversation_created ON messages (conversation_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_messages_conversation_id ON messages (conversation_id)",
+    "CREATE INDEX IF NOT EXISTS ix_satisfaction_ratings_conversation_id ON satisfaction_ratings (conversation_id)",
+    "CREATE INDEX IF NOT EXISTS ix_satisfaction_ratings_created_at ON satisfaction_ratings (created_at)",
+    "CREATE INDEX IF NOT EXISTS ix_satisfaction_ratings_rating ON satisfaction_ratings (rating)",
+    "CREATE INDEX IF NOT EXISTS ix_workflow_runs_started ON workflow_runs (started_at)",
+    "CREATE INDEX IF NOT EXISTS ix_workflow_runs_user_status ON workflow_runs (user_id, status)",
+    "CREATE INDEX IF NOT EXISTS ix_workflow_runs_workflow ON workflow_runs (workflow_id)",
+    "CREATE INDEX IF NOT EXISTS ix_agent_approvals_session_id ON agent_approvals (session_id)",
+    "CREATE INDEX IF NOT EXISTS ix_agent_approvals_status ON agent_approvals (status)",
+    "CREATE INDEX IF NOT EXISTS ix_workflow_step_logs_run ON workflow_step_logs (run_id)",
+    "CREATE INDEX IF NOT EXISTS ix_workflow_step_logs_run_step ON workflow_step_logs (run_id, step_id)"
+  ]
+}

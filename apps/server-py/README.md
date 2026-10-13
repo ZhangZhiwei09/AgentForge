@@ -176,3 +176,25 @@ diagnosis runtime with request-scoped knowledge retrieval. Tool, routing,
 citation and HTTP metrics are recorded along their actual execution paths;
 HTTP metric labels use route templates. Focused tests:
 `tests/test_platform_api.py`.
+
+Python owns database bootstrap and upgrades. From this directory:
+
+```powershell
+uv run python -m src.database upgrade
+uv run python -m src.database check
+uv run python -m src.database create-admin --email admin@agentforge.local
+```
+
+`create-admin` prompts for a password or reads `AGENTFORGE_ADMIN_PASSWORD`.
+It never resets an existing administrator password or promotes an existing
+ordinary user. No default privileged credentials are seeded.
+
+`upgrade` creates a fresh pgvector schema from frozen versioned DDL, or adopts
+compatible existing Prisma/Alembic tables in one transaction. It checks columns,
+types and primary keys, creates missing tables/indexes and records the Python
+baseline. Incompatible existing columns require an explicit repair migration;
+the command does not drop data or resize existing embeddings. Historical
+Alembic revisions remain readable. Use this command for initial bootstrap;
+the old Alembic chain alone depended on externally created Prisma tables.
+All existing business and retained workflow/team tables are registered in
+SQLAlchemy. PostgreSQL bootstrap/adoption tests: `tests/test_database.py`.
