@@ -39,9 +39,21 @@ resumption. Final task text is checked and masked before being emitted.
 Interrupted tasks fail without replaying tools with uncertain external outcomes;
 process death may leave a running session requiring operator reconciliation.
 Chat TASK integration, complete retrieval/citation production and cancellation
-acceptance, knowledge administration, ingestion
+acceptance, knowledge ingestion,
 workers and other public APIs remain to migrate. The default `pnpm dev` continues
 to start both backends until the complete public API has passed acceptance.
+
+Knowledge administration now supports base CRUD, document reads/deletion,
+chunk reads/edits, preview and statistics. Base settings use snake_case;
+document/chunk DTOs retain camelCase and document processing timestamps.
+Partial settings updates validate the merged configuration. Preview reuses the
+ingestion splitter with fixed separators, explicit zero overlap and parent/child
+chunks. Chunk edits require a finite 1024-dimensional embedding and commit it
+with the text; provider failures preserve the existing chunk. Elasticsearch
+sync is optional through `ELASTICSEARCH_URL`; failures are logged and SQL remains
+authoritative. Upload, document creation/processing and hybrid retrieval remain
+subsequent migration units. All knowledge administration and ingest endpoints
+require authentication.
 
 From this directory:
 
@@ -75,9 +87,16 @@ uv run pytest -p no:cacheprovider tests/test_auth.py tests/test_auth_api.py test
 uv run pytest -p no:cacheprovider tests/test_entry_flows.py tests/test_entry_flow_api.py tests/test_entry_decision.py tests/test_business_classifier.py tests/test_entry_chat_api.py
 uv run pytest -p no:cacheprovider tests/test_chat_compatibility.py tests/test_conversation_history.py
 uv run pytest -p no:cacheprovider tests/test_agent_tasks_api.py
+uv run pytest -p no:cacheprovider tests/test_knowledge_management_api.py tests/test_rag_splitter.py
 ```
 
 HTTP authentication and entry/chat tests create isolated SQLite databases.
 They never migrate or modify the configured PostgreSQL database. PostgreSQL
 activation locks, diagnosis checkpoints and complete frontend acceptance are
 still required before the full backend cutover.
+
+Task, entry-flow and knowledge HTTP tests can also use a disposable PostgreSQL
+database. Set `AGENTFORGE_TEST_POSTGRES_URL` to an asyncpg URL whose database is
+`agentforge_python_migration` or starts with `agentforge_test_`, with the `vector`
+extension installed. Each test creates and drops its own uniquely named schema;
+existing tables and the public schema are preserved.

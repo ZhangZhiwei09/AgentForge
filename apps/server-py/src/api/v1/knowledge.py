@@ -5,14 +5,17 @@ POST /api/knowledge/ingest —— 摄入文档（split → embed → store）
 
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from src.api.deps import get_current_user
 from src.rag.ingestion import ingest_document
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/knowledge", tags=["knowledge"])
+router = APIRouter(
+    prefix="/api/knowledge", tags=["knowledge"], dependencies=[Depends(get_current_user)],
+)
 
 
 class IngestRequest(BaseModel):

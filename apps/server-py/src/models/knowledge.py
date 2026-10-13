@@ -83,6 +83,15 @@ class KnowledgeDocument(Base):
     parsing_completed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    normalizing_completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    chunking_completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    embedding_completed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -120,7 +129,7 @@ class KnowledgeChunk(Base):
     source_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     quality_label: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     parent_chunk_id: Mapped[Optional[str]] = mapped_column(
-        String(36), ForeignKey("knowledge_chunks.id"), nullable=True
+        String(36), ForeignKey("knowledge_chunks.id", ondelete="SET NULL"), nullable=True
     )
     # Phase B 新增: pgvector embedding（维度对齐本地 Ollama bge-m3, 1024d）
     embedding: Mapped[Optional[list[float]]] = mapped_column(

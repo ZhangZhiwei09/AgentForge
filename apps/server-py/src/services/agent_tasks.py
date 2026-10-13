@@ -201,13 +201,14 @@ async def claim_approval(
     now = datetime.now(UTC)
     requested = approval.requested_at.replace(tzinfo=UTC) if approval.requested_at.tzinfo is None else approval.requested_at
     if (now - requested).total_seconds() * 1000 > approval.timeout_ms:
-        expired = await db.execute(update(AgentApproval).where(
-            AgentApproval.id == approval_id, AgentApproval.status == "pending",
-        ).values(status="timed_out", decided_at=now))
+        # Match approval/resume lock order: session first, then approval.
         failed = await db.execute(update(AgentSession).where(
             AgentSession.id == session.id, AgentSession.status == "paused",
             AgentSession.runtime_state == session.runtime_state,
         ).values(status="failed", final_summary="Approval request has timed out", completed_at=now))
+        expired = await db.execute(update(AgentApproval).where(
+            AgentApproval.id == approval_id, AgentApproval.status == "pending",
+        ).values(status="timed_out", decided_at=now))
         if expired.rowcount != 1 or failed.rowcount != 1:
             await db.rollback()
             raise HTTPException(409, "Approval has already been decided")

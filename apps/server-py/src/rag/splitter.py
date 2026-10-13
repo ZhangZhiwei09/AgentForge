@@ -124,6 +124,7 @@ class RecursiveTokenTextSplitter:
         chunk_size: int | None = None,
         chunk_overlap: int | None = None,
         separators: Sequence[str] | None = None,
+        fixed_separator: str | None = None,
     ) -> None:
         """初始化分片器。
 
@@ -132,9 +133,12 @@ class RecursiveTokenTextSplitter:
             chunk_overlap: chunk 之间的重叠 token 数
             separators: 分隔符优先级列表（从大到小）
         """
-        self._chunk_size = chunk_size or settings.chunk_size_tokens
-        self._chunk_overlap = chunk_overlap or settings.chunk_overlap_tokens
+        self._chunk_size = settings.chunk_size_tokens if chunk_size is None else chunk_size
+        self._chunk_overlap = settings.chunk_overlap_tokens if chunk_overlap is None else chunk_overlap
+        if self._chunk_size <= 0 or not 0 <= self._chunk_overlap < self._chunk_size:
+            raise ValueError("chunk_overlap must be nonnegative and less than chunk_size")
         self._separators = list(separators) if separators else DEFAULT_SEPARATORS
+        self._fixed_separator = fixed_separator
 
     def split_text(self, text: str) -> list[str]:
         """将文本分割为 chunk 列表。
@@ -148,8 +152,41 @@ class RecursiveTokenTextSplitter:
         if not text.strip():
             return []
 
-        chunks = self._split_recursive(text, self._separators)
-        return self._merge_chunks(chunks)
+        if self._fixed_separator:
+            separator = re.sub(r"\\([nrt\\])", lambda match: {
+                "n": "\n", "r": "\r", "t": "\t", "\\": "\\",
+            }[match[1]], self._fixed_separator)
+            chunks = []
+            for part in text.split(separator):
+                if part:
+                    chunks.extend(self._merge_chunks(self._split_recursive(part, self._separators)))
+        else:
+            chunks = self._merge_chunks(self._split_recursive(text, self._separators))
+        return self._with_overlap(chunks)
+
+    def split_hierarchical(
+        self, text: str, child_chunk_size: int = 400, child_chunk_overlap: int = 60,
+    ) -> tuple[list[str], dict[int, list[str]]]:
+        parents = self.split_text(text)
+        child_splitter = RecursiveTokenTextSplitter(
+            child_chunk_size, child_chunk_overlap, fixed_separator=self._fixed_separator,
+        )
+        return parents, {index: child_splitter.split_text(parent) for index, parent in enumerate(parents)}
+
+    def _with_overlap(self, chunks: list[str]) -> list[str]:
+        if not self._chunk_overlap or len(chunks) < 2:
+            return chunks
+        output = [chunks[0]]
+        for previous, chunk in zip(chunks, chunks[1:]):
+            # Keep the longest previous suffix that fits both budgets.
+            suffix = ""
+            for start in range(len(previous) - 1, -1, -1):
+                candidate = previous[start:]
+                if estimate_tokens(candidate) > self._chunk_overlap or estimate_tokens(candidate + chunk) > self._chunk_size:
+                    break
+                suffix = candidate
+            output.append(suffix + chunk)
+        return output
 
     def _split_recursive(self, text: str, separators: list[str]) -> list[str]:
         """递归分割：按分隔符优先级逐级拆分。"""

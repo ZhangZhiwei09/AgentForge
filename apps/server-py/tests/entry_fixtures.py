@@ -1,9 +1,13 @@
 """Disposable SQL database shared by entry API and signed-in chat tests."""
 
+import os
+import uuid
+
 import httpx
 import pytest_asyncio
 from fastapi import HTTPException, Request
-from sqlalchemy import event
+from sqlalchemy import event, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from src.api.deps import get_chat_user, get_current_user, get_db
@@ -18,13 +22,26 @@ from src.models.user import User
 
 @pytest_asyncio.fixture
 async def entry_api(tmp_path):
-    engine = create_async_engine(f"sqlite+aiosqlite:///{(tmp_path / 'entry.db').as_posix()}")
+    postgres_url = os.environ.get("AGENTFORGE_TEST_POSTGRES_URL")
+    schema = None
+    if postgres_url:
+        database = make_url(postgres_url).database or ""
+        if database != "agentforge_python_migration" and not database.startswith("agentforge_test_"):
+            raise ValueError("PostgreSQL tests require an explicitly named disposable test database")
+        schema = f"migration_test_{uuid.uuid4().hex}"
+        engine = create_async_engine(postgres_url, connect_args={
+            "server_settings": {"search_path": f"{schema},public"},
+        })
+        async with engine.begin() as connection:
+            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    else:
+        engine = create_async_engine(f"sqlite+aiosqlite:///{(tmp_path / 'entry.db').as_posix()}")
 
-    @event.listens_for(engine.sync_engine, "connect")
-    def enable_foreign_keys(connection, _):
-        cursor = connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
+        @event.listens_for(engine.sync_engine, "connect")
+        def enable_foreign_keys(connection, _):
+            cursor = connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
 
     async with engine.begin() as connection:
         await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=[
@@ -60,6 +77,9 @@ async def entry_api(tmp_path):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             yield client, sessions
     finally:
+        if schema:
+            async with engine.begin() as connection:
+                await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
         await engine.dispose()
 
 

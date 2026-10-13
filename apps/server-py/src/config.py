@@ -46,6 +46,7 @@ class Settings(BaseSettings):
 
     # ── PgVector ────────────────────────────────────────
     pgvector_enabled: bool = Field(default=False)
+    elasticsearch_url: str = Field(default="")
 
     # ── Langfuse ────────────────────────────────────────
     langfuse_enabled: bool = Field(default=False)
