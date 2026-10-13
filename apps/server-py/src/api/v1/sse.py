@@ -15,10 +15,13 @@ from src.agent.types import (
     DiagnosisPhaseDone,
     DiagnosisStarted,
     DiagnosisWaitingInput,
+    StreamCitations,
+    StreamClear,
     StreamDone,
     StreamError,
     StreamMeta,
     StreamToken,
+    StreamTraceStep,
 )
 
 
@@ -57,6 +60,21 @@ def _(event: StreamDone) -> dict:
 @_sse_payload.register
 def _(event: StreamError) -> dict:
     return {"type": "error", "content": event.content}
+
+
+@_sse_payload.register
+def _(event: StreamClear) -> dict:
+    return {"type": event.type, "message_id": event.message_id}
+
+
+@_sse_payload.register
+def _(event: StreamCitations) -> dict:
+    return {"type": event.type, "items": event.items}
+
+
+@_sse_payload.register
+def _(event: StreamTraceStep) -> dict:
+    return {"type": event.type, "step": event.step}
 
 
 @_sse_payload.register
@@ -120,9 +138,11 @@ def _(event: DiagnosisWaitingInput) -> dict:
     }
 
 
-async def _to_sse(events: AsyncIterator) -> AsyncIterator[str]:
+async def _to_sse(events: AsyncIterator, *, terminal_marker: bool = False) -> AsyncIterator[str]:
     """将 Agent 事件流转为 SSE 格式字符串流。"""
     async with aclosing(events):
         async for event in events:
             payload = json.dumps(_sse_payload(event), ensure_ascii=False)
             yield f"data: {payload}\n\n"
+    if terminal_marker:
+        yield "data: [DONE]\n\n"

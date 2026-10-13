@@ -9,7 +9,10 @@ from src.models.chat import Message
 
 
 async def test_filtered_page_keeps_cursor_for_older_messages(monkeypatch):
-    conversation = SimpleNamespace(user_id="user-1")
+    conversation = SimpleNamespace(
+        id="conv-1", user_id="user-1", session_id="old-session",
+        created_at=datetime(2026, 10, 9, 10, 0), intent=None,
+    )
     monkeypatch.setattr(
         "src.api.v1.conversations._find_conversation",
         AsyncMock(return_value=conversation),

@@ -566,6 +566,17 @@ export function useAgentChatStream() {
                 continue;
               }
 
+              if (chunk.type === "clear_stream") {
+                streamContent = "";
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  return last?.id === "__stream__"
+                    ? [...prev.slice(0, -1), { ...last, content: "" }]
+                    : prev;
+                });
+                continue;
+              }
+
               // ── 诊断事件处理 ──
               if (chunk.type === "diagnosis_started") {
                 diagnosisProgress = {

@@ -55,7 +55,10 @@ def dependencies(monkeypatch):
 
 def frames(response):
     assert response.status_code == 200, response.text
-    return [json.loads(line[6:]) for line in response.text.splitlines() if line.startswith("data: ")]
+    return [
+        json.loads(line[6:]) for line in response.text.splitlines()
+        if line.startswith("data: ") and line != "data: [DONE]"
+    ]
 
 
 def answer(events):
@@ -364,7 +367,7 @@ async def test_assistant_and_entry_run_link_share_one_transaction(entry_api, dep
 
 
 async def test_existing_access_token_reaches_python_chat_and_admin_routes(entry_api, dependencies):
-    from src.api.deps import get_current_user
+    from src.api.deps import get_chat_user, get_current_user
     from src.models.user import User
     from src.services.auth import _create_tokens
 
@@ -374,6 +377,7 @@ async def test_existing_access_token_reaches_python_chat_and_admin_routes(entry_
         admin_tokens = _create_tokens(await db.get(User, "admin"))
     app = client._transport.app
     app.dependency_overrides.pop(get_current_user)
+    app.dependency_overrides.pop(get_chat_user)
     events = frames(await client.post("/api/agent/chat", json={"message": "你好"}, headers={
         "Authorization": f"Bearer {user_tokens['accessToken']}",
     }))

@@ -87,6 +87,25 @@ class StreamError:
 
 
 @dataclass(slots=True)
+class StreamClear:
+    """Replace previously streamed text after a retry or fallback."""
+    type: str = "clear_stream"
+    message_id: str = ""
+
+
+@dataclass(slots=True)
+class StreamCitations:
+    type: str = "citations"
+    items: list[dict] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class StreamTraceStep:
+    type: str = "trace_step"
+    step: dict = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class DiagnosisStarted:
     """Multi-Agent 诊断启动事件 —— 通知前端开始诊断流程。"""
     type: str = "diagnosis_started"
@@ -150,6 +169,7 @@ class DiagnosisWaitingInput:
 
 # Union type alias（Python 3.12+ 的 type statement）
 type RouteStreamEvent = (StreamMeta | StreamToken | StreamDone | StreamError
+    | StreamClear | StreamCitations | StreamTraceStep
     | DiagnosisStarted | DiagnosisPhase | DiagnosisPhaseDone
     | DiagnosisCompleted | ClarificationNeeded | DiagnosisWaitingInput)
 

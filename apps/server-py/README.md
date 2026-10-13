@@ -8,17 +8,29 @@ supported. Signout revokes all refresh sessions for the authenticated user.
 Existing access tokens remain valid until expiry.
 
 Python also owns the entry-route flow management API and enterprise entry
-decisions for authenticated chat. The editor keeps its existing camelCase DTOs,
+decisions for authenticated and anonymous chat. The editor keeps its existing camelCase DTOs,
 draft revisions, publication, activation, test runs and redacted audit records.
 Signed-in chat applies safety and explicit controls first, resumes owned waiting
 diagnoses, executes a published entry flow, then makes at most one business
 classification call. Fixed replies do not need a model provider. Replies retain
 entry provenance and clarification/diagnosis metadata in message history.
+Public chat preserves the legacy anonymous actor, rejects supplied invalid
+credentials, and resolves `conversation_id` before the old `session_id` alias.
+Anonymous conversation lists require a session alias; V1 chat, deletion and
+administration still require authentication. An absent reserved actor is created
+without a password; existing actor credentials are preserved.
+
+History supports full reads for legacy clients and explicit compound cursor
+pagination for the current frontend. Citation and trace events retain their
+payloads and final state in history, cleared drafts are replaced, and diagnosis
+phases/waiting states use the frontend DTOs. Streams end with `[DONE]`; cancelled
+requests finish saving emitted output and release their conversation locks.
+Citation retrieval/generation parity remains part of knowledge consultation work.
 
 Configured diagnosis runs reuse the existing Python flow runtime directly.
 TASK consultation still uses the existing executor pending complete knowledge
-consultation parity. Anonymous chat, session/approval APIs, the complete
-citation/timeline/cancellation contract, knowledge administration, ingestion
+consultation parity. Session/approval APIs, complete retrieval/citation production
+and cancellation acceptance, knowledge administration, ingestion
 workers and other public APIs remain to migrate. The default `pnpm dev` continues
 to start both backends until the complete public API has passed acceptance.
 
@@ -52,6 +64,7 @@ Focused validation:
 ```powershell
 uv run pytest -p no:cacheprovider tests/test_auth.py tests/test_auth_api.py tests/test_platform_dev.py tests/test_config.py
 uv run pytest -p no:cacheprovider tests/test_entry_flows.py tests/test_entry_flow_api.py tests/test_entry_decision.py tests/test_business_classifier.py tests/test_entry_chat_api.py
+uv run pytest -p no:cacheprovider tests/test_chat_compatibility.py tests/test_conversation_history.py
 ```
 
 HTTP authentication and entry/chat tests create isolated SQLite databases.

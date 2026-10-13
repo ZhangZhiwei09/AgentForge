@@ -14,6 +14,7 @@ from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.db import async_session
@@ -24,6 +25,7 @@ from src.services.auth import authenticate
 # HTTPBearer 自动从 Authorization: Bearer <token> 头提取 token
 # 缺少凭证由依赖统一返回 401；兼容已有 api_key 查询参数。
 security = HTTPBearer(auto_error=False)
+ANONYMOUS_USER_ID = "00000000-0000-0000-0000-000000000002"
 
 
 # ---- 数据库会话 ----
@@ -68,4 +70,33 @@ async def get_current_user(
             detail="Invalid or expired token",
         )
 
+    return user
+
+
+async def get_chat_user(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> User:
+    """Public chat retains the legacy actor; invalid credentials never become anonymous."""
+    if "authorization" in request.headers or "api_key" in request.query_params:
+        if "authorization" in request.headers and credentials is None:
+            raise HTTPException(401, "Invalid authorization header")
+        return await get_current_user(request, credentials, db)
+
+    user = await db.get(User, ANONYMOUS_USER_ID)
+    if user is None:
+        try:
+            async with db.begin_nested():
+                db.add(User(
+                    id=ANONYMOUS_USER_ID, email="customer@agentforge.local", role="user",
+                ))
+                await db.flush()
+        except IntegrityError:
+            # Another request may have created the reserved actor concurrently.
+            user = await db.get(User, ANONYMOUS_USER_ID)
+            if user is None:
+                raise HTTPException(503, "匿名会话身份配置冲突，请联系管理员") from None
+        await db.commit()
+        user = await db.get(User, ANONYMOUS_USER_ID)
     return user

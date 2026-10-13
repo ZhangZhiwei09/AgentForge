@@ -20,10 +20,11 @@ import asyncio
 import logging
 import uuid
 from collections.abc import AsyncIterator
-from contextlib import aclosing
+from contextlib import aclosing, asynccontextmanager
 from datetime import UTC, datetime
 from typing import Annotated, cast
 
+from anyio import CancelScope
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, field_validator
@@ -49,16 +50,22 @@ from src.agent.tools.registry import tool_registry
 from src.agent.types import (
     ClarificationNeeded,
     DiagnosisCompleted,
+    DiagnosisPhase,
+    DiagnosisPhaseDone,
+    DiagnosisStarted,
     DiagnosisWaitingInput,
     RouteContext,
     RouteName,
     RouterDecision,
+    StreamCitations,
+    StreamClear,
     StreamDone,
     StreamError,
     StreamMeta,
     StreamToken,
+    StreamTraceStep,
 )
-from src.api.deps import get_current_user, get_db
+from src.api.deps import get_chat_user, get_current_user, get_db
 from src.api.v1.conversations import _find_conversation
 from src.api.v1.sse import _to_sse
 from src.config import settings
@@ -87,7 +94,7 @@ def _get_singleton[T](cls: type[T]) -> T:
 
 
 # ── 会话级并发控制 ──
-_conversation_locks: dict[str, asyncio.Lock] = {}
+_conversation_locks: dict[str, tuple[asyncio.Lock, int]] = {}
 
 
 def _get_executor() -> AgentExecutor:
@@ -102,11 +109,20 @@ def _get_diagnosis_agent() -> DiagnosisRouteAgent:
     return _get_singleton(DiagnosisRouteAgent)
 
 
-def _acquire_lock(conversation_id: str) -> asyncio.Lock:
-    """获取或创建会话级别的异步锁，防止同一会话并发消息乱序。"""
-    if conversation_id not in _conversation_locks:
-        _conversation_locks[conversation_id] = asyncio.Lock()
-    return _conversation_locks[conversation_id]
+@asynccontextmanager
+async def _acquire_lock(conversation_id: str):
+    """Keep a lock until its holder and all queued requests have released it."""
+    lock, users = _conversation_locks.get(conversation_id, (asyncio.Lock(), 0))
+    _conversation_locks[conversation_id] = (lock, users + 1)
+    try:
+        async with lock:
+            yield
+    finally:
+        _, users = _conversation_locks[conversation_id]
+        if users == 1:
+            del _conversation_locks[conversation_id]
+        else:
+            _conversation_locks[conversation_id] = (lock, users - 1)
 
 
 # ── 常量 ──────────────────────────────────────────────────────
@@ -140,7 +156,9 @@ async def _get_or_create_conversation(
     - 无 → 新建会话
     """
     if conversation_id:
-        conv = await _find_conversation(db, conversation_id, conv_type="agent_chat")
+        conv = await _find_conversation(
+            db, conversation_id, conv_type="agent_chat", user_id=user_id,
+        )
         if conv is not None:
             # 验证 ownership（防止跨用户访问）
             if conv.user_id != user_id:
@@ -154,6 +172,7 @@ async def _get_or_create_conversation(
         title="新对话",
         user_id=user_id,
         type="agent_chat",
+        session_id=conversation_id,
         status="active",
     )
     db.add(conv)
@@ -175,11 +194,13 @@ def _build_route_context(
     provider_name: str,
     assistant_msg_id: str,
     intent: str,
+    session_id: str | None = None,
     prebuilt_messages: list | None = None,
 ) -> RouteContext:
     """构造 Agent 执行上下文（各路由共享的公共字段）。"""
     return RouteContext(
         conversation_id=conversation_id,
+        session_id=session_id,
         user_message=user_message,
         prebuilt_messages=[] if prebuilt_messages is None else prebuilt_messages,
         resolved_model=resolved_model,
@@ -199,6 +220,7 @@ def _select_events(
     provider_name: str,
     assistant_msg_id: str,
     intent: str | None = None,
+    session_id: str | None = None,
 ) -> AsyncIterator:
     """按路由决策选择对应的事件流。
 
@@ -214,6 +236,7 @@ def _select_events(
     if route == RouteName.CHAT:
         context = _build_route_context(
             conversation_id=conversation_id,
+            session_id=session_id,
             user_message=user_message,
             prebuilt_messages=prebuilt_messages,
             resolved_model=resolved_model,
@@ -226,6 +249,7 @@ def _select_events(
     if route == RouteName.DIAGNOSIS:
         context = _build_route_context(
             conversation_id=conversation_id,
+            session_id=session_id,
             user_message=user_message,
             resolved_model=resolved_model,
             provider_name=provider_name,
@@ -237,6 +261,7 @@ def _select_events(
     # TASK 兜底：ReAct + Tool
     context = _build_route_context(
         conversation_id=conversation_id,
+        session_id=session_id,
         user_message=user_message,
         prebuilt_messages=prebuilt_messages,
         resolved_model=resolved_model,
@@ -283,17 +308,18 @@ async def _save_assistant_message(
     streamed_answer: list[str],
     metadata: dict | None = None,
     entry_run_id: str | None = None,
+    message_type: str = "text",
 ) -> None:
     """保存助手回复并镜像到 Redis；无输出时跳过。"""
     final_answer = "".join(streamed_answer)
-    if not final_answer:
+    if not final_answer and not metadata:
         return
 
     assistant_msg = Message(
         id=assistant_msg_id,
         conversation_id=conversation_id,
         role="assistant",
-        type="text",
+        type=message_type,
         content=final_answer,
         model=model_id,
         msg_metadata=metadata,
@@ -366,6 +392,39 @@ async def _stream_diagnosis(context: RouteContext, actor_id: str, *, waiting: bo
                 yield event
 
 
+def _collect_diagnosis(metadata: dict, event: object) -> None:
+    """Persist the same progress DTO the frontend builds from live events."""
+    if isinstance(event, DiagnosisStarted):
+        metadata["diagnosis"] = {
+            "status": "running",
+            "phases": [{
+                "phase": agent.get("phase", index + 1),
+                "label": agent.get("role", ""), "agent": agent.get("name", ""),
+                "status": "pending",
+            } for index, agent in enumerate(event.agents)],
+        }
+    elif isinstance(event, (DiagnosisPhase, DiagnosisPhaseDone)):
+        for phase in metadata.get("diagnosis", {}).get("phases", []):
+            if phase["phase"] == event.phase:
+                phase["status"] = "done" if isinstance(event, DiagnosisPhaseDone) else "running"
+                if isinstance(event, DiagnosisPhaseDone):
+                    phase["summary"] = event.summary
+    elif isinstance(event, DiagnosisCompleted):
+        from src.agent.diagnosis.route_agent import _extract_conclusion_text
+
+        progress = metadata.setdefault("diagnosis", {"phases": []})
+        progress.update({
+            "status": "done", "resolution": event.output.get("resolution", ""),
+            "finalConclusion": _extract_conclusion_text(event.output),
+        })
+        for phase in progress["phases"]:
+            if phase["status"] == "pending" or phase["agent"] in event.output.get("skipped_nodes", []):
+                phase["status"] = "skipped"
+        metadata["diagnosisOutput"] = event.output
+        metadata.pop("waitingInput", None)
+        metadata.pop("diagnosisWaitingInput", None)
+
+
 async def _handle_chat(
     message: str,
     model: str | None,
@@ -379,8 +438,13 @@ async def _handle_chat(
     assistant_msg_id = str(uuid.uuid4())
 
     # ── 1. 会话管理 ──
-    conv = await _get_or_create_conversation(db, user.id, conversation_id)
+    if conversation_id:
+        async with _acquire_lock(f"lookup:{user.id}:{conversation_id}"):
+            conv = await _get_or_create_conversation(db, user.id, conversation_id)
+    else:
+        conv = await _get_or_create_conversation(db, user.id, None)
     actual_conv_id = conv.id
+    actual_session_id = conv.session_id
 
     # ── 并发控制 ──
     lock = _acquire_lock(actual_conv_id)
@@ -389,7 +453,7 @@ async def _handle_chat(
         async with lock:
             history_rows = list(await db.scalars(select(Message).where(
                 Message.conversation_id == actual_conv_id,
-                Message.role.in_(["user", "assistant"]), Message.type == "text",
+                Message.role.in_(["user", "assistant"]), Message.type.in_(["text", "diagnosis"]),
             ).order_by(Message.created_at.desc(), Message.id.desc()).limit(4)))
             history = [ChatMessage(role=row.role, content=row.content) for row in reversed(history_rows)]
             model_id = model or settings.default_model
@@ -400,6 +464,7 @@ async def _handle_chat(
             streamed_answer: list[str] = []
             metadata: dict = {}
             saved = False
+            delivered = False
 
             async def load_entry_result():
                 nonlocal entry_execution
@@ -413,7 +478,7 @@ async def _handle_chat(
 
             async def persist():
                 nonlocal saved
-                if saved or not streamed_answer:
+                if saved or not delivered:
                     return
                 if entry_execution is not None:
                     metadata["entryRoute"] = {
@@ -423,6 +488,7 @@ async def _handle_chat(
                 await _save_assistant_message(
                     db, actual_conv_id, assistant_msg_id, model_id, streamed_answer, metadata,
                     entry_execution.run_id if entry_execution is not None else None,
+                    message_type="diagnosis" if route == RouteName.DIAGNOSIS else "text",
                 )
                 saved = True
 
@@ -474,6 +540,7 @@ async def _handle_chat(
                             await db.commit()
                         context = _build_route_context(
                             conversation_id=actual_conv_id, user_message=query,
+                            session_id=actual_session_id,
                             resolved_model=model_id, provider_name=provider_name,
                             assistant_msg_id=assistant_msg_id, intent=intent, prebuilt_messages=prebuilt,
                         )
@@ -483,11 +550,13 @@ async def _handle_chat(
                             events = _select_events(
                                 RouterDecision(route, 1, decision.reasoning),
                                 conversation_id=actual_conv_id, user_message=query, prebuilt_messages=prebuilt,
+                                session_id=actual_session_id,
                                 resolved_model=model_id, provider_name=provider_name, assistant_msg_id=assistant_msg_id,
                                 intent=intent,
                             )
                     yield StreamMeta(
                         message_id=assistant_msg_id, conversation_id=actual_conv_id,
+                        session_id=actual_session_id,
                         model=model_id if provider_name else "", provider=provider_name,
                         route=route.value, intent=intent, source=decision.source,
                         conversational=decision.action == "reply",
@@ -498,17 +567,39 @@ async def _handle_chat(
                                 continue
                             if isinstance(event, StreamToken):
                                 streamed_answer.append(event.content)
+                                delivered = True
+                            elif isinstance(event, StreamClear):
+                                streamed_answer.clear()
+                            elif isinstance(event, StreamCitations):
+                                metadata["citations"] = event.items
+                                delivered = True
+                            elif isinstance(event, StreamTraceStep):
+                                traces = {step["seq"]: step for step in metadata.get("traces", [])}
+                                traces[event.step["seq"]] = event.step
+                                metadata["traces"] = [traces[key] for key in sorted(traces)]
+                                delivered = True
                             elif isinstance(event, ClarificationNeeded):
+                                delivered = True
                                 metadata["clarification"] = {
                                     "intent": event.intent, "missingFields": event.missing_fields,
                                     "promptMessage": event.prompt_message, "hints": event.hints,
                                 }
-                            elif isinstance(event, DiagnosisCompleted):
-                                metadata["diagnosis"] = event.output
+                            elif isinstance(event, (DiagnosisStarted, DiagnosisPhase, DiagnosisPhaseDone, DiagnosisCompleted)):
+                                _collect_diagnosis(metadata, event)
+                                delivered = True
                             elif isinstance(event, DiagnosisWaitingInput):
+                                delivered = True
                                 metadata["diagnosisWaitingInput"] = {
                                     "message": event.message, "missing_fields": event.missing_fields,
                                 }
+                                metadata["waitingInput"] = {
+                                    "message": event.message, "missingFields": event.missing_fields,
+                                }
+                                if "diagnosis" in metadata:
+                                    metadata["diagnosis"]["status"] = "waiting_input"
+                            elif isinstance(event, StreamError):
+                                if "diagnosis" in metadata:
+                                    metadata["diagnosis"]["status"] = "error"
                             elif isinstance(event, StreamDone):
                                 metadata["suggestions"] = event.suggestions or []
                                 event.source = decision.source
@@ -525,16 +616,19 @@ async def _handle_chat(
                     yield StreamError(content=failure)
                     if not streamed_answer:
                         streamed_answer.append(failure)
+                        delivered = True
                         yield StreamToken(content=failure, message_id=assistant_msg_id)
                     await persist()
                     yield StreamDone(message_id=assistant_msg_id, route=route.value, source=decision.source, validated=False)
                 finally:
                     cancel.set()
-                    await persist()
+                    # Starlette disconnect cancellation must not cancel the final SQL write.
+                    with CancelScope(shield=True):
+                        await persist()
             _spawn_compression(db, actual_conv_id)
 
     return StreamingResponse(
-        _to_sse(_persisted_events()),
+        _to_sse(_persisted_events(), terminal_marker=True),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -603,7 +697,8 @@ async def chat(
 
 class AgentChatRequest(BaseModel):
     message: str = PydField(min_length=1, max_length=16000)
-    conversation_id: str | None = None
+    conversation_id: str | None = PydField(default=None, max_length=64)
+    session_id: str | None = PydField(default=None, max_length=64)
 
     @field_validator("message")
     @classmethod
@@ -619,11 +714,11 @@ agent_router = APIRouter(prefix="/api/agent", tags=["agent-chat"])
 @agent_router.post("/chat")
 async def agent_chat(
     body: AgentChatRequest,
-    user: Annotated[User, Depends(get_current_user)],
+    user: Annotated[User, Depends(get_chat_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ):
-    """Agent 聊天端点 —— 需要认证，支持会话持久化和历史记忆。"""
-    return await _handle_chat(body.message, None, db, user, body.conversation_id)
+    """Agent 聊天端点，兼容匿名身份与旧 session_id。"""
+    return await _handle_chat(body.message, None, db, user, body.conversation_id or body.session_id)
 
 
 

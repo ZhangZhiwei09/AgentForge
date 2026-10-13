@@ -6,7 +6,7 @@ from fastapi import HTTPException, Request
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from src.api.deps import get_current_user, get_db
+from src.api.deps import get_chat_user, get_current_user, get_db
 from src.main import create_app
 from src.models.agent_flow import AgentFlow, AgentFlowRun
 from src.models.base import Base
@@ -53,6 +53,7 @@ async def entry_api(tmp_path):
 
     app.dependency_overrides[get_db] = isolated_db
     app.dependency_overrides[get_current_user] = actor
+    app.dependency_overrides[get_chat_user] = actor
     try:
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
             yield client, sessions

@@ -5,6 +5,11 @@
 > 新入口直接替换旧五层路由，不需要环境开关。SAFETY / CHAT / TASK / HUMAN / DIAGNOSIS 保留为执行与协议标签。
 > 规则优先级：安全 → 明确人工/取消 → 等待诊断 → 已发布配置 → 精确问候 → 模型分类。
 > 模型区分 consultation / diagnosis / unclear；不明确则澄清，服务失败则提示不可用。
+>
+> Python 迁移进度（2026-10-13）：`apps/server-py` 已实现相同入口决策、
+> 一级流程管理、匿名与登录态会话、旧 session 别名及流元数据持久化。
+> 默认开发入口仍保留 TS API；审批、完整知识咨询和数据库验收完成后再切换。
+> 已退出生产调用的 TS 旧五层分类器及其专属测试、验证脚本已删除。
 
 ---
 
@@ -47,6 +52,11 @@ resolveAgent(route) → 现有 Agent 执行 → 消息与引用等后处理
 
 | 文件 | 职责 |
 |---|---|
+| `apps/server-py/src/agent/router/entry_decision.py` | Python 统一入口决策，复用现有 Agent Runtime |
+| `apps/server-py/src/agent/entry_flows/` | Python 条件 DSL、校验与确定性执行 |
+| `apps/server-py/src/api/v1/chat.py` | Python 聊天执行、诊断进度和中断持久化 |
+| `apps/server-py/src/api/v1/conversations.py` | Python 会话归属、旧别名、历史分页和元数据回放 |
+| `apps/server-py/src/api/deps.py` | Python 登录认证与兼容的匿名聊天身份 |
 | `apps/server/src/services/entry-route-flows/` | 条件 DSL、图校验、执行、发布快照和运行记录 |
 | `apps/server/src/routes/entry-route-flows.ts` | TS 原生管理员配置与试运行接口 |
 | `apps/server/src/services/agent-runtime/entry-decision.ts` | 安全、控制、状态、配置、问候与一次业务分类的统一决策 |
@@ -84,7 +94,7 @@ export type RouteName = "SAFETY" | "CHAT" | "TASK" | "HUMAN" | "DIAGNOSIS";
 
 ## 4. 历史模块
 
-本节记录仓库仍存在的旧分类模块，供独立测试与脚本定位。它们已经退出主聊天入口，无法通过环境开关或停用一级流程恢复为聊天主链。以下算法和阈值是历史模块行为，不代表当前请求流程。
+本节保留旧分类算法的设计记录。TS 的 L2～L5、QueryRouter、兼容导出和专属测试/脚本已删除；安全关键词模块仍供当前 TS 入口使用。Python 的历史分类模块及测试仍保留于 `apps/server-py/src/agent/router/` 和 `apps/server-py/tests/test_router_*.py`，不参与企业聊天主入口。下文旧 TS 路径与行号仅用于理解历史设计。
 
 L2 为 Embedding 样本检索：置信度 >= 0.8 直接采纳；0.5～0.8 且有样本时进入 L3 Few-Shot。L3 和 L4 的普通路由门槛为 0.5，DIAGNOSIS 为 0.7。未获得可接受结果时进入 L5，原算法、提示词和阈值均保持。
 
