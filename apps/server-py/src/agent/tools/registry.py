@@ -14,12 +14,15 @@ Python 新概念：
 """
 
 import asyncio
+import logging
 import time
 from typing import Any
 
 from src.agent.tools.base import RISK_TIMEOUTS, RegisteredTool, ToolDefinition
 from src.agent.tools.builtins import search_knowledge_tool
+from src.observability.metrics import tool_calls, tool_duration
 
+logger = logging.getLogger(__name__)
 
 class ToolRegistry:
     """工具注册中心。
@@ -42,7 +45,7 @@ class ToolRegistry:
 
         # Lazy import to avoid circular dependency:
         # executor → registry → diagnosis/tools → diagnosis/__init__ → mode → executor
-        from src.agent.diagnosis.tools import DIAGNOSIS_TOOLS  # noqa: PLC0415
+        from src.agent.diagnosis.tools import DIAGNOSIS_TOOLS
 
         all_tools = [
             search_knowledge_tool,
@@ -99,7 +102,7 @@ class ToolRegistry:
             }
 
         # Phase C: 创建工具执行 Span
-        from src.observability import get_observability  # noqa: PLC0415
+        from src.observability import get_observability
 
         obs = get_observability()
         tool_span = obs.create_tool_span(
@@ -109,8 +112,9 @@ class ToolRegistry:
 
         timeout = tool.timeout or RISK_TIMEOUTS.get(tool.risk_level, 30000)
 
+        start = time.monotonic()
+        result = None
         try:
-            start = time.monotonic()
             result = await asyncio.wait_for(
                 tool.execute(args, run_id),
                 timeout=timeout / 1000,
@@ -128,7 +132,7 @@ class ToolRegistry:
 
             return result
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             result = {
                 "status": "timeout",
                 "error": f"Tool '{name}' timed out after {timeout}ms",
@@ -136,12 +140,17 @@ class ToolRegistry:
             tool_span.end(output=result)
             return result
         except Exception as exc:
+            logger.exception("Tool execution failed name=%s", name)
             result = {
                 "status": "failed",
                 "error": f"Tool '{name}' execution error: {exc}",
             }
             tool_span.end(output=result)
             return result
+        finally:
+            status = result.get("status", "error") if isinstance(result, dict) else "cancelled"
+            tool_calls.labels("agentforge", name, status).inc()
+            tool_duration.labels("agentforge", name).observe((time.monotonic() - start) * 1000)
 
     def filter(self, tool_names: list[str]) -> "ToolRegistry":
         """创建仅包含指定工具的过滤副本。

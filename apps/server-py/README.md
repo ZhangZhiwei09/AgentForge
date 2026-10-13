@@ -162,3 +162,17 @@ pending approvals. Chat owns one assistant message per request and saves
 citations, trace updates and the task session reference in history. Model
 disconnects mark running tasks failed without replaying uncertain tool effects.
 Focused validation: `tests/test_chat_tasks_api.py` and `tests/test_agent_tasks_api.py`.
+
+Ratings, FAQ, feedback and analytics now use the existing SQL tables. Ratings
+validate conversation ownership and assistant message membership; failed writes
+return an error. Public FAQ excludes disabled bases, documents and chunks.
+Feedback, analytics, tool definitions, disabled-memory endpoints and Prometheus
+metrics require authentication. `/api/ready` checks SQL, provider configuration
+and Redis, requiring Redis when asynchronous ingestion is enabled.
+
+The public `/api/diagnosis/query` adapter retains the original response DTO,
+checks missing information before model invocation and uses the existing Python
+diagnosis runtime with request-scoped knowledge retrieval. Tool, routing,
+citation and HTTP metrics are recorded along their actual execution paths;
+HTTP metric labels use route templates. Focused tests:
+`tests/test_platform_api.py`.

@@ -228,12 +228,6 @@ async def agent_delete_conversation(
     return {"ok": True}
 
 
-@agent_chat_router.get("/faq/categories")
-async def agent_faq_categories():
-    """FAQ 分类列表。"""
-    return {"categories": []}
-
-
 # ═══════════════════════════════════════════════════════════
 # /api/conversations —— 向后兼容别名
 # ═══════════════════════════════════════════════════════════

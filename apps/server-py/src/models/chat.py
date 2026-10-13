@@ -14,7 +14,15 @@
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, func
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSON  # PostgreSQL jsonb
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -33,11 +41,11 @@ class Conversation(Base):
     title: Mapped[str] = mapped_column(String(255), default="新对话")
     user_id: Mapped[str] = mapped_column(String(36), ForeignKey("users.id"), nullable=False)
     type: Mapped[str] = mapped_column(String(32), default="agent_chat", server_default="agent_chat")
-    session_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    intent: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    rating: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(20), default="active", server_default="active")
-    customer_meta: Mapped[Optional[dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    intent: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    rating: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    status: Mapped[str | None] = mapped_column(String(20), default="active", server_default="active")
+    customer_meta: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -75,8 +83,8 @@ class Message(Base):
         String(20), default="text", server_default="text"
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
-    msg_metadata: Mapped[Optional[dict[str, Any]]] = mapped_column("metadata", JSON, nullable=True)
-    model: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    msg_metadata: Mapped[dict[str, Any] | None] = mapped_column("metadata", JSON, nullable=True)
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
@@ -110,8 +118,8 @@ class ConversationMemory(Base):
         nullable=False,
         unique=True,
     )
-    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
-    covered_until_message_id: Mapped[Optional[str]] = mapped_column(String(36), nullable=True)
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    covered_until_message_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     token_count: Mapped[int] = mapped_column(Integer, default=0)
     memory_type: Mapped[str] = mapped_column(
         String(20), default="summary", server_default="summary"
@@ -125,3 +133,18 @@ class ConversationMemory(Base):
 
     # 关联
     conversation: Mapped["Conversation"] = relationship(back_populates="memory")
+
+
+class SatisfactionRating(Base):
+    __tablename__ = "satisfaction_ratings"
+    __table_args__ = (
+        Index("ix_satisfaction_ratings_conversation_id", "conversation_id"),
+        Index("ix_satisfaction_ratings_created_at", "created_at"),
+        Index("ix_satisfaction_ratings_rating", "rating"),
+    )
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(String(36), ForeignKey("conversations.id", ondelete="CASCADE"))
+    message_id: Mapped[str | None] = mapped_column(String(36))
+    rating: Mapped[str] = mapped_column(String(20))
+    comment: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

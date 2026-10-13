@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import sys
+import time
 import uuid
 from contextlib import asynccontextmanager
 
@@ -10,11 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from src.agent.checkpoint import close_checkpointer, get_checkpointer
 from src.api.v1.agent_flows import router as agent_flows_router
 from src.api.v1.agent_tasks import router as agent_tasks_router
+from src.api.v1.analytics import router as analytics_router
 from src.api.v1.auth import router as auth_router
 from src.api.v1.chat import agent_router
 from src.api.v1.chat import router as chat_router
 from src.api.v1.conversations import agent_chat_router, conversations_router
 from src.api.v1.dev import router as dev_router
+from src.api.v1.diagnosis import router as diagnosis_router
 from src.api.v1.entry_route_flows import router as entry_route_flows_router
 from src.api.v1.health import router as health_router
 from src.api.v1.knowledge import router as knowledge_router
@@ -22,8 +25,10 @@ from src.api.v1.knowledge_ingestion import router as knowledge_ingestion_router
 from src.api.v1.knowledge_management import router as knowledge_management_router
 from src.api.v1.knowledge_regression import router as knowledge_regression_router
 from src.api.v1.knowledge_retrieval import router as knowledge_retrieval_router
+from src.api.v1.platform import router as platform_router
 from src.config import settings
 from src.observability import init_observability, shutdown_observability
+from src.observability.metrics import record_http
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +58,15 @@ def create_app() -> FastAPI:
     async def request_id(request: Request, call_next):
         correlation_id = request.headers.get("x-request-id") or str(uuid.uuid4())
         request.state.request_id = correlation_id
-        response = await call_next(request)
+        started = time.perf_counter()
+        status = 500
+        try:
+            response = await call_next(request)
+            status = response.status_code
+        finally:
+            route = request.scope.get("route")
+            path = getattr(route, "path", "unmatched")
+            record_http(request.method, path, status, (time.perf_counter() - started) * 1000)
         response.headers["X-Request-ID"] = correlation_id
         # Do not log query parameters: existing clients may send api_key there.
         logger.info(
@@ -84,6 +97,9 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(agent_flows_router)
     app.include_router(agent_tasks_router)
+    app.include_router(analytics_router)
+    app.include_router(platform_router)
+    app.include_router(diagnosis_router)
     app.include_router(entry_route_flows_router)
     app.include_router(dev_router)
     return app

@@ -8,6 +8,7 @@ import re
 
 from pydantic import BaseModel, Field, ValidationError
 
+from src.observability.metrics import citation_coverage
 from src.rag.embeddings import get_embedding_provider, validate_embeddings
 
 logger = logging.getLogger(__name__)
@@ -133,6 +134,7 @@ async def verify_answer(content: str, sources: list[dict]) -> tuple[str, dict]:
         "avgScore": sum(scores) / len(scores) if scores else 1,
         "uncitedCount": sum(score < 0.55 for score in scores), "invalidIndexes": invalid,
     }
+    citation_coverage.labels("agentforge", level).observe(coverage)
     if invalid or (factual and coverage < 0.5):
         content += "\n\n以上信息缺少充分来源支持，建议核实后参考。"
     return content, report

@@ -73,6 +73,7 @@ from src.models.agent_flow import AgentFlowRun
 from src.models.chat import Conversation, Message
 from src.models.entry_flow import EntryRouteFlowRun
 from src.models.user import User
+from src.observability.metrics import entry_decisions, route_classification
 from src.providers.registry import resolve_model
 from src.schemas.chat import ChatMessage, ChatRequest
 from src.services.chat_tasks import cancel_chat_task, paused_chat_task, stream_chat_task
@@ -367,7 +368,11 @@ async def _stream_entry_response(decision: EntryDecision, assistant_msg_id: str)
     )
 
 
-async def _stream_diagnosis(context: RouteContext, actor_id: str, *, waiting: bool, cancel: asyncio.Event) -> AsyncIterator:
+async def _stream_diagnosis(
+    context: RouteContext, actor_id: str, *, waiting: bool, cancel: asyncio.Event,
+    registry=None,
+) -> AsyncIterator:
+    registry = registry or tool_registry
     if not waiting:
         info = _check_info_sufficiency(context.user_message)
         if not info["sufficient"]:
@@ -384,11 +389,11 @@ async def _stream_diagnosis(context: RouteContext, actor_id: str, *, waiting: bo
         # Do not start a different run if a waiting run was cancelled concurrently.
         raise HTTPException(409, "等待排查状态已变化，请重新发送")
     if run is not None:
-        async with aclosing(diagnosis_events(run, context, tool_registry, cancel, resume=resume)) as events:
+        async with aclosing(diagnosis_events(run, context, registry, cancel, resume=resume)) as events:
             async for event in events:
                 yield event
     else:
-        async with aclosing(_get_diagnosis_agent().execute(context, tool_registry)) as events:
+        async with aclosing(_get_diagnosis_agent().execute(context, registry)) as events:
             async for event in events:
                 yield event
 
@@ -517,6 +522,8 @@ async def _handle_chat(
                         answer="入口配置或运行记录暂不可用，请联系管理员检查配置。",
                     )
                 route = decision.route
+                entry_decisions.labels("agentforge", decision.action, decision.source).inc()
+                route_classification.labels("agentforge", route.value, decision.source).inc()
                 intent = decision.business_intent or ("unclear" if decision.action == "clarify" else route.value.lower())
                 metadata["entryDecision"] = {
                     "action": decision.action, "source": decision.source, "reasoning": decision.reasoning,
