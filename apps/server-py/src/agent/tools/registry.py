@@ -16,6 +16,7 @@ Python 新概念：
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from src.agent.tools.base import RISK_TIMEOUTS, RegisteredTool, ToolDefinition
@@ -23,6 +24,14 @@ from src.agent.tools.builtins import search_knowledge_tool
 from src.observability.metrics import tool_calls, tool_duration
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CircuitState:
+    failures: int = 0
+    opened_at: float = 0
+    probing: bool = False
+
 
 class ToolRegistry:
     """工具注册中心。
@@ -37,6 +46,7 @@ class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, RegisteredTool] = {}
         self._initialized = False
+        self._circuits: dict[str, CircuitState] = {}
 
     def init(self) -> None:
         """惰性初始化，注册所有内置工具。幂等。"""
@@ -46,10 +56,12 @@ class ToolRegistry:
         # Lazy import to avoid circular dependency:
         # executor → registry → diagnosis/tools → diagnosis/__init__ → mode → executor
         from src.agent.diagnosis.tools import DIAGNOSIS_TOOLS
+        from src.agent.tools.builtins.operational import OPERATIONAL_TOOLS
 
         all_tools = [
             search_knowledge_tool,
             *DIAGNOSIS_TOOLS,
+            *OPERATIONAL_TOOLS,
         ]
         for tool in all_tools:
             self.register(tool)
@@ -102,6 +114,12 @@ class ToolRegistry:
             }
 
         # Phase C: 创建工具执行 Span
+        circuit = self._circuits.setdefault(name, CircuitState())
+        if circuit.failures >= 5:
+            if time.monotonic() - circuit.opened_at < 60 or circuit.probing:
+                return {"status": "failed", "error": f"Tool '{name}' circuit is open"}
+            circuit.probing = True
+
         from src.observability import get_observability
 
         obs = get_observability()
@@ -139,6 +157,9 @@ class ToolRegistry:
             }
             tool_span.end(output=result)
             return result
+        except asyncio.CancelledError:
+            tool_span.end(output={"status": "cancelled"})
+            raise
         except Exception as exc:
             logger.exception("Tool execution failed name=%s", name)
             result = {
@@ -149,6 +170,13 @@ class ToolRegistry:
             return result
         finally:
             status = result.get("status", "error") if isinstance(result, dict) else "cancelled"
+            circuit.probing = False
+            if status in {"success", "partial"}:
+                circuit.failures = 0
+            elif status != "cancelled":
+                circuit.failures += 1
+                if circuit.failures >= 5:
+                    circuit.opened_at = time.monotonic()
             tool_calls.labels("agentforge", name, status).inc()
             tool_duration.labels("agentforge", name).observe((time.monotonic() - start) * 1000)
 
@@ -164,6 +192,7 @@ class ToolRegistry:
             if name in self._tools:
                 filtered._tools[name] = self._tools[name]
         filtered._initialized = True
+        filtered._circuits = self._circuits
         return filtered
 
     def list_names(self) -> list[str]:

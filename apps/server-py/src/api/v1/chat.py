@@ -18,6 +18,7 @@
 
 import asyncio
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
@@ -72,6 +73,7 @@ from src.config import settings
 from src.models.agent_flow import AgentFlowRun
 from src.models.chat import Conversation, Message
 from src.models.entry_flow import EntryRouteFlowRun
+from src.models.retained import RouteClassificationLog
 from src.models.user import User
 from src.observability.metrics import entry_decisions, route_classification
 from src.providers.registry import resolve_model
@@ -503,6 +505,7 @@ async def _handle_chat(
                 "chat-request", input=message, metadata={"conversation_id": actual_conv_id},
             ):
                 try:
+                    decision_started = time.monotonic()
                     safety = safety_route_scan(message)
                     waiting = False if safety or explicit_entry_control(message) == "human" else await _waiting_diagnosis(db, actual_conv_id, user.id)
                     task = None if safety or explicit_entry_control(message) == "human" else await paused_chat_task(db, actual_conv_id)
@@ -522,6 +525,17 @@ async def _handle_chat(
                         answer="入口配置或运行记录暂不可用，请联系管理员检查配置。",
                     )
                 route = decision.route
+                try:
+                    async with db.begin_nested():
+                        db.add(RouteClassificationLog(
+                            id=str(uuid.uuid4()), conversation_id=actual_conv_id, session_id=actual_session_id,
+                            user_message=message[:2000], route=route.value, source=decision.source,
+                            confidence=0 if decision.source == "business_llm" else 1,
+                            latency_ms=round((time.monotonic() - decision_started) * 1000),
+                        ))
+                        await db.flush()
+                except Exception:
+                    logger.exception("Entry audit persistence failed")
                 entry_decisions.labels("agentforge", decision.action, decision.source).inc()
                 route_classification.labels("agentforge", route.value, decision.source).inc()
                 intent = decision.business_intent or ("unclear" if decision.action == "clarify" else route.value.lower())

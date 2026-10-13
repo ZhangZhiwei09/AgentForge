@@ -17,6 +17,7 @@ from src.models.agent_session import AgentApproval, AgentSession
 from src.models.base import Base
 from src.models.chat import Conversation, ConversationMemory, Message
 from src.models.entry_flow import EntryRouteFlow, EntryRouteFlowRun
+from src.models.retained import RouteClassificationLog
 from src.models.user import User
 
 
@@ -48,6 +49,7 @@ async def entry_api(tmp_path):
             User.__table__, Conversation.__table__, Message.__table__, ConversationMemory.__table__,
             AgentFlow.__table__, AgentFlowRun.__table__, EntryRouteFlow.__table__, EntryRouteFlowRun.__table__,
             AgentSession.__table__, AgentApproval.__table__,
+            RouteClassificationLog.__table__,
         ]))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     actors = {
@@ -80,6 +82,28 @@ async def entry_api(tmp_path):
         if schema:
             async with engine.begin() as connection:
                 await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
+        await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def empty_postgres():
+    """Fresh isolated schema for database bootstrap and read-only SQL tools."""
+    url = os.environ.get("AGENTFORGE_TEST_POSTGRES_URL")
+    if not url:
+        import pytest
+        pytest.skip("Set AGENTFORGE_TEST_POSTGRES_URL for disposable database bootstrap tests")
+    database = make_url(url).database or ""
+    if database != "agentforge_python_migration" and not database.startswith("agentforge_test_"):
+        raise ValueError("Bootstrap tests require a disposable test database")
+    schema = f"bootstrap_test_{uuid.uuid4().hex}"
+    engine = create_async_engine(url, connect_args={"server_settings": {"search_path": f"{schema},public"}})
+    async with engine.begin() as connection:
+        await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    try:
+        yield engine, schema
+    finally:
+        async with engine.begin() as connection:
+            await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
         await engine.dispose()
 
 

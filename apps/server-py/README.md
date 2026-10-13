@@ -198,3 +198,22 @@ Alembic revisions remain readable. Use this command for initial bootstrap;
 the old Alembic chain alone depended on externally created Prisma tables.
 All existing business and retained workflow/team tables are registered in
 SQLAlchemy. PostgreSQL bootstrap/adoption tests: `tests/test_database.py`.
+
+All twelve original operational tools are available from the shared registry:
+knowledge/trace lookup, time, calculation, web search/fetch, HTTP requests,
+workspace file read/write/search, read-only SQL and persistent support tickets.
+Set `FILE_WORKSPACE` to restrict file tools and `TAVILY_API_KEY` for web search.
+Unconfigured search reports no results rather than inventing sources.
+File writes, HTTP requests and ticket creation require the existing task
+approval lifecycle; transient diagnosis graphs cannot execute those mutations.
+Empty diagnosis tool lists grant no tools. Tools open a shared circuit after
+five failures, then allow one recovery probe after sixty seconds.
+
+HTTP moving-window limits default to 60 requests per minute per peer address.
+Configure `RATE_LIMIT_MAX`, `RATE_LIMIT_ENABLED` and
+`RATE_LIMIT_REDIS_ENABLED` (uses `REDIS_URL` for shared limits). Redis outages
+temporarily use local limits. Health/readiness probes are exempt; SSE streams
+are forwarded without buffering. Forwarded client addresses must be supplied by
+a trusted proxy configured for Uvicorn, not arbitrary client headers.
+Entry decisions also retain SQL classification audit records. Focused tests:
+`tests/test_operational_tools.py`.

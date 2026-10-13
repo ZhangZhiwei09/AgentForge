@@ -169,9 +169,15 @@ def build_react_graph(
 
             try:
                 if result is None:
-                    result = await registry.execute(
-                        tc_name, tc_args, conversation_id
-                    )
+                    tool = registry.get(tc_name)
+                    if lifecycle is None and tool is not None and (
+                        tool.require_approval or str(tool.risk_level) in {"mutation", "destructive"}
+                    ):
+                        result = {"status": "failed", "error": "This tool requires the task approval lifecycle"}
+                    else:
+                        result = await registry.execute(
+                            tc_name, tc_args, conversation_id
+                        )
             except Exception as exc:
                 logger.exception("Tool %s execution error", tc_name)
                 result = {"status": "failed", "error": str(exc)}

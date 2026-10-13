@@ -104,9 +104,7 @@ async def _run_phase_agent(
     （其内部经 build_react_graph 工厂构建 ReAct 图并 astream_events 驱动），
     收集 executor 流出的全部 StreamToken。
     """
-    filtered_registry = (
-        tools_registry.filter(role.tools) if role.tools else tools_registry
-    )
+    filtered_registry = tools_registry.filter(role.tools)
     # 内层 ReAct 保持瞬态（checkpoint=False）：父图是唯一被 checkpoint 的图
     # （multi-agent-langgraph-plan.md §4.3）。即便未来激活 G1 全局门控，也不挂。
     executor = AgentExecutor(registry=filtered_registry, checkpoint=False)

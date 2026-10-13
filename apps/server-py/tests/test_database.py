@@ -1,50 +1,28 @@
 """Fresh/adopted PostgreSQL schema and administrator lifecycle checks."""
 
 import json
-import os
-import uuid
 from pathlib import Path
 
 import pytest
-import pytest_asyncio
 from sqlalchemy import inspect, select, text
-from sqlalchemy.engine import make_url
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from src.database import BASELINE, BASELINE_HEAD, create_admin, upgrade_connection
+from src.database import BASELINE, create_admin, upgrade_connection
 from src.models.base import Base
 from src.models.user import User
 from src.services.auth import verify_password
 
-
-@pytest_asyncio.fixture
-async def empty_postgres():
-    url = os.environ.get("AGENTFORGE_TEST_POSTGRES_URL")
-    if not url:
-        pytest.skip("Set AGENTFORGE_TEST_POSTGRES_URL for disposable database bootstrap tests")
-    database = make_url(url).database or ""
-    if database != "agentforge_python_migration" and not database.startswith("agentforge_test_"):
-        raise ValueError("Bootstrap tests require a disposable test database")
-    schema = f"bootstrap_test_{uuid.uuid4().hex}"
-    engine = create_async_engine(url, connect_args={"server_settings": {"search_path": f"{schema},public"}})
-    async with engine.begin() as connection:
-        await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
-    try:
-        yield engine, schema
-    finally:
-        async with engine.begin() as connection:
-            await connection.execute(text(f'DROP SCHEMA "{schema}" CASCADE'))
-        await engine.dispose()
+LATEST_HEAD = "20261013_support_tickets"
 
 
 @pytest.mark.asyncio
 async def test_fresh_bootstrap_is_complete_and_idempotent(empty_postgres):
     engine, _ = empty_postgres
     async with engine.begin() as connection:
-        assert await connection.run_sync(upgrade_connection) == BASELINE_HEAD
+        assert await connection.run_sync(upgrade_connection) == LATEST_HEAD
         names = await connection.run_sync(lambda sync: set(inspect(sync).get_table_names()))
         assert set(json.loads(BASELINE.read_text(encoding="utf-8"))["tables"]) <= names
-        assert await connection.scalar(text("SELECT version_num FROM alembic_version")) == BASELINE_HEAD
+        assert await connection.scalar(text("SELECT version_num FROM alembic_version")) == LATEST_HEAD
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
         user_id, created = await create_admin(db, "bootstrap@example.test", "test-password")
         assert created
@@ -67,7 +45,7 @@ async def test_adopts_existing_unversioned_schema_without_changing_data(empty_po
     async with engine.begin() as connection:
         await connection.run_sync(upgrade_connection)
         assert await connection.scalar(text("SELECT email FROM users WHERE id='keep'")) == "keep@example.test"
-        assert await connection.scalar(text("SELECT version_num FROM alembic_version")) == BASELINE_HEAD
+        assert await connection.scalar(text("SELECT version_num FROM alembic_version")) == LATEST_HEAD
 
 
 @pytest.mark.asyncio
@@ -94,7 +72,7 @@ async def test_existing_legacy_stamp_is_preserved_then_upgraded(empty_postgres):
         await connection.execute(text("INSERT INTO alembic_version VALUES ('a3f2e1d0c9b8')"))
     async with engine.begin() as connection:
         await connection.run_sync(upgrade_connection)
-        assert await connection.scalar(text("SELECT version_num FROM alembic_version")) == BASELINE_HEAD
+        assert await connection.scalar(text("SELECT version_num FROM alembic_version")) == LATEST_HEAD
 
 
 @pytest.mark.asyncio

@@ -4,6 +4,9 @@
 ValidationError 的修复：无 tool_calls 的纯文本回复不应崩溃。
 """
 
+from dataclasses import replace
+from unittest.mock import AsyncMock
+
 import pytest
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -12,6 +15,7 @@ from langchain_core.messages import (
     AIMessageChunk,
     HumanMessage,
     SystemMessage,
+    ToolMessage,
 )
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
@@ -84,3 +88,27 @@ async def test_plain_text_response_does_not_crash():
     assert last.content == "摄像头权限被拒绝"
     # 空 tool_calls（而非 None）不应再触发校验错误
     assert last.tool_calls == []
+
+
+@pytest.mark.asyncio
+async def test_transient_graph_cannot_bypass_mutation_approval():
+    class MutationModel(FakeBaseChatModel):
+        async def _astream(self, messages, **kwargs):
+            if isinstance(messages[-1], ToolMessage):
+                yield ChatGenerationChunk(message=AIMessageChunk(content="审批未完成"))
+            else:
+                yield ChatGenerationChunk(message=AIMessageChunk(content="", tool_calls=[{
+                    "name": "file_write", "args": {"path": "a.txt", "content": "unexpected"}, "id": "call-1",
+                }]))
+
+    registry = ToolRegistry()
+    execute = AsyncMock(return_value={"status": "success"})
+    registry.register(replace(registry.get("file_write"), execute=execute))
+    graph = build_react_graph(
+        model=MutationModel(), tool_defs=registry.get_definitions(["file_write"]),
+        registry=registry, conversation_id="conv", max_iterations=3,
+    )
+    final = await graph.ainvoke({"messages": [HumanMessage(content="写入文件")], "iteration_count": 0})
+    tool_response = next(message for message in final["messages"] if isinstance(message, ToolMessage))
+    assert "requires the task approval lifecycle" in tool_response.content
+    execute.assert_not_awaited()

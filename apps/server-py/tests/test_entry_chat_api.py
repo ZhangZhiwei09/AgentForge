@@ -22,6 +22,7 @@ from src.api.v1 import chat
 from src.models.agent_flow import AgentFlow, AgentFlowRun
 from src.models.chat import Conversation, Message
 from src.models.entry_flow import EntryRouteFlow, EntryRouteFlowRun
+from src.models.retained import RouteClassificationLog
 from tests.entry_fixtures import enable_flow
 
 USER = {"X-Test-Actor": "user"}
@@ -88,6 +89,10 @@ async def test_exact_greeting_needs_no_provider_or_executor(entry_api, dependenc
     dependencies.resolve.assert_not_called()
     dependencies.classify.assert_not_called()
     assert not dependencies.executions
+    async with sessions() as db:
+        audit = await db.scalar(select(RouteClassificationLog))
+        assert audit.source == "conversational_rule" and audit.route == "CHAT"
+        assert audit.user_message == "你好" and audit.confidence == 1
     rows = await saved_messages(sessions, events[0]["conversation_id"])
     assert len(rows) == 2
     assistant = next(row for row in rows if row.role == "assistant")

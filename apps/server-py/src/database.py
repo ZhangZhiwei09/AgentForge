@@ -88,7 +88,7 @@ def upgrade_connection(connection):
             command.stamp(config, LEGACY_HEAD)
     command.upgrade(config, "head")
     validate_existing_schema(connection)
-    return BASELINE_HEAD
+    return connection.scalar(text("SELECT version_num FROM alembic_version"))
 
 
 async def upgrade_database(url: str):

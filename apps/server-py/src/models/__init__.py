@@ -27,6 +27,7 @@ from src.models.retained import (
     WorkflowRun,
     WorkflowStepLog,
 )
+from src.models.support_ticket import SupportTicket
 from src.models.user import User
 
 __all__ = [
@@ -54,6 +55,7 @@ __all__ = [
     "RefreshToken",
     "RouteClassificationLog",
     "SatisfactionRating",
+    "SupportTicket",
     "User",
     "Workflow",
     "WorkflowRun",

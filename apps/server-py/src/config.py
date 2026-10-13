@@ -112,6 +112,11 @@ class Settings(BaseSettings):
         "http://localhost:5173,http://localhost:5174,http://localhost:5175,"
         "http://localhost:5200,http://localhost:5201,http://localhost:3000"
     ))
+    file_workspace: str = Field(default="")
+    tavily_api_key: str = Field(default="")
+    rate_limit_enabled: bool = Field(default=True)
+    rate_limit_max: int = Field(default=60, ge=1)
+    rate_limit_redis_enabled: bool = Field(default=False)
 
 
 # 模块级单例 —— import 即加载 .env，进程内唯一
