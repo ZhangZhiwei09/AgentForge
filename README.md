@@ -17,14 +17,24 @@ AgentForge 是一个面向企业故障排查的 AI 诊断工作台，围绕问�
 
 ## 运行结构
 
-| 模块 | 职责 |
-| --- | --- |
-| `apps/customer-service` | 诊断对话与证据展示 |
-| `apps/data-admin` | 知识库、反馈与统一流程管理 |
-| `apps/server-py` | Python 公共 API、认证、知识库、Agent Runtime 与 ARQ 摄取 worker |
+| 模块                                    | 技术                                | 职责                                                |
+| --------------------------------------- | ----------------------------------- | --------------------------------------------------- |
+| `apps/customer-service`                 | React / TypeScript / Vite           | 诊断对话与证据展示                                  |
+| `apps/data-admin`                       | React / TypeScript / Vite           | 知识库、反馈与统一流程管理                          |
+| `apps/server-py`                        | Python / FastAPI / SQLAlchemy / ARQ | 公共 API、认证、知识库、Agent Runtime 与摄取 worker |
+| `packages/sdk`、`packages/shared-types` | TypeScript                          | 前端 API 客户端与接口类型                           |
+| `packages/ui`、`packages/cui`           | React / TypeScript                  | 共享界面与对话组件                                  |
 
-默认诊断与发布流程均使用现有 Python Runtime。TS 后端、BullMQ worker 和 Prisma
-运行工具已移除；历史 SQL、数据表、已有环境配置和上传文件保留。Node 仅用于前端开发、构建与浏览器测试。
+后端迁移已完成：API、Agent Runtime、摄取 worker、数据库迁移与管理脚本全部使用 Python。
+原 TS 后端源码、BullMQ worker 和 Prisma 客户端及运行工具已移除，后端 Docker 镜像无需 Node.js。
+
+前端、共享组件、客户端 SDK 和浏览器测试继续使用 TS/TSX。Node.js 用于前端开发、构建、
+浏览器测试及本地开发启动编排；`pnpm` 中的后端命令会调用 Python。完整项目开发仍需要 Node.js。
+
+`packages/database/prisma` 保留历史 schema 和 SQL 迁移，用于旧数据库兼容验证；
+当前数据模型与迁移位于 `apps/server-py/src/models` 和 `apps/server-py/alembic`。
+已有环境配置、上传文件和日志继续保留。旧安装可能仍有未纳入 Git 的 `dist`、
+`node_modules` 或构建缓存，这些不属于当前后端源码。
 
 ## 快速开始
 
@@ -32,10 +42,9 @@ AgentForge 是一个面向企业故障排查的 AI 诊断工作台，围绕问�
 
 ### 环境要求
 
-- Node.js 20+
-- pnpm 9+
-- Python 3.12+ 与 uv
-- Docker Desktop
+- Node.js 20+ 与 pnpm 9+：前端开发、构建与浏览器测试
+- Python 3.12+ 与 uv：API、worker 与数据库工具
+- Docker Desktop：启动本地 PostgreSQL、Redis 等依赖服务
 - 一个可用的 OpenAI 兼容 LLM API Key
 
 ### 1. 安装依赖
@@ -109,6 +118,21 @@ pnpm dev
 其他兼容服务也需返回 1024 维。异步摄取需开启 `INGESTION_ASYNC_ENABLED=true`
 并单独运行 `pnpm server:worker`。`pnpm dev:agent-flows` 可自动选择空闲端口启动两端工作台。
 
+### 仅运行 Python 后端
+
+数据库、Redis 与环境变量准备好后，可直接使用 Python 工具链：
+
+```bash
+cd apps/server-py
+uv sync --locked
+uv run python -m src.database upgrade
+uv run python -m src.database check
+uv run python -m src.dev
+```
+
+启用异步摄取时，在另一个终端从 `apps/server-py` 运行 `uv run python -m src.worker`。
+后端运行无需安装 Node.js 或 pnpm；更多后端配置见 [Python 后端说明](apps/server-py/README.md)。
+
 ## 验证重点
 
 ```bash
@@ -126,9 +150,10 @@ pnpm --filter @agentforge/data-admin test:e2e:workbench
 ## 深入文档
 
 - [开发指南](docs/operations/development.md)：完整的本地开发流程和质量检查
-- [架构与路由](docs/architecture/routing.md)：请求分类和 Agent 分发
-- [Agent Runtime](docs/runtime/execution-runtime-v1.md)：执行器和运行时模型
-- [知识混合检索](docs/architecture/knowledge-hybrid-retrieval.md)：向量检索、BM25 和 RRF
+- [Python 后端说明](apps/server-py/README.md)：当前 API、Agent Runtime、知识摄取与 worker
+- [架构与路由](docs/architecture/routing.md)：当前 Python 请求分类和 Agent 分发
+- [Agent Runtime 历史设计](docs/runtime/execution-runtime-v1.md)：原 TS 执行器设计，文中路径为历史引用
+- [知识混合检索历史设计](docs/architecture/knowledge-hybrid-retrieval.md)：原 TS 检索设计与算法说明，当前实现见 Python 后端说明
 - [部署手册](docs/operations/deployment.md)：生产环境部署
 - [备份与恢复](docs/operations/backup-restore.md)：数据库备份和恢复
 
