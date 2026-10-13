@@ -1,19 +1,12 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { createHmac, randomUUID } from "node:crypto";
-import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { pythonDatabase } from "./python-db";
 import type { AgentFlowDTO, EntryRouteFlowDTO, EntryRouteRunDTO } from "@agentforge/shared-types";
 
-const require = createRequire(resolve(process.cwd(), "../server/package.json"));
-const { PrismaClient } = require("@prisma/client");
-const { parse } = require("dotenv");
-const env = parse(readFileSync(resolve(process.cwd(), "../server/.env")));
-const db = new PrismaClient({ datasourceUrl: process.env.DATABASE_URL || env.DATABASE_URL });
-const secret = process.env.JWT_SECRET || env.JWT_SECRET || "agentforge-dev-secret-change-in-production";
+const db = pythonDatabase();
+const secret = process.env.JWT_SECRET!;
 const adminId = randomUUID(), userId = randomUUID();
 let token: string, userToken: string;
-let testIp = `entry-e2e-${randomUUID()}`;
 let previous: Array<{ id: string }> = [];
 let diagnosisBinding: Array<{ id: string; publishedVersion: number }>;
 const flowIds: string[] = [];
@@ -26,8 +19,8 @@ function accessToken(id: string, role: string) {
   const payload = Buffer.from(JSON.stringify({ sub: id, role, type: "access", iat: now, exp: now + 1800 })).toString("base64url");
   return `${header}.${payload}.${createHmac("sha256", secret).update(`${header}.${payload}`).digest("base64url")}`;
 }
-const auth = () => ({ Authorization: `Bearer ${token}`, "X-Real-IP": testIp });
-const userAuth = () => ({ Authorization: `Bearer ${userToken}`, "X-Real-IP": testIp });
+const auth = () => ({ Authorization: `Bearer ${token}` });
+const userAuth = () => ({ Authorization: `Bearer ${userToken}` });
 async function activation(api: APIRequestContext, id: string, enabled: boolean) {
   const response = await api.put(`/api/entry-route-flows/${id}/activation`, { headers: auth(), data: { enabled } });
   expect(response.ok()).toBeTruthy();
@@ -39,13 +32,7 @@ test.beforeAll(async () => {
   previous = await db.entryRouteFlow.findMany({ where: { enabled: true }, select: { id: true } });
   diagnosisBinding = await db.agentFlow.findMany({ where: { enabled: true }, select: { id: true, publishedVersion: true } });
 });
-test.beforeEach(async ({ page }) => {
-  // Isolate test traffic in the existing limiter; production limits remain exercised.
-  testIp = `entry-e2e-${randomUUID()}`;
-  await page.setExtraHTTPHeaders({ "X-Real-IP": testIp });
-});
 test.afterAll(async ({ request }) => {
-  testIp = `entry-e2e-cleanup-${randomUUID()}`;
   for (const id of flowIds) {
     const exists = await db.entryRouteFlow.findUnique({ where: { id } });
     if (exists && !exists.archived) await activation(request, id, false);
@@ -53,14 +40,7 @@ test.afterAll(async ({ request }) => {
   for (const item of previous) await activation(request, item.id, true);
   for (const id of diagnosisFlowIds) {
     await request.put(`/api/agent-flows/${id}/activation`, { headers: auth(), data: { enabled: false } });
-    const runs = await db.agentFlowRun.findMany({ where: { flowId: id }, select: { id: true } });
-    for (const run of runs) {
-      await db.$executeRaw`DELETE FROM checkpoint_writes WHERE thread_id = ${run.id}`;
-      await db.$executeRaw`DELETE FROM checkpoint_blobs WHERE thread_id = ${run.id}`;
-      await db.$executeRaw`DELETE FROM checkpoints WHERE thread_id = ${run.id}`;
-    }
-    await db.agentFlowRun.deleteMany({ where: { flowId: id } });
-    await db.agentFlow.deleteMany({ where: { id } });
+    await db.cleanupFlow(id);
   }
   if (diagnosisFlowIds.length) for (const item of diagnosisBinding) {
     await request.put(`/api/agent-flows/${item.id}/activation`, { headers: auth(), data: { enabled: true } });
@@ -148,10 +128,13 @@ test("real editor config, dry run, published chat, handoff and rollback", async 
   const handoffFrames = (await handoff.text()).split(/\r?\n/).filter((line) => line.startsWith("data: {")).map((line) => JSON.parse(line.slice(6)));
   const handoffMeta = handoffFrames.find((event) => event.type === "meta");
   const handoffText = handoffFrames.filter((event) => event.type === "token").map((event) => event.content).join("");
-  expect(handoffText).toBe(handoffMeta.within_service_hours ? human.handoff.withinHours : human.handoff.outsideHours);
-  expect((await db.conversation.findUnique({ where: { id: handoffMeta.conversation_id } })).status).toBe("escalated");
+  // Explicit human control takes precedence over the published entry flow.
+  expect(handoffMeta.source).toBe("control_rule");
+  expect(handoffText).toContain(handoffMeta.within_service_hours ? "正在为您转接人工客服" : "非工作时间");
+  expect(handoffText).not.toContain("平台工作时间转接");
+  expect((await db.conversation.findUnique({ where: { id: handoffMeta.conversation_id } }))!.status).toBe("escalated");
   // Customer browser consumes the existing SSE contract without changes.
-  await page.goto("http://localhost:5173");
+  await page.goto(process.env.AGENT_FLOW_CUSTOMER_URL || "http://localhost:5173");
   const input = page.locator("textarea").first();
   await expect(input).toBeVisible();
   await input.fill("欢迎");
@@ -225,7 +208,7 @@ test("real canvas node creation, connections, graph errors and archive", async (
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "归档 连线验收" }).click();
   await expect(page.getByRole("link", { name: "连线验收", exact: true })).toHaveCount(0);
-  expect((await db.entryRouteFlowRun.findUnique({ where: { id: testRun.id } })).status).toBe("completed");
+  expect((await db.entryRouteFlowRun.findUnique({ where: { id: testRun.id } }))!.status).toBe("completed");
 });
 
 test("ordinary user has no entry tab and cannot open editor directly", async ({ page }) => {
@@ -275,7 +258,7 @@ test("optional live entry dispatch, diagnosis HITL and L2 continuation", async (
     localStorage.setItem("accessToken", access);
     localStorage.setItem("agent_chat_conversation_id", conversationId);
   }, { access: userToken, conversationId: meta.conversation_id });
-  await page.goto("http://localhost:5173/");
+  await page.goto(process.env.AGENT_FLOW_CUSTOMER_URL || "http://localhost:5173/");
   await expect(page.getByText("诊断暂停，需要您补充信息", { exact: true })).toBeVisible();
   await expect(page.getByText("多 Agent 协同诊断", { exact: true })).toBeVisible();
   await page.screenshot({ path: info.outputPath("entry-live-customer-waiting.png"), fullPage: true });
@@ -290,10 +273,10 @@ test("optional live entry dispatch, diagnosis HITL and L2 continuation", async (
   expect(resumed.filter((event) => event.type === "error")).toEqual([]);
   expect(resumed.some((event) => event.type === "diagnosis_completed")).toBeTruthy();
   expect(await db.entryRouteFlowRun.count({ where: { flowId: entry.id, conversationId: meta.conversation_id } })).toBe(1);
-  const completed = await db.agentFlowRun.findUnique({ where: { id: run.id } });
-  expect(completed.status).toBe("completed");
-  expect(completed.version).toBe(run.version);
-  for (const id of ["frontend", "backend", "leader"]) expect(completed.records[id]).toEqual(run.records[id]);
+  const completed = await db.agentFlowRun.findUnique({ where: { id: run!.id } });
+  expect(completed!.status).toBe("completed");
+  expect(completed!.version).toBe(run!.version);
+  for (const id of ["frontend", "backend", "leader"]) expect(completed!.records[id]).toEqual(run!.records[id]);
   await expect(page.getByText("完成", { exact: true })).toBeVisible();
   await page.screenshot({ path: info.outputPath("entry-live-customer.png"), fullPage: true });
   // Enable an empty entry so even a greeting must continue through L2-L5.
@@ -306,8 +289,8 @@ test("optional live entry dispatch, diagnosis HITL and L2 continuation", async (
   expect(continued.some((event) => event.type === "done")).toBeTruthy();
   const continuedMeta = continued.find((event) => event.type === "meta");
   const continuationRun = await db.entryRouteFlowRun.findFirst({ where: { flowId: empty.id, conversationId: continuedMeta.conversation_id } });
-  expect(continuationRun.output).toEqual({ action: "continue" });
+  expect(continuationRun!.output).toEqual({ action: "continue" });
   const classification = await db.routeClassificationLog.findFirst({ where: { conversationId: continuedMeta.conversation_id } });
-  expect(classification.source).not.toBe("keyword");
+  expect(classification!.source).not.toBe("keyword");
   await activation(request, empty.id, false);
 });

@@ -1,6 +1,6 @@
 """Initialize the previously uninitialized business ticket store."""
 
-from sqlalchemy import inspect
+from sqlalchemy import inspect, text
 
 from alembic import op
 
@@ -11,9 +11,11 @@ depends_on = None
 
 
 def upgrade():
-    inspector = inspect(op.get_bind())
-    if "support_tickets" in inspector.get_table_names():
-        columns = {column["name"] for column in inspector.get_columns("support_tickets")}
+    connection = op.get_bind()
+    inspector = inspect(connection)
+    schema = connection.scalar(text("SELECT current_schema()"))
+    if "support_tickets" in inspector.get_table_names(schema=schema):
+        columns = {column["name"] for column in inspector.get_columns("support_tickets", schema=schema)}
         required = {"id", "ticket_id", "summary", "priority", "category", "status", "created_at", "updated_at"}
         if required - columns:
             raise RuntimeError("Existing support_tickets schema is incompatible; apply an explicit repair migration")

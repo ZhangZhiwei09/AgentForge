@@ -17,10 +17,12 @@ This rule applies to any text that will be sent to an LLM:
 
 | File | Content |
 |---|---|
-| `packages/shared-prompts/src/index.ts` | All `Prompt.content` strings |
-| `apps/server/src/services/agent.ts` | `buildIterationContext` template strings |
-| `apps/server/src/tools/builtins.ts` | Tool `description` fields |
-| `apps/server/src/tools/file-tools.ts` | Tool `description` fields |
+| `apps/server-py/src/agent/context_builder.py` | Shared runtime context and system prompt |
+| `apps/server-py/src/agent/executor.py` | ReAct system prompt |
+| `apps/server-py/src/agent/router/business_classifier.py` | Business classification prompt |
+| `apps/server-py/src/agent/diagnosis/` | Diagnosis prompts and model context |
+| `apps/server-py/src/agent/tools/` | Tool descriptions and model-facing results |
+| `apps/server-py/src/services/chat_tasks.py` | Consultation and task context |
 
 ## Rationale
 

@@ -21,6 +21,20 @@ from src.models.retained import RouteClassificationLog
 from src.models.user import User
 
 
+async def isolated_postgres_engine(url, schema):
+    # Create the schema before dialect initialization can cache public as default.
+    control = create_async_engine(url)
+    try:
+        async with control.begin() as connection:
+            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    finally:
+        await control.dispose()
+    return create_async_engine(
+        url, connect_args={"server_settings": {"search_path": f"{schema},public"}},
+        execution_options={"schema_translate_map": {None: schema}},
+    )
+
+
 @pytest_asyncio.fixture
 async def entry_api(tmp_path):
     postgres_url = os.environ.get("AGENTFORGE_TEST_POSTGRES_URL")
@@ -30,11 +44,7 @@ async def entry_api(tmp_path):
         if database != "agentforge_python_migration" and not database.startswith("agentforge_test_"):
             raise ValueError("PostgreSQL tests require an explicitly named disposable test database")
         schema = f"migration_test_{uuid.uuid4().hex}"
-        engine = create_async_engine(postgres_url, connect_args={
-            "server_settings": {"search_path": f"{schema},public"},
-        })
-        async with engine.begin() as connection:
-            await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+        engine = await isolated_postgres_engine(postgres_url, schema)
     else:
         engine = create_async_engine(f"sqlite+aiosqlite:///{(tmp_path / 'entry.db').as_posix()}")
 
@@ -96,9 +106,7 @@ async def empty_postgres():
     if database != "agentforge_python_migration" and not database.startswith("agentforge_test_"):
         raise ValueError("Bootstrap tests require a disposable test database")
     schema = f"bootstrap_test_{uuid.uuid4().hex}"
-    engine = create_async_engine(url, connect_args={"server_settings": {"search_path": f"{schema},public"}})
-    async with engine.begin() as connection:
-        await connection.execute(text(f'CREATE SCHEMA "{schema}"'))
+    engine = await isolated_postgres_engine(url, schema)
     try:
         yield engine, schema
     finally:

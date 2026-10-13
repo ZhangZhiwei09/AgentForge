@@ -1,3 +1,24 @@
+x-backend: &backend
+  image: agentforge-server:local
+  build:
+    context: ../../
+    dockerfile: infra/docker/Dockerfile.server
+  env_file:
+    - path: ../../apps/server/.env
+      required: false
+    - path: ../../.env
+      required: false
+    - path: ../../apps/server-py/.env
+      required: false
+  environment: &backend-env
+    DATABASE_URL: postgresql+asyncpg://postgres:postgres@db:5432/agentforge
+    REDIS_URL: redis://redis:6379
+    KNOWLEDGE_STORAGE_ROOT: /app/data/knowledge-files
+    INGESTION_ASYNC_ENABLED: "true"
+    PORT: "8000"
+  volumes:
+    - knowledge_files:/app/data/knowledge-files
+
 services:
   db:
     image: pgvector/pgvector:pg16
@@ -5,114 +26,106 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: agentforge
-    ports:
-      - "5434:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-
+    ports: ["127.0.0.1:5434:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "agentforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    ports: ["127.0.0.1:6379:6379"]
+    volumes: ["redis_data:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  migrate:
+    <<: *backend
+    profiles: ["app"]
+    command: ["python", "-m", "src.database", "upgrade"]
+    healthcheck:
+      disable: true
+    depends_on:
+      db:
+        condition: service_healthy
+  server:
+    <<: *backend
+    profiles: ["app"]
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+  worker:
+    <<: *backend
+    profiles: ["app"]
+    command: ["python", "-m", "src.worker"]
+    healthcheck:
+      disable: true
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+  customer-service:
+    profiles: ["app"]
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.customer-service
+    environment:
+      SERVER_API_URL: http://server:8000
+    ports: ["5173:80"]
+    depends_on: [server]
+  data-admin:
+    profiles: ["app"]
+    build:
+      context: ../../
+      dockerfile: infra/docker/Dockerfile.web
+    environment:
+      SERVER_API_URL: http://server:8000
+    ports: ["5200:80"]
+    depends_on: [server]
+  ollama:
+    profiles: ["search"]
+    image: ollama/ollama:latest
+    ports: ["127.0.0.1:11434:11434"]
+    volumes: ["ollama_data:/root/.ollama"]
+  elasticsearch:
+    profiles: ["search"]
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    environment:
+      discovery.type: single-node
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+      xpack.security.enabled: "false"
+    ports: ["127.0.0.1:9200:9200"]
+    volumes: ["es_data:/usr/share/elasticsearch/data"]
   pgadmin:
+    profiles: ["tools"]
     image: dpage/pgadmin4:latest
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@agentforge.io
       PGADMIN_DEFAULT_PASSWORD: admin
-    ports:
-      - "5050:80"
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    depends_on:
-      - db
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ── Ollama Embedding（本地向量模型）─────────────────────
-  ollama:
-    image: ollama/ollama:latest
-    ports:
-      - "11434:11434"
-    volumes:
-      - ollama_data:/root/.ollama
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-
-  # ── Elasticsearch ──────────────────────────────────────
-  elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
-    environment:
-      - discovery.type=single-node
-      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
-      - xpack.security.enabled=false
-      - "ELASTIC_USERNAME=elastic"
-      - "ELASTIC_PASSWORD=changeme"
-    ports:
-      - "9200:9200"
-      - "9300:9300"
-    volumes:
-      - es_data:/usr/share/elasticsearch/data
-    healthcheck:
-      test: ["CMD-SHELL", "curl -s http://localhost:9200/_cluster/health | grep -q 'green\\|yellow'"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-
-  # ── Jaeger Tracing ──────────────────────────────────────
+    ports: ["127.0.0.1:5050:80"]
+    volumes: ["pgadmin_data:/var/lib/pgadmin"]
+    depends_on: [db]
   jaeger:
+    profiles: ["tools"]
     image: jaegertracing/all-in-one:latest
-    ports:
-      - "16686:16686"   # Jaeger UI
-      - "4318:4318"     # OTLP HTTP receiver
+    ports: ["127.0.0.1:16686:16686", "127.0.0.1:4318:4318"]
     environment:
       COLLECTOR_OTLP_ENABLED: "true"
-    volumes:
-      - jaeger_data:/tmp
-
-  # ── Langfuse LLM Observability ─────────────────────────
-  langfuse:
-    image: ghcr.io/langfuse/langfuse:2
-    ports:
-      - "3000:3000"
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/langfuse
-      NEXTAUTH_SECRET: "${LANGFUSE_NEXTAUTH_SECRET:-langfuse-nextauth-secret-change-me-in-production}"
-      SALT: "${LANGFUSE_SALT:-langfuse-salt-change-me}"
-      ENCRYPTION_KEY: "${LANGFUSE_ENCRYPTION_KEY:-c664547df5d73957fb381ac93b8f2b60012866434866bb0bf8d855b573977795}"
-      NEXTAUTH_URL: "http://localhost:3000"
-      TELEMETRY_ENABLED: "false"
-    depends_on:
-      db:
-        condition: service_started
-
-  server:
-    build:
-      context: ../../
-      dockerfile: infra/docker/Dockerfile.server
-    ports:
-      - "8000:8000"
-    environment:
-      DATABASE_URL: postgresql://postgres:postgres@db:5432/agentforge
-      REDIS_URL: redis://redis:6379
-    depends_on:
-      - db
-      - redis
-    env_file:
-      - ../../apps/server/.env
+    volumes: ["jaeger_data:/tmp"]
 
 volumes:
   pgdata:
-  pgadmin_data:
   redis_data:
+  knowledge_files:
   ollama_data:
   es_data:
+  pgadmin_data:
   jaeger_data:

@@ -4,7 +4,7 @@
 
 用法:
     cd apps/server-py
-    uv run python scripts/seed_intent_samples.py
+    uv run python -m scripts.seed_intent_samples
 
 幂等：基于确定性 id（is-{md5(text)[:8]}）insert-or-skip，重复运行不产生重复数据。
 
@@ -21,8 +21,8 @@ import sys
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
-from src.config import settings
-from src.rag.embeddings import get_embedding_provider
+from src.database import upgrade_database
+from src.dev import configure_environment
 
 # 确保 Windows 终端正确输出中文
 if sys.platform == "win32":
@@ -208,6 +208,11 @@ def _vec_literal(vec: list[float]) -> str:
 
 
 async def main() -> None:
+    configure_environment()
+    from src.config import settings
+    from src.rag.embeddings import get_embedding_provider, validate_embeddings
+
+    await upgrade_database(settings.database_url)
     print(
         f"开始播种意图样本，共 {len(ALL_SAMPLES)} 条"
         f"（DIAGNOSIS: {len(DIAGNOSIS_SAMPLES)}, TASK: {len(TASK_SAMPLES)}, "
@@ -255,14 +260,16 @@ async def main() -> None:
                 if embedding_provider is not None and texts:
                     try:
                         embeddings = await embedding_provider.embed(texts)
-                    except Exception as exc:
+                        validate_embeddings(embeddings, len(texts))
+                    except Exception as exc:  # noqa: BLE001 - retain unembedded samples on provider failure
+                        embeddings = []
                         print(f"Embedding 生成失败，跳过本批次向量写入: {exc}")
 
                 for j, (route, sample_text) in enumerate(batch):
                     sample_id = _deterministic_id(sample_text)
 
                     # insert-or-skip（幂等）
-                    await conn.execute(
+                    result = await conn.execute(
                         text(
                             "INSERT INTO intent_samples "
                             "(id, route, text, source, active) "
@@ -271,7 +278,7 @@ async def main() -> None:
                         ),
                         {"id": sample_id, "route": route, "text": sample_text},
                     )
-                    inserted += 1
+                    inserted += result.rowcount
 
                     # 写入 Embedding 向量（仅当本批 embedding 生成成功）
                     # asyncpg 要求 vector 传字符串字面量 '[0.1,...]'；列类型已是

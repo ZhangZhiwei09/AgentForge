@@ -1,6 +1,7 @@
 """Fresh/adopted PostgreSQL schema and administrator lifecycle checks."""
 
 import json
+import logging
 from pathlib import Path
 
 import pytest
@@ -17,12 +18,17 @@ LATEST_HEAD = "20261013_support_tickets"
 
 @pytest.mark.asyncio
 async def test_fresh_bootstrap_is_complete_and_idempotent(empty_postgres):
+    probe_logger = logging.getLogger("agentforge.bootstrap-probe")
+    assert not probe_logger.disabled
     engine, _ = empty_postgres
     async with engine.begin() as connection:
         assert await connection.run_sync(upgrade_connection) == LATEST_HEAD
-        names = await connection.run_sync(lambda sync: set(inspect(sync).get_table_names()))
+        names = await connection.run_sync(lambda sync: set(inspect(sync).get_table_names(
+            schema=sync.dialect.default_schema_name,
+        )))
         assert set(json.loads(BASELINE.read_text(encoding="utf-8"))["tables"]) <= names
         assert await connection.scalar(text("SELECT version_num FROM alembic_version")) == LATEST_HEAD
+        assert not probe_logger.disabled
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
         user_id, created = await create_admin(db, "bootstrap@example.test", "test-password")
         assert created
@@ -58,9 +64,32 @@ async def test_incompatible_adoption_rolls_back_stamp_and_ddl(empty_postgres):
         async with engine.begin() as connection:
             await connection.run_sync(upgrade_connection)
     async with engine.connect() as connection:
-        names = await connection.run_sync(lambda sync: set(inspect(sync).get_table_names()))
+        names = await connection.run_sync(lambda sync: set(inspect(sync).get_table_names(
+            schema=sync.dialect.default_schema_name,
+        )))
         assert "alembic_version" not in names and "knowledge_bases" not in names
         assert await connection.scalar(text("SELECT email FROM users WHERE id='keep'")) == "keep@example.test"
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_ignores_tables_and_versions_in_other_visible_schemas(empty_postgres):
+    engine, schema = empty_postgres
+    shadow = f"{schema}_shadow"
+    async with engine.begin() as connection:
+        await connection.execute(text(f'CREATE SCHEMA "{shadow}"'))
+        await connection.execute(text(f'CREATE TABLE "{shadow}".users (id text PRIMARY KEY, email text)'))
+        await connection.execute(text(f"INSERT INTO \"{shadow}\".users VALUES ('keep', 'keep@example.test')"))
+        await connection.execute(text(f'CREATE TABLE "{shadow}".alembic_version (version_num varchar(32) PRIMARY KEY)'))
+        await connection.execute(text(f"INSERT INTO \"{shadow}\".alembic_version VALUES ('unrelated_revision')"))
+        await connection.execute(
+            text("SELECT set_config('search_path', :path, true)"),
+            {"path": f"{schema},{shadow},public"},
+        )
+        assert await connection.run_sync(upgrade_connection) == LATEST_HEAD
+        assert await connection.scalar(text("SELECT count(*) FROM users")) == 0
+        assert await connection.scalar(text(f'SELECT email FROM "{shadow}".users')) == "keep@example.test"
+        assert await connection.scalar(text(f'SELECT version_num FROM "{shadow}".alembic_version')) == "unrelated_revision"
+        await connection.execute(text(f'DROP SCHEMA "{shadow}" CASCADE'))
 
 
 @pytest.mark.asyncio

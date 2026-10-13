@@ -37,3 +37,23 @@ class TestOpenAIEmbeddingProvider:
             base_url="http://localhost:11434/v1",
         )
         assert provider.dimensions == 1024
+
+    @pytest.mark.parametrize("model,extra", [
+        ("text-embedding-3-small", {"dimensions": 1024}),
+        ("text-embedding-3-large", {"dimensions": 1024}),
+        ("bge-m3", {}),
+    ])
+    async def test_requested_dimension_matches_retained_schema(self, monkeypatch, model, extra):
+        from types import SimpleNamespace
+        from unittest.mock import AsyncMock
+
+        from src.rag.embeddings import OpenAIEmbeddingProvider
+
+        provider = OpenAIEmbeddingProvider(api_key="fixture", model=model)
+        create = AsyncMock(return_value=SimpleNamespace(data=[
+            SimpleNamespace(embedding=[0.1] * 1024),
+        ]))
+        monkeypatch.setattr(provider._client.embeddings, "create", create)
+        assert await provider.embed(["sample"]) == [[0.1] * 1024]
+        create.assert_awaited_once_with(model=model, input=["sample"], **extra)
+        await provider._client.close()

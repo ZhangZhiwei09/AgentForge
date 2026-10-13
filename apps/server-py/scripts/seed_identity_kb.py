@@ -1,29 +1,21 @@
-"""核身知识库种子脚本 —— 将 TS 侧核身排障知识库迁移至 Python 数据库。
-
-对应 TS: scripts/seed-identity-kb.ts
+"""核身排障知识库示例数据，使用 Python 数据库迁移和共享摄取服务。
 
 用法:
     cd apps/server-py
-    uv run python scripts/seed_identity_kb.py
+    uv run python -m scripts.seed_identity_kb
 
 幂等：重复运行不会创建重复数据。
 """
 
+import argparse
 import asyncio
-import sys
 import uuid
-from datetime import datetime, timezone
-from typing import Any
 
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from src.config import settings
-
-# 确保 Windows 终端正确输出中文
-if sys.platform == "win32":
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+from src.database import upgrade_database
+from src.dev import configure_environment
 
 # ── 核身知识库定义 ──────────────────────────────────────────────
 IDENTITY_KB_ID = "kb-identity-0001"
@@ -415,175 +407,51 @@ NETWORK_TIMEOUT 表示客户端与服务端之间的网络请求超时。常见�
     },
 ]
 
-# ── DDL：与 Prisma schema 对齐的表结构 ───────────────────────
+# Python ORM preserves existing documents and repairs partial seed runs.
 
-CREATE_TABLES_SQL = """
-CREATE TABLE IF NOT EXISTS knowledge_bases (
-    id                    VARCHAR(36) PRIMARY KEY,
-    name                  VARCHAR(255) NOT NULL,
-    description           TEXT,
-    category              VARCHAR(100),
-    enabled               BOOLEAN NOT NULL DEFAULT TRUE,
-    chunk_size_tokens     INTEGER,
-    chunk_overlap_tokens  INTEGER,
-    separator_mode        VARCHAR(20) DEFAULT 'auto',
-    custom_separator      VARCHAR(100),
-    chunk_structure       VARCHAR(20) DEFAULT 'paragraph',
-    child_chunk_size_tokens    INTEGER,
-    child_chunk_overlap_tokens INTEGER,
-    remove_extra_spaces   BOOLEAN NOT NULL DEFAULT TRUE,
-    remove_urls_emails    BOOLEAN NOT NULL DEFAULT FALSE,
-    created_at            TIMESTAMPTZ DEFAULT NOW(),
-    updated_at            TIMESTAMPTZ DEFAULT NOW()
-);
+async def seed_documents(db):
+    from src.models.knowledge import KnowledgeBase, KnowledgeDocument
 
-CREATE TABLE IF NOT EXISTS knowledge_documents (
-    id                      VARCHAR(36) PRIMARY KEY,
-    knowledge_base_id       VARCHAR(36) NOT NULL REFERENCES knowledge_bases(id),
-    title                   VARCHAR(500) NOT NULL,
-    content                 TEXT NOT NULL,
-    chunk_count             INTEGER NOT NULL DEFAULT 0,
-    status                  VARCHAR(50) NOT NULL DEFAULT 'pending',
-    enabled                 BOOLEAN NOT NULL DEFAULT TRUE,
-    original_filename       VARCHAR(500),
-    original_file_type      VARCHAR(100),
-    original_file_size      INTEGER,
-    original_file_path      VARCHAR(1000),
-    error_message           VARCHAR(2000),
-    retry_count             INTEGER NOT NULL DEFAULT 0,
-    quality_label           VARCHAR(20),
-    processing_detail       TEXT,
-    processing_started_at   TIMESTAMPTZ,
-    downloading_completed_at TIMESTAMPTZ,
-    parsing_completed_at    TIMESTAMPTZ,
-    created_at              TIMESTAMPTZ DEFAULT NOW(),
-    updated_at              TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS ix_knowledge_documents_kb_id
-    ON knowledge_documents(knowledge_base_id);
-
-CREATE TABLE IF NOT EXISTS knowledge_chunks (
-    id                VARCHAR(36) PRIMARY KEY,
-    document_id       VARCHAR(36) NOT NULL REFERENCES knowledge_documents(id),
-    knowledge_base_id VARCHAR(36) NOT NULL REFERENCES knowledge_bases(id),
-    chunk_index       INTEGER NOT NULL,
-    content           TEXT NOT NULL,
-    token_count       INTEGER NOT NULL DEFAULT 0,
-    enabled           BOOLEAN NOT NULL DEFAULT TRUE,
-    source_type       VARCHAR(20),
-    quality_label     VARCHAR(20),
-    parent_chunk_id   VARCHAR(36) REFERENCES knowledge_chunks(id),
-    created_at        TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS ix_knowledge_chunks_doc_id
-    ON knowledge_chunks(document_id);
-
-CREATE INDEX IF NOT EXISTS ix_knowledge_chunks_kb_id
-    ON knowledge_chunks(knowledge_base_id);
-"""
+    if not await db.get(KnowledgeBase, IDENTITY_KB_ID):
+        db.add(KnowledgeBase(id=IDENTITY_KB_ID, name=IDENTITY_KB_NAME, description=IDENTITY_KB_DESC))
+        await db.flush()
+    documents = list((await db.scalars(select(KnowledgeDocument).where(
+        KnowledgeDocument.knowledge_base_id == IDENTITY_KB_ID,
+    ))).all())
+    by_title = {document.title: document for document in documents}
+    for sample in IDENTITY_DOCS:
+        if sample["title"] not in by_title:
+            document = KnowledgeDocument(
+                id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"agentforge:identity:{sample['title']}")),
+                knowledge_base_id=IDENTITY_KB_ID, title=sample["title"],
+                content=sample["content"], status="pending",
+            )
+            db.add(document)
+            by_title[document.title] = document
+    await db.commit()
+    return [by_title[sample["title"]].id for sample in IDENTITY_DOCS]
 
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
+async def seed(*, process=False):
+    configure_environment()
+    from src.config import settings
+    from src.services.knowledge_ingestion import IngestionService
 
-
-async def seed() -> None:
-    """主流程：建表 → 创建 KB → 写入文档。"""
-    # 用 sync 连接建表（CREATE TABLE 不能跑在事务里）
-    sync_url = settings.database_url.replace("+asyncpg", "+psycopg2")
-    engine = create_async_engine(
-        settings.database_url,
-        echo=False,
-    )
-
-    # 1. 建表（使用 raw connection 避免事务问题）
-    import asyncpg  # type: ignore[import-untyped]
-
-    # 从 DATABASE_URL 解析连接参数
-    # postgresql+asyncpg://postgres:postgres@localhost:5434/agentforge_py
-    url = settings.database_url
-    # 简单解析：移除协议前缀
-    rest = url.replace("postgresql+asyncpg://", "")
-    user_pass, host_db = rest.split("@", 1) if "@" in rest else ("", rest)
-    user, password = user_pass.split(":", 1) if ":" in user_pass else (user_pass, "")
-    host_port, db_name = host_db.split("/", 1) if "/" in host_db else (host_db, "postgres")
-    host, port = host_port.split(":", 1) if ":" in host_port else (host_port, "5434")
-
-    conn = await asyncpg.connect(
-        user=user,
-        password=password,
-        host=host,
-        port=int(port),
-        database=db_name,
-    )
+    await upgrade_database(settings.database_url)
+    engine = create_async_engine(settings.database_url)
     try:
-        await conn.execute(CREATE_TABLES_SQL)
-        print("Tables ensured.")
+        async with async_sessionmaker(engine, expire_on_commit=False)() as db:
+            ids = await seed_documents(db)
+            if process:
+                for document_id in ids:
+                    result = await IngestionService(db).process(document_id, IDENTITY_KB_ID)
+                    print(f"{document_id}: {result['status']}")
+        print(f"Ready: {len(ids)} identity documents")
     finally:
-        await conn.close()
-
-    # 2. 创建/确认知识库（幂等）
-    async with engine.connect() as conn:
-        existing = await conn.execute(
-            text("SELECT id FROM knowledge_bases WHERE id = :kb_id"),
-            {"kb_id": IDENTITY_KB_ID},
-        )
-        row = existing.fetchone()
-
-        if row:
-            print(f"Knowledge base already exists: {IDENTITY_KB_NAME}")
-        else:
-            await conn.execute(
-                text("""
-                    INSERT INTO knowledge_bases (id, name, description, enabled, chunk_structure,
-                        remove_extra_spaces, remove_urls_emails)
-                    VALUES (:id, :name, :desc, TRUE, 'paragraph', TRUE, FALSE)
-                """),
-                {"id": IDENTITY_KB_ID, "name": IDENTITY_KB_NAME, "desc": IDENTITY_KB_DESC},
-            )
-            await conn.commit()
-            print(f"Created knowledge base: {IDENTITY_KB_NAME}")
-
-        # 3. 检查已存在的文档数
-        doc_count_row = await conn.execute(
-            text("SELECT COUNT(*) FROM knowledge_documents WHERE knowledge_base_id = :kb_id"),
-            {"kb_id": IDENTITY_KB_ID},
-        )
-        existing_docs: int = doc_count_row.scalar() or 0  # type: ignore[assignment]
-
-        if existing_docs >= len(IDENTITY_DOCS):
-            print(f"{existing_docs} documents already exist, skipping.")
-            await conn.commit()
-            await engine.dispose()
-            return
-
-        # 4. 写入文档
-        print(f"Seeding {len(IDENTITY_DOCS)} documents...")
-        for i, doc in enumerate(IDENTITY_DOCS):
-            doc_id = str(uuid.uuid4())
-            await conn.execute(
-                text("""
-                    INSERT INTO knowledge_documents
-                        (id, knowledge_base_id, title, content, chunk_count, status, enabled, created_at, updated_at)
-                    VALUES (:id, :kb_id, :title, :content, 0, 'pending', TRUE, :now, :now)
-                    ON CONFLICT (id) DO NOTHING
-                """),
-                {
-                    "id": doc_id,
-                    "kb_id": IDENTITY_KB_ID,
-                    "title": doc["title"],
-                    "content": doc["content"],
-                    "now": _now(),
-                },
-            )
-            print(f"  [{i + 1}/{len(IDENTITY_DOCS)}] {doc['title']}")
-        await conn.commit()
-
-    await engine.dispose()
-    print(f"Done! {len(IDENTITY_DOCS)} documents seeded into {IDENTITY_KB_NAME}")
+        await engine.dispose()
 
 
 if __name__ == "__main__":
-    asyncio.run(seed())
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--process", action="store_true", help="Ingest using the configured embedding provider.")
+    asyncio.run(seed(process=parser.parse_args().process))

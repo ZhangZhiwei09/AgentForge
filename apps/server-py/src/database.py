@@ -14,6 +14,7 @@ from sqlalchemy import inspect, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from alembic import command
+from src.models.base import Base
 
 ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "alembic/baselines/20261013.json"
@@ -42,12 +43,13 @@ def validate_existing_schema(connection):
     """Inspect before stamping; do not disguise incompatible schemas as migrated."""
     baseline = json.loads(BASELINE.read_text(encoding="utf-8"))
     inspector = inspect(connection)
-    present = set(inspector.get_table_names())
+    schema = connection.scalar(text("SELECT current_schema()"))
+    present = set(inspector.get_table_names(schema=schema))
     errors = []
     for name, expected in baseline["tables"].items():
         if name not in present:
             continue
-        columns = {column["name"]: column for column in inspector.get_columns(name)}
+        columns = {column["name"]: column for column in inspector.get_columns(name, schema=schema)}
         for column, expected_type in expected["columns"].items():
             actual = columns.get(column)
             if actual is None:
@@ -60,7 +62,7 @@ def validate_existing_schema(connection):
                 continue
             elif not compatible_type(expected_type, str(actual["type"].compile(dialect=connection.dialect))):
                 errors.append(f"{name}.{column}: incompatible type (expected {expected_type})")
-        if inspector.get_pk_constraint(name)["constrained_columns"] != expected["primary_key"]:
+        if inspector.get_pk_constraint(name, schema=schema)["constrained_columns"] != expected["primary_key"]:
             errors.append(f"{name}: incompatible primary key")
     if errors:
         raise RuntimeError("Schema adoption refused; apply an explicit repair migration:\n" + "\n".join(errors))
@@ -73,7 +75,8 @@ def upgrade_connection(connection):
     connection.execute(text("SELECT pg_advisory_xact_lock(2147130013)"))
     config = Config(str(ROOT / "alembic.ini"))
     config.attributes["connection"] = connection
-    present = set(inspect(connection).get_table_names())
+    schema = connection.scalar(text("SELECT current_schema()"))
+    present = set(inspect(connection).get_table_names(schema=schema))
     current = connection.scalar(text("SELECT version_num FROM alembic_version")) if "alembic_version" in present else None
     if current is None:
         validate_existing_schema(connection)
@@ -145,8 +148,10 @@ def main():
             if args.action == "check":
                 async with engine.connect() as connection:
                     await connection.run_sync(validate_existing_schema)
-                    present = await connection.run_sync(lambda sync: set(inspect(sync).get_table_names()))
-                    required = set(json.loads(BASELINE.read_text(encoding="utf-8"))["tables"])
+                    present = await connection.run_sync(lambda sync: set(inspect(sync).get_table_names(
+                        schema=sync.scalar(text("SELECT current_schema()")),
+                    )))
+                    required = set(Base.metadata.tables)
                     if required - present:
                         raise RuntimeError("Missing tables: " + ", ".join(sorted(required - present)))
                 print("Database schema is compatible")

@@ -6,6 +6,11 @@ import sys
 
 from arq.worker import Worker, get_kwargs
 
+if __name__ == "__main__":
+    from src.dev import configure_environment
+
+    configure_environment()
+
 from src.jobs.ingestion import WorkerSettings
 
 

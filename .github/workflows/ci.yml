@@ -9,23 +9,40 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     env:
-      DATABASE_URL: "postgresql://test:test@localhost:5434/agentforge_test"
-
+      DATABASE_URL: postgresql+asyncpg://test:test@localhost:5434/agentforge_test_ci
+      AGENTFORGE_TEST_POSTGRES_URL: postgresql+asyncpg://test:test@localhost:5434/agentforge_test_ci
+      AGENTFORGE_E2E_DATABASE_URL: postgresql+asyncpg://test:test@localhost:5434/agentforge_test_ci
+      AGENTFORGE_TEST_REDIS_URL: redis://localhost:6379
+      REDIS_TEST_URL: redis://localhost:6379
+      AGENT_FLOW_INTEGRATION: "1"
+      REDIS_URL: redis://localhost:6379
+      JWT_SECRET: ci-test-secret
+      OPENAI_API_KEY: ""
+      EMBEDDING_API_KEY: ""
+      EMBEDDING_BASE_URL: http://127.0.0.1:8011/v1
+      AGENTFORGE_E2E_EMBEDDINGS: "1"
+      LANGFUSE_ENABLED: "false"
+      LANGGRAPH_CHECKPOINT_ENABLED: "false"
+      LANGGRAPH_DIAGNOSIS_CHECKPOINT_ENABLED: "false"
+      RATE_LIMIT_MAX: "10000"
+      AGENT_FLOW_ADMIN_URL: http://localhost:5200
     services:
       postgres:
         image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: test
           POSTGRES_PASSWORD: test
-          POSTGRES_DB: agentforge_test
-        ports:
-          - "5434:5432"
+          POSTGRES_DB: agentforge_test_ci
+        ports: ["5434:5432"]
         options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-
+          --health-cmd "pg_isready -U test -d agentforge_test_ci"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -34,39 +51,49 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'pnpm'
-
+          cache: pnpm
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.11.19'
+          python-version: '3.12'
       - run: pnpm install --frozen-lockfile
-
-      - name: Wait for PostgreSQL
-        run: |
-          until pg_isready -h localhost -p 5434 -U test; do
-            echo "Waiting for postgres..."
-            sleep 2
-          done
-        env:
-          PGPASSWORD: test
-
-      - name: Generate Prisma Client
-        run: pnpm db:generate
-
-      - name: Run Database Migrations
-        run: pnpm --filter @agentforge/database exec prisma migrate deploy
-        env:
-          DATABASE_URL: "postgresql://test:test@localhost:5434/agentforge_test"
-
-      - name: Lint
-        run: pnpm lint
-        continue-on-error: true  # ESLint is opt-in; don't block CI until all issues resolved
-
-      - name: Typecheck
+      - run: uv sync --locked
+        working-directory: apps/server-py
+      - name: Python database bootstrap
+        run: pnpm db:migrate && pnpm db:check
+      - name: Frontend typecheck
         run: pnpm typecheck
-
-      - name: Test
-        run: pnpm test
-        env:
-          JWT_SECRET: "ci-test-secret"
-          LOG_LEVEL: "warn"
-
-      - name: Build
+      - name: Frontend component regression
+        run: pnpm --filter @agentforge/cui test
+      - name: Python regression with PostgreSQL and Redis
+        run: pnpm py:test
+      - name: Frontend build
         run: pnpm build
+      - name: Install browser
+        run: pnpm --filter @agentforge/data-admin exec playwright install --with-deps chromium
+      - name: Start Python and frontends
+        env:
+          EMBEDDING_API_KEY: browser-embedding-fixture
+        run: |
+          (cd apps/server-py && uv run --locked python -m tests.embedding_stub) > /tmp/agentforge-embedding.log 2>&1 &
+          pnpm server:dev > /tmp/agentforge-api.log 2>&1 &
+          pnpm admin:dev > /tmp/agentforge-admin.log 2>&1 &
+          pnpm cs:dev > /tmp/agentforge-customer.log 2>&1 &
+          for endpoint in http://localhost:8000/api/health http://localhost:5200 http://localhost:5173; do
+            for attempt in $(seq 1 60); do
+              if curl --fail --silent "$endpoint" > /dev/null; then break; fi
+              if [ "$attempt" = 60 ]; then cat /tmp/agentforge-*.log; exit 1; fi
+              sleep 1
+            done
+          done
+      - name: Real frontend acceptance
+        run: pnpm --filter @agentforge/data-admin exec playwright test
+      - name: Build Python runtime image
+        run: docker build -f infra/docker/Dockerfile.server -t agentforge-server:ci .
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: acceptance-evidence
+          path: |
+            /tmp/agent-flow-playwright
+            /tmp/agentforge-*.log

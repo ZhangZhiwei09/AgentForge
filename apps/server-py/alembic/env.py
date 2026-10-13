@@ -3,23 +3,22 @@
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
-
-from src.config import settings
-from src.models.base import Base
 
 # 加载所有模型，确保 Base.metadata 包含了全部表定义
 # 每新增一个模型文件，在这里加一行 import
 import src.models  # noqa: F401
+from alembic import context
+from src.config import settings
+from src.models.base import Base
 
 # Alembic Config 对象，从 alembic.ini 读取配置
 config = context.config
 
 # 设置日志
-if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+if config.config_file_name is not None and config.attributes.get("connection") is None:
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 # 把数据库 URL 设置到 alembic 配置中，覆盖 alembic.ini 里的占位符
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
@@ -47,7 +46,10 @@ def run_migrations_offline() -> None:
 
 def do_run_migrations(connection):
     """在给定连接上执行迁移。"""
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(
+        connection=connection, target_metadata=target_metadata,
+        version_table_schema=connection.dialect.default_schema_name,
+    )
 
     with context.begin_transaction():
         context.run_migrations()

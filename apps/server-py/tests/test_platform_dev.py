@@ -1,4 +1,13 @@
-from src.dev import platform_environment
+from src.dev import environment_paths, platform_environment
+
+
+def test_env_paths_support_monorepo_and_shallow_container_layout(tmp_path):
+    assert environment_paths(tmp_path / "apps/server-py") == (
+        tmp_path / "apps/server/.env", tmp_path / ".env", tmp_path / "apps/server-py/.env",
+    )
+    assert environment_paths(tmp_path / "app") == (
+        tmp_path / "app/apps/server/.env", tmp_path / "app/.env", tmp_path / "app/.env",
+    )
 
 
 def test_platform_defaults_ignore_the_standalone_python_database(tmp_path):
@@ -164,7 +173,7 @@ def test_public_launch_uses_python_config_and_explicit_port(tmp_path, monkeypatc
     assert dev.os.environ["REDIS_URL"] == "redis://python"
 
 
-def test_legacy_flow_launch_keeps_8004_even_when_server_env_has_public_port(tmp_path, monkeypatch):
+def test_explicit_flow_launch_keeps_8004_even_when_server_env_has_public_port(tmp_path, monkeypatch):
     import sys
 
     import uvicorn
@@ -174,10 +183,33 @@ def test_legacy_flow_launch_keeps_8004_even_when_server_env_has_public_port(tmp_
     legacy = tmp_path / "legacy.env"
     legacy.write_text("PORT=8000\n")
     monkeypatch.setattr(dev, "SERVER_ENV", legacy)
-    monkeypatch.setattr(sys, "argv", ["dev", "--no-reload"])
+    monkeypatch.setattr(sys, "argv", ["dev", "--flow-service", "--no-reload"])
+    monkeypatch.setattr(dev, "ROOT_ENV", tmp_path / "missing-root.env")
+    monkeypatch.setattr(dev, "PYTHON_ENV", tmp_path / "missing-python.env")
     calls = []
     monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
     monkeypatch.setattr("os.environ", {})
     dev.main()
     assert calls[0][1]["port"] == 8004
     assert dev.os.environ["PORT"] == "8004"
+
+
+def test_default_launch_is_public_and_reads_python_configuration(tmp_path, monkeypatch):
+    import sys
+
+    import uvicorn
+
+    from src import dev
+
+    python = tmp_path / "python.env"
+    python.write_text("JWT_SECRET=python-file\n")
+    monkeypatch.setattr(dev, "SERVER_ENV", tmp_path / "missing-legacy.env")
+    monkeypatch.setattr(dev, "ROOT_ENV", tmp_path / "missing-root.env")
+    monkeypatch.setattr(dev, "PYTHON_ENV", python)
+    monkeypatch.setattr(sys, "argv", ["dev", "--no-reload"])
+    calls = []
+    monkeypatch.setattr(uvicorn, "run", lambda *args, **kwargs: calls.append((args, kwargs)))
+    monkeypatch.setattr("os.environ", {})
+    dev.main()
+    assert calls[0][1]["port"] == 8000
+    assert dev.os.environ["JWT_SECRET"] == "python-file"

@@ -1,5 +1,10 @@
 # RFC-001: AgentForge Execution Runtime Model V1
 
+> Historical TypeScript design reference. Since the Python cutover, active
+> execution uses `apps/server-py/src/agent/react_graph.py`, `src/services/agent_tasks.py` and the
+> persisted task lifecycle. The TS source paths below are archived design
+> references; see [current routing](../architecture/routing.md).
+
 > **Status**: Accepted
 > **Date**: 2026-06-15
 > **Scope**: 定义 AgentForge 统一运行时执行模型的核心抽象。智能客服消息中断是第一个消费者。

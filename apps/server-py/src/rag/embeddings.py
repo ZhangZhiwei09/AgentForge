@@ -63,7 +63,7 @@ class EmbeddingProvider(Protocol):
 class OpenAIEmbeddingProvider:
     """OpenAI Embedding 服务。
 
-    使用 text-embedding-3-small 模型，1536 维向量。
+    默认使用 text-embedding-3-small，显式请求与现有数据库一致的 1024 维向量。
     如果 embedding_api_key 为空，fallback 到 openai_api_key。
     """
 
@@ -88,7 +88,7 @@ class OpenAIEmbeddingProvider:
             )
 
         self._model = model or settings.embedding_model
-        # 本地 Ollama bge-m3 固定维度（与 embedding 模型匹配）
+        # 保留现有数据库的固定向量维度。
         self._dimensions = 1024
 
         self._client = AsyncOpenAI(
@@ -110,7 +110,7 @@ class OpenAIEmbeddingProvider:
             texts: 文本列表（建议 batch ≤ 100）
 
         Returns:
-            等长的向量列表，每个向量 1536 维
+            等长的向量列表，每个向量 1024 维
         """
         if not texts:
             return []
@@ -119,6 +119,9 @@ class OpenAIEmbeddingProvider:
             response = await self._client.embeddings.create(
                 model=self._model,
                 input=texts,
+                **({"dimensions": self._dimensions} if self._model in {
+                    "text-embedding-3-small", "text-embedding-3-large",
+                } else {}),
             )
             # 按输入顺序返回
             return [item.embedding for item in response.data]

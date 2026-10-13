@@ -1,5 +1,9 @@
 # Identity Diagnosis Agent Spec
 
+> 当前实现：后端已迁移为 Python，诊断复用现有 LangGraph Runtime。
+> 下文 TS 执行器和“已废弃 LangGraph”的说明均为历史设计状态；
+> 当前执行关系以 `docs/architecture/routing.md` 为准。
+
 > **⚠️ 架构已变更（2026-07）**: 此 Spec 描述的是独立 LangGraph 端点方案。实际实现已改为 DIAGNOSIS 作为 Agent Runtime 的第 5 条路由（`DiagnosisRouteAgent`），通过主链路 `AgentRuntimeService → Router → DiagnosisRouteAgent` 执行，不再使用 LangGraph。详见 `docs/architecture/routing.md`。
 >
 > 以下为原始 Spec，保留作为设计参考。

@@ -24,6 +24,7 @@ from collections.abc import AsyncIterator
 from contextlib import aclosing, asynccontextmanager
 from datetime import UTC, datetime
 from typing import Annotated, cast
+from zoneinfo import ZoneInfo
 
 from anyio import CancelScope
 from fastapi import APIRouter, Depends, HTTPException
@@ -141,11 +142,22 @@ async def _stream_safety(assistant_msg_id: str) -> AsyncIterator:
     yield StreamDone(message_id=assistant_msg_id, usage={}, route=RouteName.SAFETY.value, fallback_used=True)
 
 
-async def _stream_human(assistant_msg_id: str) -> AsyncIterator:
-    human_msg = "正在为您转接人工客服，请稍候..."
+def _within_service_hours() -> bool:
+    now = datetime.now(ZoneInfo("Asia/Shanghai"))
+    return now.weekday() < 5 and 9 <= now.hour < 18
+
+
+async def _stream_human(assistant_msg_id: str, within_hours: bool = True) -> AsyncIterator:
+    human_msg = "正在为您转接人工客服，请稍候..." if within_hours else (
+        "当前为非工作时间（工作日 9:00-18:00），人工客服暂时不在线。"
+        "您的问题已记录，请在工作时间联系人工支持。"
+    )
     for char in human_msg:
         yield StreamToken(content=char, message_id=assistant_msg_id)
-    yield StreamDone(message_id=assistant_msg_id, usage={}, route=RouteName.HUMAN.value)
+    yield StreamDone(
+        message_id=assistant_msg_id, usage={}, route=RouteName.HUMAN.value,
+        suggestions=["继续咨询其他问题", "关闭会话"],
+    )
 
 
 # ── 会话持久化辅助函数 ──────────────────────────────────────
@@ -544,11 +556,14 @@ async def _handle_chat(
                 }
                 events = None
                 provider_name = ""
+                within_hours = _within_service_hours()
                 try:
                     if decision.action != "dispatch":
                         events = _stream_entry_response(decision, assistant_msg_id)
                     elif route in (RouteName.SAFETY, RouteName.HUMAN):
-                        events = _stream_safety(assistant_msg_id) if route == RouteName.SAFETY else _stream_human(assistant_msg_id)
+                        if route == RouteName.HUMAN:
+                            conv.status = "escalated"
+                        events = _stream_safety(assistant_msg_id) if route == RouteName.SAFETY else _stream_human(assistant_msg_id, within_hours)
                     else:
                         query = decision.resolved_query or message
                         # Insufficient diagnoses can ask for information without a provider.
@@ -588,6 +603,7 @@ async def _handle_chat(
                         model=model_id if provider_name else "", provider=provider_name,
                         route=route.value, intent=intent, source=decision.source,
                         conversational=decision.action == "reply",
+                        within_service_hours=within_hours,
                     )
                     async with aclosing(events):
                         async for event in events:

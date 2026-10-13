@@ -13,6 +13,8 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+.pytest-tmp*/
+.e2e/
 
 .trae/
 .DS_Store

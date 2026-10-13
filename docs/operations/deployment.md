@@ -1,197 +1,88 @@
-# 生产部署运维手册
+# Production Deployment
 
-## 服务器信息
+The production stack consists of pgvector PostgreSQL 16, persistent Redis 7,
+a Python API, a Python ARQ worker and two Nginx frontend images. Database upgrades
+run as a separate service before API/worker startup. Node is used during frontend
+image builds; neither backend image nor runtime needs Node or Prisma.
 
-| 项目 | 值 |
-|------|-----|
-| 公网 IP | `<SERVER_IP>`（配置于 `.env.production`） |
-| SSH | `ssh root@<SERVER_IP>`（密钥/密码见 `.env.production`） |
-| 系统 | Alibaba Cloud ECS 华南1（深圳），Docker 26.1.3 |
-| 代码路径 | `/root/agentforge/` |
-| 配置文件 | `/root/agentforge/infra/docker/.env.production` |
+## Configuration
 
-## 架构概览
+Create a private `.env.production` and pass it explicitly to Compose. Required:
 
+```dotenv
+POSTGRES_USER=agentforge
+POSTGRES_PASSWORD=replace-me
+POSTGRES_DB=agentforge
+REDIS_PASSWORD=replace-me
+DATABASE_URL=postgresql+asyncpg://agentforge:replace-me@db:5432/agentforge
+REDIS_URL=redis://:replace-me@redis:6379
+JWT_SECRET=replace-with-a-stable-random-secret
+OPENAI_API_KEY=replace-with-provider-key
+OPENAI_BASE_URL=https://api.openai.com/v1
+DEFAULT_MODEL=gpt-4o-mini
+EMBEDDING_MODEL=text-embedding-3-small
+WEB_PORT=80
+ADMIN_PORT=5200
 ```
-用户 → :80 (Nginx 前端) → :8000 (Server, Docker 内部)
-                                  ↓
-用户 → :3000 (Langfuse 观测面板)
-```
 
-所有服务通过 `docker-compose.prod.yml` 编排，`--env-file .env.production` 注入配置。
+URL-encode credentials inside URLs. Keep the JWT secret used by existing users
+to preserve their sessions. The retained vector schema is 1024-dimensional:
+OpenAI text-embedding-3 models explicitly request 1024; custom providers must
+return 1024. Configure `EMBEDDING_API_KEY` and `EMBEDDING_BASE_URL` independently
+when using a different embedding provider.
 
-## 常用操作
+Configure optional Elasticsearch/reranking/Langfuse endpoints as needed.
+These services can be operated externally; they are not automatically provisioned
+by production Compose. Same-origin Nginx API proxies do not require CORS;
+set `CORS_ORIGINS` for external browser origins.
 
-### 启动全部服务
+## Startup And Upgrade
+
+From the repository root:
 
 ```bash
-ssh root@<SERVER_IP>
-cd /root/agentforge/infra/docker
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d
+docker compose --env-file .env.production -f infra/docker/docker-compose.prod.yml up -d --build
+docker compose --env-file .env.production -f infra/docker/docker-compose.prod.yml ps -a
+docker compose --env-file .env.production -f infra/docker/docker-compose.prod.yml logs --tail=100 server worker migrate
 ```
 
-首次冷启动约 30 秒，DB + Redis + Server + Nginx + Langfuse 全部就绪。
-
-### 停止全部服务
+`migrate` creates a fresh database or adopts compatible existing Prisma/Alembic
+tables transactionally. Incompatible columns stop startup with a repair error;
+no tables or vectors are implicitly dropped/resized. Back up before upgrades.
+Run the migration explicitly before restarting an existing deployment:
 
 ```bash
-cd /root/agentforge/infra/docker
-docker compose --env-file .env.production -f docker-compose.prod.yml down
+docker compose --env-file .env.production -f infra/docker/docker-compose.prod.yml run --rm migrate
+docker compose --env-file .env.production -f infra/docker/docker-compose.prod.yml up -d --build server worker customer-service data-admin
+docker compose --env-file .env.production -f infra/docker/docker-compose.prod.yml exec server python -m src.database check
+docker compose --env-file .env.production -f infra/docker/docker-compose.prod.yml exec server python -m src.database create-admin --email admin@agentforge.local
 ```
 
-**停止后数据不会丢失**——数据库、向量库、Langfuse 数据保存在 Docker Volume 中，下次启动自动恢复。
+The API binds only the Compose network. Frontend ports are public; terminate TLS
+at the deployment gateway. Production `TRUSTED_PROXY_IPS` defaults to the private
+network's proxies. Restrict it to actual proxy IPs if connecting other workloads
+or exposing the API. Requests must not be allowed to forge forwarded addresses.
 
-### 查看服务状态
+## Persistence And Monitoring
 
-```bash
-docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-```
+`pgdata` retains PostgreSQL, `redis_data` retains AOF queue state, and
+`knowledge_files` is mounted read/write by API and worker. Redis uses `noeviction`
+so memory pressure rejects writes instead of discarding queued ingestion jobs.
+Queue dispatch failures retain pending documents and return 503.
 
-### 查看日志
+When migrating an existing deployment, reuse its PostgreSQL volume and upload
+storage. Preserve legacy `apps/server/data/knowledge-files`; mount or copy it to
+the configured storage root before enabling the new API. Database rows containing
+absolute paths need those paths mounted at the same container location, or an
+explicit data migration. Do not remove old volumes until restored data and files
+have been verified.
 
-```bash
-# 全部日志
-docker compose --env-file .env.production -f docker-compose.prod.yml logs --tail=50
+`/api/health` is liveness; `/api/ready` verifies SQL, provider configuration and
+required Redis. `/api/metrics` requires authentication. Grafana queries are in
+`infra/dashboards/agentforge.json`. Readiness validates configured credentials,
+not a paid live model request. Monitor worker logs and failed document status.
+Interrupted task sessions may require operator reconciliation; tools with uncertain
+external outcomes are not automatically replayed.
 
-# 单个服务
-docker compose --env-file .env.production -f docker-compose.prod.yml logs server --tail=50
-```
-
-### 仅重启 Server（代码更新后）
-
-```bash
-cd /root/agentforge/infra/docker
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d server
-```
-
-Server 重启约 10 秒，期间客服前端暂时不可用。
-
-## 更新部署
-
-### 只改前端
-
-```bash
-# 本地构建
-pnpm --filter @agentforge/customer-service build
-
-# 上传到服务器
-scp -r apps/customer-service/dist/* root@<SERVER_IP>:/tmp/html/
-
-# SSH 到服务器替换
-ssh root@<SERVER_IP>
-docker cp /tmp/html/. docker-customer-service-1:/usr/share/nginx/html/
-# 无需重启，刷新页面即生效
-```
-
-### 改了后端或 Dockerfile
-
-```bash
-# 本地提交 & 推送代码
-git add . && git commit -m "feat: xxx" && git push
-
-# 在服务器上拉取最新代码
-ssh root@<SERVER_IP>
-cd /root/agentforge
-git pull
-
-# 重新构建镜像
-docker build -f infra/docker/Dockerfile.server -t agentforge-server:latest .
-
-# 重启
-cd infra/docker
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d server
-```
-
-## 数据库维护
-
-### 连接数据库
-
-```bash
-docker exec -it docker-db-1 psql -U agentforge
-```
-
-### 执行 SQL 脚本
-
-```bash
-docker exec -w /app/apps/server -i docker-server-1 node < script.js
-```
-
-### 重置数据库
-
-```bash
-# 停止服务
-docker compose --env-file .env.production -f docker-compose.prod.yml down
-
-# 删除数据库 Volume（⚠️ 不可逆）
-docker volume rm docker_pgdata
-
-# 重新启动（Prisma migrate 自动建表）
-docker compose --env-file .env.production -f docker-compose.prod.yml up -d
-
-# 插入种子数据
-docker exec -w /app/apps/server -i docker-server-1 node < infra/scripts/seed-users.js
-```
-
-## Langfuse 观测
-
-| 项目 | 值 |
-|------|-----|
-| 访问地址 | http://<SERVER_IP>:3000 |
-| Public Key | `<LANGFUSE_PUBLIC_KEY>`（完整值见 `.env.production`） |
-| Secret Key | `sk-lf-...`（完整值见服务器 `.env.production`） |
-
-### 首次设置
-
-1. 打开 Langfuse → 注册管理员账号
-2. 创建 Organization → 创建 Project
-3. Settings → API Keys → 获取 Key
-4. 更新 `.env.production` 中的 `LANGFUSE_PUBLIC_KEY` 和 `LANGFUSE_SECRET_KEY`
-5. 重启 Server：`docker compose --env-file .env.production -f docker-compose.prod.yml up -d server`
-
-### 查看数据
-
-Traces 面板展示每次 AI 对话的：
-- **调用链路**：用户消息 → Router → Agent → LLM → 响应
-- **性能指标**：TTFT（首字延迟）、TTLT（完整响应时间）、Token 消耗
-- **错误追踪**：异常栈、失败原因
-
-## 防火墙
-
-阿里云控制台 → 防火墙（已配置 4 条规则）：
-
-| 端口 | 用途 |
-|------|------|
-| 80 | 客服前端 |
-| 3000 | Langfuse 面板 |
-| (SSH) | 远程管理 |
-
-需要在 `https://console.aliyun.com` → 轻量应用服务器 → 防火墙 管理。
-
-## 故障排查
-
-### 页面无法访问
-
-```bash
-# 检查容器状态
-docker ps
-
-# 检查特定容器日志
-docker logs docker-customer-service-1
-docker logs docker-server-1
-```
-
-### 提问报错
-
-```bash
-# 检查 Server 日志中的错误
-docker compose --env-file .env.production -f docker-compose.prod.yml logs server | grep -i error
-```
-
-常见原因：
-- LLM API Key 过期或余额不足 → 更新 `.env.production` 中的 `OPENAI_API_KEY`
-- 数据库连接失败 → 检查 DB 容器是否运行
-- 外键约束错误 → 运行 `seed-users.js` 补全系统用户数据
-
-### Docker Hub 镜像拉取超时
-
-国内网络访问 Docker Hub 可能很慢。镜像加速器已配置（daocloud、163、baidubce），GHCR（`ghcr.io`）不受加速，改用 Docker Hub 镜像（如 `langfuse/langfuse:2` 替代 `ghcr.io/langfuse/langfuse:2`）。
+See [backup and restore](backup-restore.md). Back up upload storage together with
+PostgreSQL and test restoration into a disposable environment.

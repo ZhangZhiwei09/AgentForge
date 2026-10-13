@@ -1,5 +1,10 @@
 # Knowledge Base Hybrid Retrieval — 数据流转全链路
 
+> 历史架构记录：下文的 TypeScript 路径、BullMQ 和 Promise 实现已于 Python 迁移时退役。
+> 当前入口是 `apps/server-py/src/services/knowledge_ingestion.py`、
+> `knowledge_retrieval.py`、`src/jobs/ingestion.py` 和 `src/rag/`；
+> 队列使用 ARQ。运行与配置以[开发指南](../operations/development.md)为准。
+
 本文档描述 AgentForge 知识库从**文档摄入→索引构建→混合检索→结果精排**的完整数据流转架构。
 
 ## 一、系统架构总览

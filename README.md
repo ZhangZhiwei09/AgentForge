@@ -21,14 +21,14 @@ AgentForge 是一个面向企业故障排查的 AI 诊断工作台，围绕问�
 | --- | --- |
 | `apps/customer-service` | 诊断对话与证据展示 |
 | `apps/data-admin` | 知识库、反馈与统一流程管理 |
-| `apps/server` | TypeScript 公共 API、认证、知识摄取、Agent Runtime |
-| `apps/server-py` | 配置式诊断流程执行，由 TypeScript API 转发调用 |
+| `apps/server-py` | Python 公共 API、认证、知识库、Agent Runtime 与 ARQ 摄取 worker |
 
-未激活配置式诊断流程时，默认诊断仍使用 TypeScript 内部 Team 执行器。独立通用 Workflow、公开 Team 管理 API 和旧悬浮客服已移除；历史数据库表保留。详细边界见[项目精简说明](docs/design/project-simplification.md)。
+默认诊断与发布流程均使用现有 Python Runtime。TS 后端、BullMQ worker 和 Prisma
+运行工具已移除；历史 SQL、数据表、已有环境配置和上传文件保留。Node 仅用于前端开发、构建与浏览器测试。
 
 ## 快速开始
 
-下面的路径同时启动诊断前端、管理端和两个后端服务。
+下面的路径启动诊断前端、管理端和一个 Python 后端。
 
 ### 环境要求
 
@@ -42,6 +42,9 @@ AgentForge 是一个面向企业故障排查的 AI 诊断工作台，围绕问�
 
 ```bash
 pnpm install
+cd apps/server-py
+uv sync --locked
+cd ../..
 ```
 
 ### 2. 配置环境变量
@@ -49,41 +52,43 @@ pnpm install
 macOS / Linux：
 
 ```bash
-cp .env.example apps/server/.env
-cp .env.example packages/database/.env
+cp .env.example apps/server-py/.env
 ```
 
 PowerShell：
 
 ```powershell
-Copy-Item .env.example apps/server/.env
-Copy-Item .env.example packages/database/.env
+Copy-Item .env.example apps/server-py/.env
 ```
 
-编辑 `apps/server/.env`，至少配置：
+首次安装时创建并编辑 `apps/server-py/.env`；已有配置不要覆盖。至少配置：
 
 ```dotenv
 OPENAI_API_KEY=your-api-key
 OPENAI_BASE_URL=https://api.openai.com/v1
 ```
 
-确认 `packages/database/.env` 中的 `DATABASE_URL` 指向本地 PostgreSQL。默认 Docker 配置使用 `5434` 端口。
+确认 `DATABASE_URL` 指向本地 PostgreSQL。默认 Docker 配置使用 `5434` 端口。
 
-`pnpm py:dev` 会从 `apps/server/.env` 继承数据库、认证密钥和模型配置。TypeScript 通过 `AGENT_FLOW_BACKEND_URL` 访问 Python，默认地址为 `http://127.0.0.1:8004`。
+配置优先级为进程环境、Python `.env`、根 `.env`、旧 `apps/server/.env`。
+旧环境文件仅作兼容回退，不需要 Node API。数据库初始化和升级也全部由 Python 完成。
 
 管理端追踪链接默认指向 `http://localhost:3000`；需要修改时，在 `apps/data-admin/.env.local` 设置 `VITE_LANGFUSE_URL`。
 
 ### 3. 启动依赖服务
 
 ```bash
-docker compose -f infra/docker/docker-compose.yml up -d db redis ollama elasticsearch
+pnpm infra:up
+# 可选检索服务
+docker compose -f infra/docker/docker-compose.yml --profile search up -d ollama elasticsearch
 ```
 
 ### 4. 初始化数据库
 
 ```bash
-pnpm db:generate
 pnpm db:migrate
+pnpm db:check
+pnpm db:admin --email admin@agentforge.local
 ```
 
 ### 5. 启动 API 和前端
@@ -97,22 +102,26 @@ pnpm dev
 - 诊断前端：<http://localhost:5173>
 - 管理端：<http://localhost:5200>
 - API 健康检查：<http://localhost:8000/api/health>
-- Python 流程服务：<http://localhost:8004/docs>
+- Python OpenAPI：<http://localhost:8000/docs>
 
 在诊断页面输入问题即可开始对话，知识库和流程管理需要登录。首次使用知识库检索时，还需要准备 Embedding 模型或配置兼容的 Embedding 服务。
+现有向量为 1024 维；OpenAI text-embedding-3 模型会显式请求 1024 维，
+其他兼容服务也需返回 1024 维。异步摄取需开启 `INGESTION_ASYNC_ENABLED=true`
+并单独运行 `pnpm server:worker`。`pnpm dev:agent-flows` 可自动选择空闲端口启动两端工作台。
 
 ## 验证重点
 
 ```bash
 pnpm typecheck
-pnpm --filter @agentforge/server test
+pnpm py:test
 # 先启动管理端；测试使用模拟 API
 pnpm --filter @agentforge/data-admin test:e2e:workbench
 ```
 
 浏览器测试默认连接 `http://localhost:5201`；使用默认管理端端口时，将 `AGENT_FLOW_ADMIN_URL` 设置为 `http://localhost:5200`。
+真实浏览器验收使用独立 `agentforge_test_*` 数据库和 Python 数据夹具，配置方法见开发指南。
 
-检索质量应使用固定测试集比较命中率与排序指标；诊断质量应结合固定故障案例检查结论和证据，再记录时延与成本。仓库包含检索回归接口与评测脚本，尚未提供统一的诊断基准报告。
+检索质量应使用固定测试集比较命中率与排序指标；诊断质量应结合固定故障案例检查结论和证据，再记录时延与成本。仓库包含检索回归接口与自动化测试，尚未提供统一的诊断基准报告。
 
 ## 深入文档
 

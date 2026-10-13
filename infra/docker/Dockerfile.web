@@ -1,18 +1,22 @@
 FROM node:20-alpine AS builder
-
 WORKDIR /app
-
+RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json ./
 COPY packages/shared-types ./packages/shared-types
-COPY packages/shared-prompts ./packages/shared-prompts
 COPY packages/sdk ./packages/sdk
-COPY apps/web ./apps/web
-
-RUN corepack enable && corepack prepare pnpm@9.15.4 --activate
+COPY packages/ui ./packages/ui
+COPY packages/cui ./packages/cui
+COPY apps/data-admin ./apps/data-admin
 RUN pnpm install --frozen-lockfile
-RUN pnpm turbo build --filter=@agentforge/web
+RUN pnpm turbo build --filter=@agentforge/data-admin
 
 FROM nginx:alpine
-COPY --from=builder /app/apps/web/dist /usr/share/nginx/html
+COPY --from=builder /app/apps/data-admin/dist /usr/share/nginx/html
+COPY infra/docker/nginx-customer-service.conf /etc/nginx/templates/default.conf.template
+COPY infra/docker/nginx-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
 EXPOSE 80
+HEALTHCHECK --interval=15s --timeout=3s --retries=3 \
+    CMD wget -qO- http://127.0.0.1/health || exit 1
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["nginx", "-g", "daemon off;"]

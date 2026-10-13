@@ -1,5 +1,8 @@
 # Knowledge Base Hybrid Retrieval — 问答实录
 
+> 历史问答：文中的 TS 后端与 BullMQ 已退役。当前 Python 摄取、检索和 worker
+> 入口见[数据流文档](knowledge-hybrid-retrieval.md)开头的迁移说明。
+
 > 2026-07-01，以师生对话方式逐层拆解 AgentForge 知识库的完整数据链路——从"为什么"到"怎么做"到"代码怎么写的"。
 
 ---

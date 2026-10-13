@@ -34,7 +34,7 @@ parse_db_url() {
     echo "ERROR: DATABASE_URL not set" >&2
     exit 1
   fi
-  echo "$url"
+  echo "${url/postgresql+asyncpg:/postgresql:}"
 }
 
 log() {

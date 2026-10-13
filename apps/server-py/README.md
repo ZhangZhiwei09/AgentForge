@@ -1,7 +1,8 @@
-# Python Backend Migration
+# Python Backend
 
-The Python backend is being expanded to replace the TypeScript API. The first
-completed capability is public authentication: signup, signin, refresh rotation,
+Python is the only public backend and ingestion worker. The retired TypeScript
+API, BullMQ worker and Prisma runtime are no longer required. Public
+authentication includes signup, signin, refresh rotation,
 signout, current user and API key management. These use the existing PostgreSQL
 `users`, `refresh_tokens` and `api_keys` tables; existing passwords and tokens are
 supported. Signout revokes all refresh sessions for the authenticated user.
@@ -25,7 +26,7 @@ pagination for the current frontend. Citation and trace events retain their
 payloads and final state in history, cleared drafts are replaced, and diagnosis
 phases/waiting states use the frontend DTOs. Streams end with `[DONE]`; cancelled
 requests finish saving emitted output and release their conversation locks.
-Citation retrieval/generation parity remains part of knowledge consultation work.
+Knowledge consultation uses the shared retrieval service described below.
 
 Configured diagnosis runs reuse the existing Python flow runtime directly.
 TASK chat and authenticated task APIs (`/api/agent/run`, `/respond`,
@@ -37,9 +38,7 @@ rejections never execute the tool, and conditional SQL writes prevent duplicate
 resumption. Final task text is checked and masked before being emitted.
 Interrupted tasks fail without replaying tools with uncertain external outcomes;
 process death may leave a running session requiring operator reconciliation.
-Complete frontend acceptance and other public APIs remain to migrate.
-The default `pnpm dev` continues
-to start both backends until the complete public API has passed acceptance.
+The root `pnpm dev` starts one Python API and both frontends.
 
 Knowledge administration now supports base CRUD, document reads/deletion,
 chunk reads/edits, preview and statistics. Base settings use snake_case;
@@ -59,7 +58,7 @@ to save settings first. The pipeline extracts PDF text, DOCX paragraphs/tables,
 UTF-8 text and images through the existing vision provider. Encrypted/scanned
 PDFs, legacy `.doc` files (convert to `.docx`) and extraction failures retain
 their error status. Uploads are limited to 15 MB. Binary originals use
-`KNOWLEDGE_STORAGE_ROOT` (defaulting to the old server storage directory) or the
+`KNOWLEDGE_STORAGE_ROOT` (retaining the old server storage path for existing installations) or the
 existing MinIO credentials. Existing absolute local paths and MinIO object keys
 remain readable. Chunk replacement is atomic; failed retries preserve old chunks.
 
@@ -82,7 +81,7 @@ From this directory:
 
 ```powershell
 uv sync
-uv run python -m src.dev --public
+uv run python -m src.dev
 ```
 
 The public Python entry defaults to port `8000`. If occupied, select another:
@@ -99,9 +98,9 @@ Use `JWT_SECRET` matching existing credentials when retaining user sessions.
 Set `CORS_ORIGINS` to a comma-separated list of frontend origins; an empty value
 disables cross-origin access.
 
-The existing flow entry remains `uv run python -m src.dev`, on port `8004`.
-From the repository root, `pnpm py:api` starts the migrating public Python entry
-and `pnpm py:dev` starts the flow service.
+`pnpm server:dev`, `pnpm py:dev` and `pnpm py:api` all start the public API.
+`--public` remains a compatibility alias; `--flow-service` explicitly selects
+the former 8004 port. The worker uses the same local configuration precedence.
 
 Focused validation:
 
@@ -115,9 +114,10 @@ uv run pytest -p no:cacheprovider tests/test_knowledge_ingestion_api.py
 ```
 
 HTTP authentication and entry/chat tests create isolated SQLite databases.
-They never migrate or modify the configured PostgreSQL database. PostgreSQL
-activation locks, diagnosis checkpoints and complete frontend acceptance are
-still required before the full backend cutover.
+They never migrate or modify the configured business PostgreSQL database.
+Real browser fixtures require an explicit `AGENTFORGE_E2E_DATABASE_URL` pointing
+to `agentforge_test_*`, plus the API's `JWT_SECRET`. See the root development
+guide for independent API/frontend and deterministic embedding acceptance.
 
 Task, entry-flow and knowledge HTTP tests can also use a disposable PostgreSQL
 database. Set `AGENTFORGE_TEST_POSTGRES_URL` to an asyncpg URL whose database is
@@ -133,6 +133,8 @@ and parent chunk context. Elasticsearch failures use SQL substring matching;
 dense failures can still return keyword results. SQL revalidates index hits and
 excludes disabled bases/documents/chunks, missing chunks and parent-only chunks.
 Set `PGVECTOR_ENABLED=true` with the existing 1024-dimensional embedding model.
+OpenAI text-embedding-3 models explicitly request 1024 dimensions; custom models
+must return the retained schema's dimension.
 Optional `RERANKER_BASE_URL` and `RERANKER_MODEL` enable the existing `/rerank`
 wire contract with a five-second timeout; unavailable or invalid responses use
 fused ranking. RRF scores are ranks, not relevance probabilities.

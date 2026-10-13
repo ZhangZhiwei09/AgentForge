@@ -1,6 +1,6 @@
 """Opt-in local PostgreSQL integration test with deterministic model responses.
 
-AGENT_FLOW_INTEGRATION=1 enables this test after the additive Prisma migration.
+AGENT_FLOW_INTEGRATION=1 enables this test after Python database bootstrap.
 Only uniquely identified test rows are removed, and any enabled flow is restored.
 """
 
@@ -30,11 +30,13 @@ from src.main import app
 from src.models.agent_flow import AgentFlow, AgentFlowRun
 from src.models.chat import Conversation
 from src.models.user import User
+from tests.browser_db import require_test_url
 
 
 @pytest.mark.skipif(os.environ.get("AGENT_FLOW_INTEGRATION") != "1", reason="Requires local PostgreSQL")
 @pytest.mark.asyncio
 async def test_flow_api_publish_run_and_resume(monkeypatch):
+    require_test_url(settings.database_url)
     actor_id, conversation_id = str(uuid.uuid4()), str(uuid.uuid4())
     actor = User(id=actor_id, email=f"agent-flow-test-{actor_id}@example.test", role="admin")
     ids = []
@@ -61,6 +63,7 @@ async def test_flow_api_publish_run_and_resume(monkeypatch):
     monkeypatch.setattr(AgentExecutor, "execute", execute)
     monkeypatch.setattr(service, "get_checkpointer", lambda **kwargs: _saver())
     monkeypatch.setattr(settings, "langgraph_diagnosis_hitl_enabled", True)
+    monkeypatch.setattr(settings, "langgraph_diagnosis_checkpoint_enabled", True)
     pool = AsyncConnectionPool(
         settings.database_url.replace("+asyncpg", ""), open=False, kwargs={"autocommit": True},
     )

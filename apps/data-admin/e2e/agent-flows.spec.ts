@@ -1,17 +1,10 @@
 import { test, expect, type APIRequestContext } from "@playwright/test";
 import { createHmac, randomUUID } from "node:crypto";
-import { createRequire } from "node:module";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { pythonDatabase } from "./python-db";
 import type { AgentFlowDTO } from "@agentforge/shared-types";
 
-const serverRequire = createRequire(resolve(process.cwd(), "../server/package.json"));
-const { PrismaClient } = serverRequire("@prisma/client");
-const { parse } = serverRequire("dotenv");
-const configured = parse(readFileSync(resolve(process.cwd(), "../server/.env")));
-const databaseUrl = (process.env.DATABASE_URL || configured.DATABASE_URL || "postgresql://postgres:postgres@127.0.0.1:5434/agentforge").replace("+asyncpg", "");
-const secret = process.env.JWT_SECRET || configured.JWT_SECRET || "agentforge-dev-secret-change-in-production";
-const db = new PrismaClient({ datasourceUrl: databaseUrl });
+const db = pythonDatabase();
+const secret = process.env.JWT_SECRET!;
 let flowId: string | undefined;
 let adminId: string;
 let userId: string;
@@ -41,20 +34,13 @@ test.beforeAll(async () => {
   await db.user.create({ data: { id: adminId, email: `flow-browser-${adminId}@example.test`, role: "admin" } });
   await db.user.create({ data: { id: userId, email: `flow-browser-${userId}@example.test`, role: "user" } });
   token = accessToken(adminId, "admin"); userToken = accessToken(userId, "user");
-  previous = await db.$queryRaw`SELECT id FROM agent_flows WHERE enabled = true`;
+  previous = await db.agentFlow.findMany({ where: { enabled: true }, select: { id: true } });
 });
 
 test.afterAll(async ({ request }) => {
   if (flowId) {
     await activate(request, flowId, false);
-    const threads: Array<{ id: string }> = await db.$queryRaw`SELECT id FROM agent_flow_runs WHERE flow_id = ${flowId}`;
-    for (const thread of threads) {
-      await db.$executeRaw`DELETE FROM checkpoint_writes WHERE thread_id = ${thread.id}`;
-      await db.$executeRaw`DELETE FROM checkpoint_blobs WHERE thread_id = ${thread.id}`;
-      await db.$executeRaw`DELETE FROM checkpoints WHERE thread_id = ${thread.id}`;
-    }
-    await db.$executeRaw`DELETE FROM agent_flow_runs WHERE flow_id = ${flowId}`;
-    await db.$executeRaw`DELETE FROM agent_flows WHERE id = ${flowId}`;
+    await db.cleanupFlow(flowId);
   }
   for (const flow of previous) await activate(request, flow.id, true);
   await db.conversation.deleteMany({ where: { userId: { in: [adminId, userId].filter(Boolean) } } });
@@ -76,7 +62,8 @@ test("real API, node editing, publishing and desktop/mobile layout", async ({ pa
     headers: { Authorization: `Bearer ${userToken}` },
     data: { conversation_id: owned.id, message: "你好" },
   });
-  expect(await otherUser.text()).toContain("无权访问该会话");
+  expect(otherUser.status()).toBe(403);
+  expect(await otherUser.text()).toContain("无权访问");
   await page.addInitScript((token) => localStorage.setItem("accessToken", token), token);
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
@@ -185,10 +172,10 @@ test("optional live model smoke run", async ({ page, request }, testInfo) => {
   expect(publicEvents.at(-1)?.type).toBe("done");
   expect(publicEvents.some((event) => event.type.startsWith("node_"))).toBeFalsy();
   const persisted = await db.message.findUnique({ where: { id: publicEvents.find((event) => event.type === "meta").message_id } });
-  expect(persisted.metadata.diagnosis.phases).toHaveLength(4);
+  expect(persisted!.metadata.diagnosis.phases).toHaveLength(4);
   if (publicEvents.some((event) => event.type === "diagnosis_waiting_input")) {
-    expect(persisted.metadata.diagnosis.status).toBe("waiting_input");
-    expect(persisted.metadata.waitingInput.missingFields.length).toBeGreaterThan(0);
+    expect(persisted!.metadata.diagnosis.status).toBe("waiting_input");
+    expect(persisted!.metadata.waitingInput.missingFields.length).toBeGreaterThan(0);
     const continuation = await request.post("/api/agent/chat", {
       headers: { Authorization: `Bearer ${userToken}` },
       data: { conversation_id: publicEvents.find((event) => event.type === "meta").conversation_id,

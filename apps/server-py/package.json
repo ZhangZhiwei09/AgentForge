@@ -5,6 +5,12 @@
   "scripts": {
     "dev": "uv run python -m src.dev",
     "dev:public": "uv run python -m src.dev --public",
+    "worker": "uv run python -m src.worker",
+    "db:migrate": "uv run python -m src.database upgrade",
+    "db:check": "uv run python -m src.database check",
+    "db:admin": "uv run python -m src.database create-admin",
+    "db:seed": "uv run python -m scripts.seed_identity_kb",
+    "db:seed:intents": "uv run python -m scripts.seed_intent_samples",
     "test": "uv run pytest",
     "lint": "uv run ruff check src/ tests/"
   }

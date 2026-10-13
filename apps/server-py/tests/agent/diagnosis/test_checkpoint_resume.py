@@ -14,21 +14,18 @@
 
 import asyncio
 import json
+import os
 import sys
 import uuid
 
 import pytest
 
-from src.agent.checkpoint import get_checkpointer
+from src.agent.checkpoint import close_checkpointer, get_checkpointer
 from src.agent.diagnosis.graph import _build_team_completed, build_diagnosis_graph
-from src.agent.diagnosis.mode import (
-    AgentCompleted,
-    AgentError,
-    AgentRole,
-    TeamCompleted,
-)
+from src.agent.diagnosis.mode import AgentRole, TeamCompleted
 from src.agent.tools.registry import ToolRegistry
-
+from src.config import settings
+from tests.browser_db import require_test_url
 
 # ── 最小角色 ────────────────────────────────────────────────
 
@@ -100,14 +97,16 @@ class _SimulatedCrash(BaseException):
 # ── 实验 ────────────────────────────────────────────────────
 
 
-@pytest.mark.filterwarnings("ignore::pytest.PytestUnraisableExceptionWarning")
-def test_nested_checkpoint_parent_checkpoint_and_resume():
+def test_nested_checkpoint_parent_checkpoint_and_resume(monkeypatch):
     """同步测试壳 —— psycopg 需要 SelectorEventLoop，本测试自管 loop。
 
     不改全局事件循环策略（避免污染其他测试的 ProactorEventLoop）。
-    过滤 Unraisable 警告：AsyncConnectionPool 后台维护任务在 loop.close() 后
-    抛 "Event loop is closed"，与本测试断言无关，属资源清理副作用。
+    仅使用显式指定的测试数据库，并在关闭 loop 前关闭连接池。
     """
+    url = os.environ.get("AGENTFORGE_TEST_POSTGRES_URL")
+    if not url:
+        pytest.skip("Set AGENTFORGE_TEST_POSTGRES_URL for disposable checkpoint tests")
+    monkeypatch.setattr(settings, "database_url", require_test_url(url).render_as_string(hide_password=False))
     # win32 下显式创建 SelectorEventLoop（psycopg AsyncConnectionPool 依赖）
     loop = (
         asyncio.SelectorEventLoop()
@@ -117,28 +116,15 @@ def test_nested_checkpoint_parent_checkpoint_and_resume():
     try:
         loop.run_until_complete(_run_experiment())
     finally:
-        # 不调用 close_checkpointer：AsyncConnectionPool 的后台维护任务在 loop
-        # 关闭时会阻塞。直接清掉模块级缓存，防止后续用例复用到绑定已关闭 loop
-        # 的 saver/pool（避免 "Lock bound to a different event loop"）。
-        _reset_checkpoint_cache()
-        loop.close()
-
-
-def _reset_checkpoint_cache() -> None:
-    """丢弃模块级 saver/pool 引用（连接池随进程退出清理）。"""
-    import src.agent.checkpoint as ckpt
-
-    ckpt._saver = None
-    ckpt._pool = None
+        try:
+            loop.run_until_complete(close_checkpointer())
+        finally:
+            loop.close()
 
 
 async def _run_experiment():
-    try:
-        saver = await get_checkpointer(required=True)
-    except Exception:
-        saver = None
-    if saver is None:
-        pytest.skip("checkpointer unavailable（DB 不可用或事件循环不兼容）")
+    saver = await get_checkpointer(required=True)
+    assert saver is not None
 
     thread_id = f"ckpt-experiment-{uuid.uuid4().hex[:8]}"
 

@@ -1,5 +1,8 @@
 # TypeScript 质量 & 代码模块控制 —— 整改方案
 
+> 历史整改记录：TS 后端、Prisma 客户端与 BullMQ 已退役；下文相关路径和阶段状态
+> 仅供追溯。现行 Python 后端入口见 `docs/architecture/routing.md`。
+
 > **Status:** Phases 0-3 Complete ✅ | Phases 4-5 Pending
 > **Date:** 2026-06-16
 > **Scope:** TypeScript 类型安全、空 catch 块、大文件拆分、DTO 映射规范化

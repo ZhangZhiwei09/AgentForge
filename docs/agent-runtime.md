@@ -1,5 +1,8 @@
 # AgentForge Runtime V1 — Agent Runtime Model
 
+> 本文保留原 TS 运行时设计。Python 切换后，现行执行入口与代码路径见
+> [路由架构](architecture/routing.md)；下面的 TS 文件名为历史设计引用。
+
 > **状态：已冻结** | 2026-06-15
 >
 > 本文档定义 AgentForge 的 Agent Runtime 状态模型。它是 `docs/agent-runtime.md` 的正式设计文档，

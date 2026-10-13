@@ -37,7 +37,7 @@ cd infra/scripts
 docker exec -i agentforge-postgres-1 pg_dump -U postgres agentforge | gzip > backup.sql.gz
 
 # 或使用 docker compose exec
-docker compose -f infra/docker/docker-compose.yml exec -T postgres pg_dump -U postgres agentforge | gzip > backup.sql.gz
+docker compose -f infra/docker/docker-compose.yml exec -T db pg_dump -U postgres agentforge | gzip > backup.sql.gz
 ```
 
 ---

@@ -80,6 +80,23 @@ async def saved_messages(sessions, conversation_id):
                                      .order_by(Message.created_at, Message.id)))
 
 
+@pytest.mark.parametrize("within_hours", [True, False])
+async def test_human_control_persists_escalation_without_model(entry_api, dependencies, monkeypatch, within_hours):
+    client, sessions = entry_api
+    monkeypatch.setattr(chat, "_within_service_hours", lambda: within_hours)
+    events = frames(await post_chat(client, "转人工"))
+    assert events[0]["route"] == "HUMAN" and events[0]["within_service_hours"] is within_hours
+    assert ("正在为您转接" if within_hours else "非工作时间") in answer(events)
+    assert events[-1]["suggestions"] == ["继续咨询其他问题", "关闭会话"]
+    dependencies.resolve.assert_not_called()
+    dependencies.classify.assert_not_called()
+    async with sessions() as db:
+        conversation = await db.get(Conversation, events[0]["conversation_id"])
+        assert conversation.status == "escalated"
+        assistant = await db.get(Message, events[-1]["message_id"])
+        assert assistant.content == answer(events)
+
+
 async def test_exact_greeting_needs_no_provider_or_executor(entry_api, dependencies):
     client, sessions = entry_api
     dependencies.resolve.side_effect = ValueError("no provider configured")

@@ -1,4 +1,4 @@
-"""Start Python as a flow service or the migrating public backend."""
+"""Start the Python public API with shared local configuration."""
 
 import argparse
 import os
@@ -8,9 +8,13 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-SERVER_ENV = Path(__file__).resolve().parents[2] / "server" / ".env"
-PYTHON_ENV = Path(__file__).resolve().parents[1] / ".env"
-ROOT_ENV = Path(__file__).resolve().parents[3] / ".env"
+
+def environment_paths(application_root: Path):
+    workspace = application_root.parent.parent if application_root.parent.name == "apps" else application_root
+    return workspace / "apps/server/.env", workspace / ".env", application_root / ".env"
+
+
+SERVER_ENV, ROOT_ENV, PYTHON_ENV = environment_paths(Path(__file__).resolve().parents[1])
 
 
 def platform_environment(
@@ -52,21 +56,15 @@ def main():
     parser.add_argument("--port", type=int)
     parser.add_argument(
         "--public", action="store_true",
-        help="Use Python-owned configuration and public port (default 8000). "
-        "Business API migration is still in progress.",
+        help="Compatibility alias; the public API is now the default.",
     )
+    parser.add_argument("--flow-service", action="store_true", help="Use the former flow port 8004.")
     parser.add_argument("--no-reload", action="store_true")
     arguments = parser.parse_args()
-    files = (SERVER_ENV, ROOT_ENV, PYTHON_ENV) if arguments.public else (SERVER_ENV,)
-    overrides = platform_environment(os.environ, env_files=files)
-    # Process environment always wins over files, including non-model settings.
-    os.environ.update({key: value for key, value in overrides.items() if key not in os.environ})
-    # These fields additionally normalize URL schemes and provider credentials.
-    for key in ("DATABASE_URL", "JWT_SECRET", "DEFAULT_MODEL", "OPENAI_API_KEY", "OPENAI_BASE_URL"):
-        os.environ[key] = overrides[key]
+    configure_environment()
     port = arguments.port
     if port is None:
-        port = int(os.environ.get("PORT", "8000")) if arguments.public else 8004
+        port = 8004 if arguments.flow_service else int(os.environ.get("PORT", "8000"))
     os.environ["PORT"] = str(port)
     if sys.platform == "win32":
         import asyncio
@@ -76,6 +74,15 @@ def main():
         "src.main:app", host="0.0.0.0", port=port,
         reload=not arguments.no_reload, loop="none", access_log=False,
     )
+
+
+def configure_environment():
+    overrides = platform_environment(os.environ, env_files=(SERVER_ENV, ROOT_ENV, PYTHON_ENV))
+    # Process environment always wins over files, including non-model settings.
+    os.environ.update({key: value for key, value in overrides.items() if key not in os.environ})
+    # These fields additionally normalize URL schemes and provider credentials.
+    for key in ("DATABASE_URL", "JWT_SECRET", "DEFAULT_MODEL", "OPENAI_API_KEY", "OPENAI_BASE_URL"):
+        os.environ[key] = overrides[key]
 
 
 if __name__ == "__main__":

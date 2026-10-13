@@ -4,8 +4,8 @@ import { client } from "@agentforge/ui";
 
 export function LoginPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("default@agentforge.local");
-  const [password, setPassword] = useState("agentforge");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -41,8 +41,9 @@ export function LoginPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm text-gray-400 mb-1">Email</label>
+            <label htmlFor="email" className="block text-sm text-gray-400 mb-1">Email</label>
             <input
+              id="email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -52,8 +53,9 @@ export function LoginPage() {
           </div>
 
           <div>
-            <label className="block text-sm text-gray-400 mb-1">Password</label>
+            <label htmlFor="password" className="block text-sm text-gray-400 mb-1">Password</label>
             <input
+              id="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -72,9 +74,6 @@ export function LoginPage() {
           </button>
         </form>
 
-        <p className="mt-4 text-xs text-gray-500 text-center">
-          Local: default@agentforge.local / agentforge
-        </p>
       </div>
     </div>
   );
