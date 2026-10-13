@@ -20,6 +20,8 @@ from src.api.v1.health import router as health_router
 from src.api.v1.knowledge import router as knowledge_router
 from src.api.v1.knowledge_ingestion import router as knowledge_ingestion_router
 from src.api.v1.knowledge_management import router as knowledge_management_router
+from src.api.v1.knowledge_regression import router as knowledge_regression_router
+from src.api.v1.knowledge_retrieval import router as knowledge_retrieval_router
 from src.config import settings
 from src.observability import init_observability, shutdown_observability
 
@@ -77,6 +79,8 @@ def create_app() -> FastAPI:
     app.include_router(knowledge_router)
     app.include_router(knowledge_management_router)
     app.include_router(knowledge_ingestion_router)
+    app.include_router(knowledge_retrieval_router)
+    app.include_router(knowledge_regression_router)
     app.include_router(auth_router)
     app.include_router(agent_flows_router)
     app.include_router(agent_tasks_router)

@@ -47,6 +47,9 @@ class Settings(BaseSettings):
     # ── PgVector ────────────────────────────────────────
     pgvector_enabled: bool = Field(default=False)
     elasticsearch_url: str = Field(default="")
+    reranker_base_url: str = Field(default="")
+    reranker_model: str = Field(default="")
+    kb_dedupe_similarity_threshold: float = Field(default=0.82, ge=0, le=1)
 
     # Knowledge storage and durable Python ingestion.
     knowledge_storage_root: str = Field(default="../server/data/knowledge-files")

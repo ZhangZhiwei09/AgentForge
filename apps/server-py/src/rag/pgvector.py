@@ -1,203 +1,208 @@
-"""PgVectorKnowledgeService —— 基于 pgvector 的语义搜索知识库服务。
+"""Shared dense/keyword retrieval, rank fusion, reranking and parent context."""
 
-实现 KnowledgeService Protocol，使用 pgvector 的余弦相似度（<=>）做向量检索。
-V1 只做纯向量检索；hybrid_search 委托给 search()，双路扩展点保留。
-"""
-
+import asyncio
 import logging
-import uuid
-from typing import Optional
+import math
+import re
+from dataclasses import replace
 
-from sqlalchemy import text
+from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from src.config import settings
-from src.rag.embeddings import EmbeddingProvider, get_embedding_provider
+from src.models.knowledge import KnowledgeBase, KnowledgeChunk, KnowledgeDocument
+from src.rag import ranking
+from src.rag.embeddings import (
+    EmbeddingProvider,
+    get_embedding_provider,
+    validate_embeddings,
+)
 from src.rag.types import HybridSearchParams, KnowledgeSearchResult
+from src.services import knowledge_index
 
 logger = logging.getLogger(__name__)
 
 
 class PgVectorKnowledgeService:
-    """pgvector 知识库检索服务。
-
-    实现 KnowledgeService Protocol：
-        - search(): 语义向量搜索
-        - hybrid_search(): 混合搜索（V1 委托给 search）
-
-    需要 pgvector 扩展 + embedding 列已存在。
-    """
-
-    def __init__(
-        self,
-        session_factory,
-        embedding_provider: EmbeddingProvider | None = None,
-    ) -> None:
-        """初始化 PgVector 知识库服务。
-
-        Args:
-            session_factory: AsyncSession 工厂（如 async_sessionmaker）
-            embedding_provider: Embedding Provider，默认从配置获取
-        """
+    def __init__(self, session_factory, embedding_provider: EmbeddingProvider | None = None):
         self._session_factory = session_factory
         self._embedding_provider = embedding_provider
 
     @property
     def embedding_provider(self) -> EmbeddingProvider | None:
-        if self._embedding_provider is not None:
-            return self._embedding_provider
-        self._embedding_provider = get_embedding_provider()
+        if self._embedding_provider is None:
+            self._embedding_provider = get_embedding_provider()
         return self._embedding_provider
 
-    # ── KnowledgeService Protocol 实现 ────────────────────
+    def statement(self, kb_ids: list[str] | None):
+        child = aliased(KnowledgeChunk)
+        statement = select(
+            KnowledgeChunk.id.label("chunk_id"), KnowledgeChunk.document_id.label("doc_id"),
+            KnowledgeChunk.knowledge_base_id.label("kb_id"), KnowledgeChunk.content,
+            KnowledgeChunk.chunk_index, KnowledgeDocument.title.label("doc_title"),
+        ).join(KnowledgeDocument, KnowledgeDocument.id == KnowledgeChunk.document_id).join(
+            KnowledgeBase, KnowledgeBase.id == KnowledgeChunk.knowledge_base_id,
+        ).where(
+            KnowledgeChunk.enabled.is_(True), KnowledgeDocument.enabled.is_(True), KnowledgeBase.enabled.is_(True),
+            ~select(child.id).where(child.parent_chunk_id == KnowledgeChunk.id).exists(),
+        )
+        if kb_ids:
+            statement = statement.where(KnowledgeChunk.knowledge_base_id.in_(kb_ids))
+        return statement
 
-    async def search(
-        self,
-        query: str,
-        kb_ids: list[str] | None = None,
-        top_k: int = 5,
-    ) -> list[KnowledgeSearchResult]:
-        """语义向量搜索。
-
-        Args:
-            query: 自然语言查询
-            kb_ids: 限制知识库 ID 列表（None=全部）
-            top_k: 返回结果数
-
-        Returns:
-            按余弦相似度降序排列的搜索结果
-        """
-        if not settings.pgvector_enabled:
-            logger.debug("pgvector disabled, returning empty results")
-            return []
-
-        provider = self.embedding_provider
-        if provider is None:
-            logger.warning("No embedding provider available")
-            return []
-
-        try:
-            # 1. 向量化查询
-            embeddings = await provider.embed([query])
-            if not embeddings:
-                return []
-            query_embedding = embeddings[0]
-
-            # 2. pgvector 余弦相似度搜索
-            async with self._session_factory() as session:
-                results = await self._vector_search(
-                    session, query_embedding, kb_ids, top_k
-                )
-                return results
-
-        except Exception as exc:
-            logger.error("PgVector search failed: %s", exc)
-            return []
-
-    async def hybrid_search(
-        self,
-        params: HybridSearchParams,
-    ) -> list[KnowledgeSearchResult]:
-        """混合搜索（V1 委托给 search，双路扩展点保留）。
-
-        未来可扩展为：向量 + 关键词 → RRF 融合。
-        """
-        return await self.search(
-            query=params.query,
-            kb_ids=params.kb_ids,
-            top_k=params.top_k,
+    @staticmethod
+    def result(row, score: float, source: str) -> KnowledgeSearchResult:
+        return KnowledgeSearchResult(
+            chunk_id=row.chunk_id, doc_id=row.doc_id, kb_id=row.kb_id, content=row.content,
+            chunk_index=row.chunk_index, doc_title=row.doc_title or "", score=score,
+            source_score=score, fusion_score=score, recall_sources=[source],
         )
 
-    # ── 内部方法 ─────────────────────────────────────────
+    async def search(self, query: str, kb_ids: list[str] | None = None, top_k: int = 5):
+        return await self.hybrid_search(HybridSearchParams(query, kb_ids, top_k, use_reranker=False))
+
+    async def semantic_search(self, query: str, kb_ids: list[str] | None, top_k: int):
+        if not settings.pgvector_enabled or self._session_factory is None or not query.strip():
+            return []
+        try:
+            provider = self.embedding_provider
+            if provider is None:
+                return []
+            vectors = await provider.embed([query])
+            validate_embeddings(vectors, 1)
+            async with self._session_factory() as session:
+                return await self._vector_search(session, vectors[0], kb_ids, top_k)
+        except Exception:
+            logger.exception("Dense knowledge recall unavailable")
+            return []
 
     async def _vector_search(
-        self,
-        session: AsyncSession,
-        query_embedding: list[float],
-        kb_ids: list[str] | None,
-        top_k: int,
-    ) -> list[KnowledgeSearchResult]:
-        """执行 pgvector 余弦相似度搜索。
+        self, session: AsyncSession, query_embedding: list[float], kb_ids: list[str] | None, top_k: int,
+    ):
+        validate_embeddings([query_embedding], 1)
+        distance = KnowledgeChunk.embedding.cosine_distance(query_embedding)
+        statement = self.statement(kb_ids).add_columns((1 - distance).label("score")).where(
+            KnowledgeChunk.embedding.is_not(None),
+        ).order_by(distance, KnowledgeChunk.id).limit(top_k)
+        rows = (await session.execute(statement)).all()
+        return [self.result(row, round(float(row.score), 4), "pgvector")
+                for row in rows if row.score is not None and math.isfinite(row.score)]
 
-        使用 <=> 运算符（余弦距离），1 - 距离 = 相似度。
-        """
-        # 构建 SQL：按余弦距离排序
-        # asyncpg 要求 vector 传字符串字面量；查询向量转成 '[0.1,...]' 内联
-        #（float 值无注入风险），避免 list 参数报 "expected str, got list"。
-        if kb_ids:
-            kb_filter = "AND kc.knowledge_base_id = ANY(:kb_ids)"
-        else:
-            kb_filter = ""
+    async def keyword_search(self, query: str, kb_ids: list[str] | None, top_k: int):
+        if not query.strip() or self._session_factory is None:
+            return []
+        try:
+            if settings.elasticsearch_url:
+                filters = [{"terms": {"kbId": kb_ids}}] if kb_ids else []
+                payload = await knowledge_index.request_index("POST", f"{knowledge_index.INDEX}/_search", {
+                    "query": {"bool": {
+                        "must": [{"match": {"content": {"query": query, "operator": "or", "fuzziness": "AUTO"}}}],
+                        "filter": filters,
+                    }},
+                    "size": top_k, "_source": ["chunkId"],
+                })
+                if payload is not None:
+                    return await self._hydrate_keyword_hits(payload, kb_ids, top_k)
+            return await self._sql_keyword_search(query, kb_ids, top_k)
+        except Exception:
+            logger.exception("Keyword index recall unavailable; using SQL fallback")
+            try:
+                return await self._sql_keyword_search(query, kb_ids, top_k)
+            except Exception:
+                logger.exception("SQL keyword recall unavailable")
+                return []
 
-        vec_str = "[" + ",".join(repr(x) for x in query_embedding) + "]"
-        sql = f"""
-            SELECT
-                kc.id AS chunk_id,
-                kc.document_id AS doc_id,
-                kc.knowledge_base_id AS kb_id,
-                kc.content,
-                kc.chunk_index,
-                kc.token_count,
-                1 - (kc.embedding <=> '{vec_str}'::vector) AS score,
-                kd.title AS doc_title
-            FROM knowledge_chunks kc
-            JOIN knowledge_documents kd ON kc.document_id = kd.id
-            WHERE kc.embedding IS NOT NULL
-              AND kc.enabled = TRUE
-              {kb_filter}
-            ORDER BY kc.embedding <=> '{vec_str}'::vector
-            LIMIT :top_k
-        """
+    async def _hydrate_keyword_hits(self, payload: dict, kb_ids: list[str] | None, top_k: int):
+        hits = payload.get("hits")
+        if not isinstance(hits, dict) or not isinstance(hits.get("hits"), list):
+            raise TypeError("Invalid Elasticsearch hits")
+        scores = {}
+        for item in hits["hits"][:top_k]:
+            if not isinstance(item, dict) or not isinstance(item.get("_source"), dict):
+                raise TypeError("Invalid Elasticsearch item")
+            chunk_id, score = item["_source"].get("chunkId"), item.get("_score", 0)
+            if not isinstance(chunk_id, str) or type(score) not in (int, float) or not math.isfinite(score):
+                raise ValueError("Invalid Elasticsearch score")
+            scores.setdefault(chunk_id, score)
+        if not scores:
+            return []
+        async with self._session_factory() as session:
+            rows = (await session.execute(
+                self.statement(kb_ids).where(KnowledgeChunk.id.in_(scores)),
+            )).all()
+        by_id = {row.chunk_id: row for row in rows}
+        return [self.result(by_id[chunk_id], score, "elasticsearch")
+                for chunk_id, score in scores.items() if chunk_id in by_id]
 
-        params: dict = {"top_k": top_k}
-        if kb_ids:
-            params["kb_ids"] = kb_ids
-
-        result = await session.execute(text(sql), params)
-        rows = result.fetchall()
-
-        return [
-            KnowledgeSearchResult(
-                chunk_id=row.chunk_id,
-                doc_id=row.doc_id,
-                kb_id=row.kb_id,
-                content=row.content or "",
-                score=round(float(row.score), 4) if row.score else 0.0,
-                chunk_index=row.chunk_index or 0,
-                doc_title=row.doc_title or "",
-            )
-            for row in rows
+    async def _sql_keyword_search(self, query: str, kb_ids: list[str] | None, top_k: int):
+        terms = re.split(r"\s+", query.strip())[:8]
+        conditions = [
+            or_(KnowledgeChunk.content.icontains(term, autoescape=True),
+                KnowledgeDocument.title.icontains(term, autoescape=True))
+            for term in terms if term
         ]
+        if not conditions:
+            return []
+        score = sum(case((condition, 1), else_=0) for condition in conditions)
+        async with self._session_factory() as session:
+            rows = (await session.execute(self.statement(kb_ids).add_columns(score.label("score")).where(
+                or_(*conditions),
+            ).order_by(score.desc(), KnowledgeChunk.created_at.desc(), KnowledgeChunk.id).limit(top_k))).all()
+        return [self.result(row, row.score / len(conditions), "elasticsearch") for row in rows]
 
+    async def hybrid_search(self, params: HybridSearchParams):
+        if not params.query.strip() or self._session_factory is None or params.top_k < 1:
+            return []
+        top_k = min(params.top_k, 100)
+        dense, sparse = await asyncio.gather(
+            self.semantic_search(params.query, params.kb_ids, top_k * 5),
+            self.keyword_search(params.query, params.kb_ids, top_k * 5),
+        )
+        candidates = ranking.dedupe(ranking.rrf_fusion(dense, sparse, top_k * 3))
+        reranked = await ranking.rerank(params.query, candidates, top_k) if params.use_reranker else []
+        return await self.enrich_parents(reranked or candidates[:top_k], params.kb_ids)
 
-# ═══════════════════════════════════════════════════════════
-# 工厂
-# ═══════════════════════════════════════════════════════════
+    async def retrieve(
+        self, query: str, kb_ids: list[str] | None, top_k: int, method: str = "hybrid",
+        use_reranker: bool = True, threshold: float = 0,
+    ):
+        if method == "semantic":
+            results = await self.semantic_search(query, kb_ids, top_k)
+        elif method == "keyword":
+            results = await self.keyword_search(query, kb_ids, top_k)
+        else:
+            results = await self.hybrid_search(HybridSearchParams(query, kb_ids, top_k, use_reranker))
+        return [item for item in results if item.score >= threshold] if threshold > 0 else results
+
+    async def enrich_parents(self, results: list[KnowledgeSearchResult], kb_ids: list[str] | None):
+        if not results:
+            return results
+        parent = aliased(KnowledgeChunk)
+        async with self._session_factory() as session:
+            statement = select(KnowledgeChunk.id, parent.id, parent.content).join(
+                parent, parent.id == KnowledgeChunk.parent_chunk_id,
+            ).where(
+                KnowledgeChunk.id.in_([item.chunk_id for item in results]),
+                parent.document_id == KnowledgeChunk.document_id,
+                parent.knowledge_base_id == KnowledgeChunk.knowledge_base_id, parent.enabled.is_(True),
+            )
+            if kb_ids:
+                statement = statement.where(parent.knowledge_base_id.in_(kb_ids))
+            rows = (await session.execute(statement)).all()
+        parents = {child_id: {"id": parent_id, "content": content} for child_id, parent_id, content in rows}
+        return [replace(item, parent_chunk=parents.get(item.chunk_id)) for item in results]
+
 
 _knowledge_service: PgVectorKnowledgeService | None = None
 
 
-def get_knowledge_service(
-    session_factory=None,
-) -> PgVectorKnowledgeService:
-    """获取 PgVectorKnowledgeService 单例（惰性初始化）。
-
-    Args:
-        session_factory: AsyncSession 工厂，首次调用时必须提供
-
-    Returns:
-        PgVectorKnowledgeService 实例
-    """
+def get_knowledge_service(session_factory=None) -> PgVectorKnowledgeService:
     global _knowledge_service
-    if _knowledge_service is not None:
-        return _knowledge_service
+    if _knowledge_service is None:
+        if session_factory is None:
+            from src.db import async_session
 
-    if session_factory is None:
-        from src.db import async_session
-
-        session_factory = async_session
-
-    _knowledge_service = PgVectorKnowledgeService(
-        session_factory=session_factory,
-    )
+            session_factory = async_session
+        _knowledge_service = PgVectorKnowledgeService(session_factory)
     return _knowledge_service

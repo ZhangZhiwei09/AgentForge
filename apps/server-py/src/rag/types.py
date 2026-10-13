@@ -15,7 +15,6 @@ from collections.abc import Awaitable
 from dataclasses import dataclass, field
 from typing import Protocol
 
-
 # ═══════════════════════════════════════════════════════════
 # 类型定义
 # ═══════════════════════════════════════════════════════════
@@ -41,6 +40,12 @@ class KnowledgeSearchResult:
     score: float = 0.0
     chunk_index: int = 0
     doc_title: str = ""
+    score_type: str | None = None
+    source_score: float | None = None
+    fusion_score: float | None = None
+    rerank_score: float | None = None
+    recall_sources: list[str] = field(default_factory=list)
+    parent_chunk: dict[str, str] | None = None
 
 
 @dataclass(slots=True)

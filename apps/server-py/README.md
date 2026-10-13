@@ -50,8 +50,7 @@ ingestion splitter with fixed separators, explicit zero overlap and parent/child
 chunks. Chunk edits require a finite 1024-dimensional embedding and commit it
 with the text; provider failures preserve the existing chunk. Elasticsearch
 sync is optional through `ELASTICSEARCH_URL`; failures are logged and SQL remains
-authoritative. Hybrid retrieval remains a subsequent migration unit.
-All knowledge administration and ingest endpoints
+authoritative. All knowledge administration, retrieval, evaluation and ingest endpoints
 require authentication.
 
 Document creation, batches, multipart upload and explicit processing use a shared
@@ -128,3 +127,23 @@ extension installed. Each test creates and drops its own uniquely named schema;
 existing tables and the public schema are preserved.
 Set `AGENTFORGE_TEST_REDIS_URL` to an isolated Redis instance to additionally
 exercise actual ARQ enqueue/worker consumption with a unique test queue.
+
+Retrieval now combines pgvector cosine recall and Elasticsearch keyword recall
+with reciprocal rank fusion (k=60), bigram deduplication, optional HTTP reranking
+and parent chunk context. Elasticsearch failures use SQL substring matching;
+dense failures can still return keyword results. SQL revalidates index hits and
+excludes disabled bases/documents/chunks, missing chunks and parent-only chunks.
+Set `PGVECTOR_ENABLED=true` with the existing 1024-dimensional embedding model.
+Optional `RERANKER_BASE_URL` and `RERANKER_MODEL` enable the existing `/rerank`
+wire contract with a five-second timeout; unavailable or invalid responses use
+fused ranking. RRF scores are ranks, not relevance probabilities.
+
+`/api/knowledge/search`, base `/hit-testing` and the regression test-set, case,
+run/history/metrics APIs retain the editor contracts. Regression runs persist
+retrieval/prompt snapshots, assertions and latency in the existing tables.
+Metrics preserve binary Recall@K, fixed-K Precision, MRR and binary NDCG;
+prompt snapshots use Chinese. Interrupted runs are marked failed. Focused tests:
+
+```powershell
+uv run pytest -p no:cacheprovider tests/test_knowledge_retrieval_api.py tests/test_rag_pgvector.py
+```
