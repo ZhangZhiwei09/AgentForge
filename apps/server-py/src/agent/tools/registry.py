@@ -162,6 +162,11 @@ class ToolRegistry:
         self.init()
         return list(self._tools.keys())
 
+    def get(self, name: str) -> RegisteredTool | None:
+        """Look up execution policy as well as the public tool definition."""
+        self.init()
+        return self._tools.get(name)
+
     def list_categories(self) -> list[dict[str, Any]]:
         """列出所有工具分类及计数。"""
         self.init()

@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from src.agent.checkpoint import close_checkpointer, get_checkpointer
 from src.api.v1.agent_flows import router as agent_flows_router
+from src.api.v1.agent_tasks import router as agent_tasks_router
 from src.api.v1.auth import router as auth_router
 from src.api.v1.chat import agent_router
 from src.api.v1.chat import router as chat_router
@@ -74,6 +75,7 @@ def create_app() -> FastAPI:
     app.include_router(knowledge_router)
     app.include_router(auth_router)
     app.include_router(agent_flows_router)
+    app.include_router(agent_tasks_router)
     app.include_router(entry_route_flows_router)
     app.include_router(dev_router)
     return app

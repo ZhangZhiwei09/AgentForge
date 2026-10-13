@@ -16,7 +16,9 @@ Graph 结构:
 
 import json as _json
 import logging
+from typing import Protocol
 
+from langchain_core.messages import AIMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 
 from src.agent.langchain_adapter import ProviderChatModel, _coerce_to_str
@@ -29,6 +31,21 @@ logger = logging.getLogger(__name__)
 DEFAULT_MAX_ITERATIONS = 5
 
 
+class ReactLifecycle(Protocol):
+    """Optional task persistence and policy hooks on the shared execution graph."""
+
+    async def before_model(self, state: AgentState) -> None: ...
+
+    async def after_model(self, state: AgentState, response: AIMessage) -> AgentState: ...
+
+    async def before_tool(self, state: AgentState, call: dict) -> dict | None: ...
+
+    async def after_tool(self, state: AgentState, call: dict, result: dict) -> None: ...
+
+    @property
+    def paused(self) -> bool: ...
+
+
 def build_react_graph(
     model: ProviderChatModel,
     tool_defs: list[dict],
@@ -36,6 +53,7 @@ def build_react_graph(
     conversation_id: str,
     checkpointer=None,
     max_iterations: int = DEFAULT_MAX_ITERATIONS,
+    lifecycle: ReactLifecycle | None = None,
 ) -> StateGraph:
     """构建 LangGraph ReAct StateGraph。
 
@@ -62,10 +80,13 @@ def build_react_graph(
         from src.observability import get_observability
 
         iteration = state.get("iteration_count", 0)
+        if lifecycle is not None:
+            await lifecycle.before_model(state)
         gen_name = f"agent-reAct-{iteration + 1}"
 
         content_parts: list[str] = []
         tool_calls: list[dict] = []
+        usage = None
 
         obs = get_observability()
         gen_span = obs.create_generation(
@@ -83,6 +104,8 @@ def build_react_graph(
                     content_parts.append(_coerce_to_str(chunk.content))
                 if chunk.tool_calls:
                     tool_calls = list(chunk.tool_calls)
+                if chunk.usage_metadata:
+                    usage = chunk.usage_metadata
 
             final_content = "".join(content_parts)
 
@@ -101,38 +124,56 @@ def build_react_graph(
         response = LCAIMessage(
             content=final_content,
             tool_calls=tool_calls,
+            usage_metadata=usage,
         )
 
-        return {
+        next_state = {
             "messages": [response],
             "iteration_count": iteration + 1,
         }
+        if lifecycle is not None:
+            return await lifecycle.after_model(state, response)
+        return next_state
 
     async def call_tools(state: AgentState) -> dict:
         """工具节点：执行 AIMessage 中的 tool_calls，委托给 ToolRegistry。"""
-        from langchain_core.messages import ToolMessage
-
         messages = state["messages"]
         if not messages:
             return {"messages": []}
 
-        last_message = messages[-1]
+        # On durable resume, completed ToolMessages may follow the pending AIMessage.
+        last_message = next(
+            (message for message in reversed(messages) if getattr(message, "tool_calls", None)),
+            messages[-1],
+        ) if lifecycle is not None else messages[-1]
         tc_list = getattr(last_message, "tool_calls", None) or []
         if not tc_list:
             return {"messages": []}
 
         tool_messages: list[ToolMessage] = []
+        completed = {message.tool_call_id for message in messages if isinstance(message, ToolMessage)}
         for tc in tc_list:
             tc_name = tc.get("name", "") if isinstance(tc, dict) else getattr(tc, "name", "")
             tc_args = tc.get("args", {}) if isinstance(tc, dict) else getattr(tc, "args", {})
             tc_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
+            if lifecycle is not None and tc_id in completed:
+                continue
+
+            current_state = {**state, "messages": [*messages, *tool_messages]}
+            result = None
+            if lifecycle is not None:
+                result = await lifecycle.before_tool(current_state, tc)
+                if lifecycle.paused:
+                    return {"messages": tool_messages, "paused": True}
+                tc_args = tc.get("args", {})
 
             try:
-                result = await registry.execute(
-                    tc_name, tc_args, conversation_id
-                )
+                if result is None:
+                    result = await registry.execute(
+                        tc_name, tc_args, conversation_id
+                    )
             except Exception as exc:
-                logger.error("Tool %s execution error: %s", tc_name, exc)
+                logger.exception("Tool %s execution error", tc_name)
                 result = {"status": "failed", "error": str(exc)}
 
             tool_messages.append(ToolMessage(
@@ -140,15 +181,19 @@ def build_react_graph(
                 tool_call_id=tc_id,
                 name=tc_name,
             ))
+            if lifecycle is not None:
+                await lifecycle.after_tool(
+                    {**state, "messages": [*messages, *tool_messages]}, tc, result,
+                )
 
-        return {"messages": tool_messages}
+        return {"messages": tool_messages, "resume_tools": False}
 
     # ── 条件边 ──
 
     def should_continue(state: AgentState) -> str:
         """条件边：判断是否继续到工具节点。"""
         messages = state["messages"]
-        if not messages:
+        if state.get("paused") or not messages:
             return END
 
         last_message = messages[-1]
@@ -164,12 +209,18 @@ def build_react_graph(
     workflow = StateGraph(AgentState)
     workflow.add_node("agent", call_model)
     workflow.add_node("tools", call_tools)
-    workflow.set_entry_point("agent")
+    workflow.set_conditional_entry_point(
+        lambda state: "tools" if state.get("resume_tools") else "agent",
+        {"tools": "tools", "agent": "agent"},
+    )
     workflow.add_conditional_edges(
         "agent",
         should_continue,
         {"tools": "tools", END: END},
     )
-    workflow.add_edge("tools", "agent")
+    workflow.add_conditional_edges(
+        "tools", lambda state: END if state.get("paused") else "agent",
+        {"agent": "agent", END: END},
+    )
 
     return workflow.compile(checkpointer=checkpointer)

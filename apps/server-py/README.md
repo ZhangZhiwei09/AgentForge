@@ -29,8 +29,17 @@ Citation retrieval/generation parity remains part of knowledge consultation work
 
 Configured diagnosis runs reuse the existing Python flow runtime directly.
 TASK consultation still uses the existing executor pending complete knowledge
-consultation parity. Session/approval APIs, complete retrieval/citation production
-and cancellation acceptance, knowledge administration, ingestion
+consultation parity. Authenticated task APIs (`/api/agent/run`, `/respond`,
+`/approve`, `/approvals` and `/api/agent-sessions`) now use the same ReAct graph
+with durable session state and approval policy. Resumption preserves the session,
+model, tool restrictions, budget and completed tool calls. Paused legacy TS
+sessions can resume from their scratchpad. Approval arguments reach execution,
+rejections never execute the tool, and conditional SQL writes prevent duplicate
+resumption. Final task text is checked and masked before being emitted.
+Interrupted tasks fail without replaying tools with uncertain external outcomes;
+process death may leave a running session requiring operator reconciliation.
+Chat TASK integration, complete retrieval/citation production and cancellation
+acceptance, knowledge administration, ingestion
 workers and other public APIs remain to migrate. The default `pnpm dev` continues
 to start both backends until the complete public API has passed acceptance.
 
@@ -65,6 +74,7 @@ Focused validation:
 uv run pytest -p no:cacheprovider tests/test_auth.py tests/test_auth_api.py tests/test_platform_dev.py tests/test_config.py
 uv run pytest -p no:cacheprovider tests/test_entry_flows.py tests/test_entry_flow_api.py tests/test_entry_decision.py tests/test_business_classifier.py tests/test_entry_chat_api.py
 uv run pytest -p no:cacheprovider tests/test_chat_compatibility.py tests/test_conversation_history.py
+uv run pytest -p no:cacheprovider tests/test_agent_tasks_api.py
 ```
 
 HTTP authentication and entry/chat tests create isolated SQLite databases.

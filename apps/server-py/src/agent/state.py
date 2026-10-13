@@ -8,10 +8,10 @@ AgentState 是 LangGraph StateGraph 的核心类型，使用 TypedDict 定义。
 messages 字段使用 add_messages reducer（默认行为），自动追加而非覆盖。
 """
 
-from typing import Annotated, TypedDict
+from typing import Annotated, NotRequired, TypedDict
 
-from langgraph.graph.message import add_messages
 from langchain_core.messages import BaseMessage
+from langgraph.graph.message import add_messages
 
 
 class AgentState(TypedDict):
@@ -25,3 +25,5 @@ class AgentState(TypedDict):
 
     messages: Annotated[list[BaseMessage], add_messages]
     iteration_count: int
+    paused: NotRequired[bool]
+    resume_tools: NotRequired[bool]

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from src.api.deps import get_chat_user, get_current_user, get_db
 from src.main import create_app
 from src.models.agent_flow import AgentFlow, AgentFlowRun
+from src.models.agent_session import AgentApproval, AgentSession
 from src.models.base import Base
 from src.models.chat import Conversation, ConversationMemory, Message
 from src.models.entry_flow import EntryRouteFlow, EntryRouteFlowRun
@@ -29,6 +30,7 @@ async def entry_api(tmp_path):
         await connection.run_sync(lambda sync: Base.metadata.create_all(sync, tables=[
             User.__table__, Conversation.__table__, Message.__table__, ConversationMemory.__table__,
             AgentFlow.__table__, AgentFlowRun.__table__, EntryRouteFlow.__table__, EntryRouteFlowRun.__table__,
+            AgentSession.__table__, AgentApproval.__table__,
         ]))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     actors = {
