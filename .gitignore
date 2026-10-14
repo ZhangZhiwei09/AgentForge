@@ -36,3 +36,6 @@ apps/server/coverage/
 
 # Build artifacts
 *.tar.gz
+
+# Local project notes
+/mydocs/
