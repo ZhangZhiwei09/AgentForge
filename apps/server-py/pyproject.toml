@@ -40,6 +40,9 @@ dependencies = [
     "tzdata>=2026.3",
 ]
 
+[project.scripts]
+agentforge-eval = "src.evaluation.run:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

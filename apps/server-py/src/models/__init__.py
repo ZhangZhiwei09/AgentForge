@@ -1,6 +1,12 @@
 """SQLAlchemy ORM 模型包。"""
 
 from src.models.agent_flow import AgentFlow, AgentFlowRun
+from src.models.agent_evaluation import (
+    AgentEvaluationCase,
+    AgentEvaluationItem,
+    AgentEvaluationRun,
+    AgentEvaluationSuite,
+)
 from src.models.agent_session import AgentApproval, AgentSession
 from src.models.auth import ApiKey, RefreshToken
 from src.models.chat import (
@@ -34,6 +40,10 @@ __all__ = [
     "AgentApproval",
     "AgentFlow",
     "AgentFlowRun",
+    "AgentEvaluationCase",
+    "AgentEvaluationItem",
+    "AgentEvaluationRun",
+    "AgentEvaluationSuite",
     "AgentSession",
     "AgentTeam",
     "AgentTeamRun",
