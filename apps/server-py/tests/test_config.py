@@ -2,6 +2,9 @@
 
 import os
 
+import pytest
+from pydantic import ValidationError
+
 from src.config import Settings
 
 
@@ -74,3 +77,52 @@ class TestSettings:
         config.write_text("ELASTICSEARCH_URL=http://localhost:9200\nMINIO_BUCKET=documents\n")
         loaded = Settings(_env_file=config)
         assert loaded.port == 8000
+
+
+@pytest.fixture
+def deployment_env(monkeypatch):
+    for name in ("APP_ENV", "DEBUG", "JWT_SECRET", "AUTH_SIGNUP_ENABLED",
+                 "ANONYMOUS_CHAT_ENABLED", "PUBLIC_FAQ_ENABLED"):
+        monkeypatch.delenv(name, raising=False)
+
+
+@pytest.mark.parametrize("mode", ["development", "test", "production"])
+def test_deployment_defaults(deployment_env, mode):
+    loaded = Settings(_env_file=None, app_env=mode, jwt_secret="isolated-test-signing-secret")
+    expected = mode != "production"
+    assert loaded.auth_signup_enabled is expected
+    assert loaded.anonymous_chat_enabled is expected
+    assert loaded.public_faq_enabled is expected
+
+
+@pytest.mark.parametrize("unsafe", [
+    {"debug": True}, {"jwt_secret": ""}, {"jwt_secret": "agentforge-dev-secret-change-in-production"},
+    {"auth_signup_enabled": True}, {"anonymous_chat_enabled": True}, {"public_faq_enabled": True},
+])
+def test_production_rejects_unsafe_settings_without_leaking_input(deployment_env, unsafe):
+    secret = "private-production-test-secret"
+    with pytest.raises(ValidationError) as error:
+        Settings(_env_file=None, **{
+            "app_env": "production", "jwt_secret": secret, **unsafe,
+        })
+    assert secret not in str(error.value)
+    assert "input_value" not in str(error.value)
+
+
+def test_production_env_defaults_and_rejects_explicit_open_switch(deployment_env, monkeypatch):
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("JWT_SECRET", "private-production-test-secret")
+    loaded = Settings(_env_file=None)
+    assert not loaded.anonymous_chat_enabled
+    monkeypatch.setenv("PUBLIC_FAQ_ENABLED", "true")
+    with pytest.raises(ValidationError, match="Production disables"):
+        Settings(_env_file=None)
+
+
+def test_local_public_switches_can_be_disabled(deployment_env):
+    loaded = Settings(
+        _env_file=None, auth_signup_enabled=False, anonymous_chat_enabled=False, public_faq_enabled=False,
+    )
+    assert not loaded.auth_signup_enabled
+    assert not loaded.anonymous_chat_enabled
+    assert not loaded.public_faq_enabled

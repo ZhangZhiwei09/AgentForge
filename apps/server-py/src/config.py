@@ -1,13 +1,20 @@
 """配置模块 —— 从 .env 加载环境变量，统一导出为 settings 单例。"""
 
-from pydantic import Field
+from typing import Literal, Self
+
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
     """应用配置，每个环境变量一个字段，均有合理默认值。"""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
+
+    app_env: Literal["development", "test", "production"] = "development"
+    auth_signup_enabled: bool = True
+    anonymous_chat_enabled: bool = True
+    public_faq_enabled: bool = True
 
     # ── 数据库 ──────────────────────────────────────────
     # 端口 5434 与 TS 项目保持一致，避免冲突
@@ -117,6 +124,22 @@ class Settings(BaseSettings):
     rate_limit_enabled: bool = Field(default=True)
     rate_limit_max: int = Field(default=60, ge=1)
     rate_limit_redis_enabled: bool = Field(default=False)
+
+    @model_validator(mode="after")
+    def validate_deployment(self) -> Self:
+        public_switches = ("auth_signup_enabled", "anonymous_chat_enabled", "public_faq_enabled")
+        # Preserve local compatibility; production defaults must fail closed.
+        for name in public_switches:
+            if name not in self.model_fields_set:
+                setattr(self, name, self.app_env != "production")
+        if self.app_env == "production":
+            if self.debug:
+                raise ValueError("Production requires DEBUG=false")
+            if not self.jwt_secret.strip() or self.jwt_secret == "agentforge-dev-secret-change-in-production":
+                raise ValueError("Production requires a non-default JWT_SECRET")
+            if any(getattr(self, name) for name in public_switches):
+                raise ValueError("Production disables signup, anonymous chat and public FAQ")
+        return self
 
 
 # 模块级单例 —— import 即加载 .env，进程内唯一

@@ -22,6 +22,7 @@ from src.agent.types import (
 )
 from src.api.deps import ANONYMOUS_USER_ID, get_chat_user, get_current_user
 from src.api.v1 import chat
+from src.config import settings
 from src.models.chat import Conversation, Message
 from src.models.user import User
 from src.services.auth import _create_tokens
@@ -62,6 +63,23 @@ async def test_anonymous_chat_bootstraps_legacy_actor_and_reuses_session(public_
     listed = await client.get("/api/agent/chat/conversations", params={"session_id": payload["session_id"]})
     assert [row["id"] for row in listed.json()["conversations"]] == [conv_id]
     assert listed.json()["conversations"][0]["session_id"] == payload["session_id"]
+
+
+async def test_closed_anonymous_entry_preserves_authenticated_chat(public_api, dependencies, monkeypatch):
+    client, sessions, headers = public_api
+    monkeypatch.setattr(settings, "anonymous_chat_enabled", False)
+    assert (await client.post("/api/agent/chat", json={"message": "你好"})).status_code == 401
+    for path in ("/api/agent/chat/history", "/api/agent/chat/conversations"):
+        assert (await client.get(path)).status_code == 401
+    assert (await client.post("/api/diagnosis/query", json={"query": "刷脸失败"})).status_code == 401
+    events = frames(await client.post("/api/agent/chat", json={"message": "你好"}, headers=headers))
+    conv_id = events[0]["conversation_id"]
+    history = await client.get("/api/agent/chat/history", params={"conversation_id": conv_id}, headers=headers)
+    assert history.status_code == 200
+    assert len(history.json()["messages"]) == 2
+    async with sessions() as db:
+        assert await db.get(User, ANONYMOUS_USER_ID) is None
+        assert (await db.get(Conversation, conv_id)).user_id == "user"
 
 
 async def test_parallel_anonymous_requests_create_one_reserved_actor(public_api, dependencies):

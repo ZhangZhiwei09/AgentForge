@@ -16,7 +16,7 @@ from src.models.knowledge import KnowledgeBase, KnowledgeChunk, KnowledgeDocumen
 from src.rag.splitter import RecursiveTokenTextSplitter, estimate_tokens
 from src.services import knowledge_index, knowledge_management
 
-USER = {"X-Test-Actor": "user"}
+ADMIN = {"X-Test-Actor": "admin"}
 
 
 @pytest_asyncio.fixture
@@ -32,7 +32,7 @@ async def knowledge_api(entry_api, monkeypatch):
 
 
 async def create_base(client, **kwargs):
-    response = await client.post("/api/knowledge/bases", headers=USER, json={"name": "核身知识", **kwargs})
+    response = await client.post("/api/knowledge/bases", headers=ADMIN, json={"name": "核身知识", **kwargs})
     assert response.status_code == 201, response.text
     return response.json()
 
@@ -69,21 +69,21 @@ async def test_base_crud_preserves_snake_case_and_counts(knowledge_api):
     assert base["separator_mode"] == "custom"
     assert base["remove_extra_spaces"] is True
     await seed_document(sessions, base["id"])
-    detail = (await client.get(f"/api/knowledge/bases/{base['id']}", headers=USER)).json()
+    detail = (await client.get(f"/api/knowledge/bases/{base['id']}", headers=ADMIN)).json()
     assert detail["document_count"] == 1
-    listing = (await client.get("/api/knowledge/bases", headers=USER)).json()
+    listing = (await client.get("/api/knowledge/bases", headers=ADMIN)).json()
     assert listing == [detail]
-    response = await client.put(f"/api/knowledge/bases/{base['id']}", headers=USER, json={
+    response = await client.put(f"/api/knowledge/bases/{base['id']}", headers=ADMIN, json={
         "name": "更新知识", "enabled": False, "description": None,
     })
     assert response.status_code == 200
     assert response.json()["name"] == "更新知识"
     assert response.json()["enabled"] is False
-    assert (await client.delete(f"/api/knowledge/bases/{base['id']}", headers=USER)).json() == {"status": "deleted"}
+    assert (await client.delete(f"/api/knowledge/bases/{base['id']}", headers=ADMIN)).json() == {"status": "deleted"}
     async with sessions() as db:
         for model in (KnowledgeBase, KnowledgeDocument, KnowledgeChunk):
             assert await db.scalar(select(func.count()).select_from(model)) == 0
-    assert (await client.get(f"/api/knowledge/bases/{base['id']}", headers=USER)).status_code == 404
+    assert (await client.get(f"/api/knowledge/bases/{base['id']}", headers=ADMIN)).status_code == 404
 
 
 @pytest.mark.asyncio
@@ -91,12 +91,12 @@ async def test_update_validates_settings_merged_with_persisted_values(knowledge_
     client, _ = knowledge_api
     base = await create_base(client, chunk_size_tokens=400, chunk_overlap_tokens=100)
     url = f"/api/knowledge/bases/{base['id']}"
-    assert (await client.put(url, headers=USER, json={"chunk_size_tokens": 150})).status_code == 422
-    assert (await client.put(url, headers=USER, json={"separator_mode": "custom"})).status_code == 422
-    saved = (await client.get(url, headers=USER)).json()
+    assert (await client.put(url, headers=ADMIN, json={"chunk_size_tokens": 150})).status_code == 422
+    assert (await client.put(url, headers=ADMIN, json={"separator_mode": "custom"})).status_code == 422
+    saved = (await client.get(url, headers=ADMIN)).json()
     assert saved["chunk_size_tokens"] == 400
     assert saved["separator_mode"] == "auto"
-    update = await client.put(url, headers=USER, json={
+    update = await client.put(url, headers=ADMIN, json={
         "chunk_size_tokens": 150, "chunk_overlap_tokens": 0,
         "separator_mode": "custom", "custom_separator": "###",
     })
@@ -113,7 +113,7 @@ async def test_update_validates_settings_merged_with_persisted_values(knowledge_
 ])
 async def test_invalid_base_config_does_not_write(knowledge_api, data):
     client, sessions = knowledge_api
-    response = await client.post("/api/knowledge/bases", headers=USER, json={"name": "知识", **data})
+    response = await client.post("/api/knowledge/bases", headers=ADMIN, json={"name": "知识", **data})
     assert response.status_code == 422
     async with sessions() as db:
         assert await db.scalar(select(func.count()).select_from(KnowledgeBase)) == 0
@@ -124,15 +124,15 @@ async def test_document_and_chunk_dtos_preserve_stage_timestamps(knowledge_api):
     client, sessions = knowledge_api
     base = await create_base(client)
     await seed_document(sessions, base["id"])
-    listing = (await client.get(f"/api/knowledge/bases/{base['id']}/documents", headers=USER)).json()
+    listing = (await client.get(f"/api/knowledge/bases/{base['id']}/documents", headers=ADMIN)).json()
     assert "content" not in listing[0]
     assert listing[0]["knowledgeBaseId"] == base["id"]
     assert listing[0]["processingDetail"] == {"phase": "completed"}
     for field in ("normalizingCompletedAt", "chunkingCompletedAt", "embeddingCompletedAt"):
         assert listing[0][field]
-    detail = (await client.get("/api/knowledge/documents/doc", headers=USER)).json()
+    detail = (await client.get("/api/knowledge/documents/doc", headers=ADMIN)).json()
     assert detail["content"] == "排查网络"
-    chunks = (await client.get("/api/knowledge/documents/doc/chunks", headers=USER)).json()
+    chunks = (await client.get("/api/knowledge/documents/doc/chunks", headers=ADMIN)).json()
     assert [chunk["chunkIndex"] for chunk in chunks] == [0, 1]
     assert chunks[1]["parentChunkId"] == "doc-parent"
     assert "embedding" not in chunks[1]
@@ -140,9 +140,9 @@ async def test_document_and_chunk_dtos_preserve_stage_timestamps(knowledge_api):
         document = await db.get(KnowledgeDocument, "doc")
         document.processing_detail = "legacy invalid JSON"
         await db.commit()
-    assert (await client.get("/api/knowledge/documents/doc", headers=USER)).json()["processingDetail"] == "legacy invalid JSON"
-    assert (await client.get("/api/knowledge/documents/absent", headers=USER)).status_code == 404
-    assert (await client.get("/api/knowledge/documents/absent/chunks", headers=USER)).json() == []
+    assert (await client.get("/api/knowledge/documents/doc", headers=ADMIN)).json()["processingDetail"] == "legacy invalid JSON"
+    assert (await client.get("/api/knowledge/documents/absent", headers=ADMIN)).status_code == 404
+    assert (await client.get("/api/knowledge/documents/absent/chunks", headers=ADMIN)).json() == []
 
 
 @pytest.mark.asyncio
@@ -153,14 +153,14 @@ async def test_document_delete_keeps_other_document_and_syncs_index(knowledge_ap
     await seed_document(sessions, base["id"], doc_id="b")
     remove_index = AsyncMock()
     monkeypatch.setattr(knowledge_index, "remove_documents", remove_index)
-    response = await client.delete("/api/knowledge/documents/a", headers=USER)
+    response = await client.delete("/api/knowledge/documents/a", headers=ADMIN)
     assert response.json() == {"status": "deleted"}
     remove_index.assert_awaited_once_with(["a"])
     async with sessions() as db:
         assert await db.get(KnowledgeDocument, "a") is None
         assert await db.get(KnowledgeDocument, "b") is not None
         assert await db.scalar(select(func.count()).select_from(KnowledgeChunk)) == 2
-    assert (await client.delete("/api/knowledge/documents/a", headers=USER)).status_code == 404
+    assert (await client.delete("/api/knowledge/documents/a", headers=ADMIN)).status_code == 404
 
 
 @pytest.mark.asyncio
@@ -172,7 +172,7 @@ async def test_chunk_edit_replaces_vector_and_refreshes_index(knowledge_api, mon
     monkeypatch.setattr(knowledge_management, "get_embedding_provider", lambda: SimpleNamespace(embed=embed))
     index = AsyncMock()
     monkeypatch.setattr(knowledge_index, "update_chunk", index)
-    response = await client.put("/api/knowledge/chunks/doc-child", headers=USER, json={"content": "  重新检查网络  "})
+    response = await client.put("/api/knowledge/chunks/doc-child", headers=ADMIN, json={"content": "  重新检查网络  "})
     assert response.status_code == 200, response.text
     assert response.json()["content"] == "重新检查网络"
     embed.assert_awaited_once_with(["重新检查网络"])
@@ -192,7 +192,7 @@ async def test_failed_embedding_leaves_chunk_untouched(knowledge_api, monkeypatc
     await seed_document(sessions, base["id"])
     monkeypatch.setattr(knowledge_management, "get_embedding_provider",
                         lambda: None if vectors is None else SimpleNamespace(embed=AsyncMock(return_value=vectors)))
-    response = await client.put("/api/knowledge/chunks/doc-child", headers=USER, json={"content": "new"})
+    response = await client.put("/api/knowledge/chunks/doc-child", headers=ADMIN, json={"content": "new"})
     assert response.status_code == 503
     async with sessions() as db:
         chunk = await db.get(KnowledgeChunk, "doc-child")
@@ -203,13 +203,13 @@ async def test_failed_embedding_leaves_chunk_untouched(knowledge_api, monkeypatc
 @pytest.mark.asyncio
 async def test_preview_supports_fixed_separators_and_hierarchy_without_writes(knowledge_api):
     client, sessions = knowledge_api
-    response = await client.post("/api/knowledge/chunk-preview", headers=USER, json={
+    response = await client.post("/api/knowledge/chunk-preview", headers=ADMIN, json={
         "text": "第一段\\n## 第二段".replace("\\n", "\n"),
         "separator_mode": "custom", "custom_separator": "\\n## ", "chunk_overlap_tokens": 0,
     })
     assert response.status_code == 200
     assert [chunk["content"] for chunk in response.json()["preview"]] == ["第一段", "第二段"]
-    response = await client.post("/api/knowledge/chunk-preview", headers=USER, json={
+    response = await client.post("/api/knowledge/chunk-preview", headers=ADMIN, json={
         "text": "测试段落。" * 80, "chunk_structure": "hierarchical", "chunk_size_tokens": 200,
         "chunk_overlap_tokens": 0, "child_chunk_size_tokens": 50, "child_chunk_overlap_tokens": 0,
     })
@@ -227,7 +227,7 @@ async def test_stats_include_pgvector_and_index_counts(knowledge_api):
     client, sessions = knowledge_api
     base = await create_base(client)
     await seed_document(sessions, base["id"])
-    response = await client.get("/api/knowledge/stats", headers=USER)
+    response = await client.get("/api/knowledge/stats", headers=ADMIN)
     assert response.status_code == 200
     result = response.json()
     assert result["knowledge_bases"] == 1

@@ -33,7 +33,7 @@ from src.services import (
 from src.services.knowledge_ingestion import IngestionService
 from src.worker import IngestionWorker
 
-USER = {"X-Test-Actor": "user"}
+ADMIN = {"X-Test-Actor": "admin"}
 CONTENT = "核身接口超时需要检查网络连接、权限设置、请求参数和服务器日志。\n\n" * 20
 
 
@@ -58,7 +58,7 @@ async def ingestion_api(entry_api, monkeypatch, tmp_path):
     monkeypatch.setattr(settings, "elasticsearch_url", "")
     monkeypatch.setattr(settings, "minio_endpoint", "")
     monkeypatch.setattr(settings, "knowledge_storage_root", str(tmp_path / "storage"))
-    response = await client.post("/api/knowledge/bases", headers=USER, json={
+    response = await client.post("/api/knowledge/bases", headers=ADMIN, json={
         "name": "摄入知识", "chunk_size_tokens": 200, "chunk_overlap_tokens": 0,
     })
     assert response.status_code == 201, response.text
@@ -68,7 +68,7 @@ async def ingestion_api(entry_api, monkeypatch, tmp_path):
 @pytest.mark.asyncio
 async def test_text_creation_and_legacy_ingest_share_pipeline(ingestion_api):
     client, sessions, base_id, embed = ingestion_api
-    response = await client.post(f"/api/knowledge/bases/{base_id}/documents", headers=USER, json={
+    response = await client.post(f"/api/knowledge/bases/{base_id}/documents", headers=ADMIN, json={
         "title": "超时排查", "content": CONTENT,
     })
     assert response.status_code == 201, response.text
@@ -79,7 +79,7 @@ async def test_text_creation_and_legacy_ingest_share_pipeline(ingestion_api):
     for field in ("processingStartedAt", "parsingCompletedAt", "normalizingCompletedAt",
                   "chunkingCompletedAt", "embeddingCompletedAt"):
         assert result[field]
-    legacy = await client.post("/api/knowledge/ingest", headers=USER, json={
+    legacy = await client.post("/api/knowledge/ingest", headers=ADMIN, json={
         "kb_id": base_id, "title": "兼容摄入", "content": CONTENT, "chunk_size": 100, "chunk_overlap": 0,
     })
     assert legacy.status_code == 200, legacy.text
@@ -94,7 +94,7 @@ async def test_text_creation_and_legacy_ingest_share_pipeline(ingestion_api):
 @pytest.mark.asyncio
 async def test_upload_process_false_waits_for_saved_settings(ingestion_api):
     client, sessions, base_id, embed = ingestion_api
-    response = await client.post(f"/api/knowledge/bases/{base_id}/documents/upload?process=false", headers=USER,
+    response = await client.post(f"/api/knowledge/bases/{base_id}/documents/upload?process=false", headers=ADMIN,
                                  files={"file": ("guide.md", CONTENT.encode(), "text/markdown")})
     assert response.status_code == 201, response.text
     document = response.json()
@@ -102,17 +102,17 @@ async def test_upload_process_false_waits_for_saved_settings(ingestion_api):
     assert document["file_name"] == "guide.md"
     assert document["file_size"] == len(CONTENT.encode())
     embed.assert_not_awaited()
-    assert (await client.put(f"/api/knowledge/bases/{base_id}", headers=USER, json={
+    assert (await client.put(f"/api/knowledge/bases/{base_id}", headers=ADMIN, json={
         "chunk_size_tokens": 100, "chunk_overlap_tokens": 0,
     })).status_code == 200
-    processed = await client.post(f"/api/knowledge/bases/{base_id}/process", headers=USER)
+    processed = await client.post(f"/api/knowledge/bases/{base_id}/process", headers=ADMIN)
     assert processed.json()["processed"] == 1
     async with sessions() as db:
         saved = await db.get(KnowledgeDocument, document["id"])
         assert saved.status == "completed"
         chunks = list(await db.scalars(select(KnowledgeChunk).where(KnowledgeChunk.document_id == document["id"])))
         assert all(chunk.token_count <= 100 for chunk in chunks)
-    assert (await client.post(f"/api/knowledge/bases/{base_id}/process", headers=USER)).json()["processed"] == 0
+    assert (await client.post(f"/api/knowledge/bases/{base_id}/process", headers=ADMIN)).json()["processed"] == 0
 
 
 @pytest.mark.asyncio
@@ -128,7 +128,7 @@ async def test_docx_upload_is_binary_and_parsed_in_pipeline(ingestion_api):
     table.cell(1, 1).text = "检查网络"
     output = io.BytesIO()
     document.save(output)
-    response = await client.post(f"/api/knowledge/bases/{base_id}/documents/upload", headers=USER, files={
+    response = await client.post(f"/api/knowledge/bases/{base_id}/documents/upload", headers=ADMIN, files={
         "file": ("guide.docx", output.getvalue(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
     })
     assert response.status_code == 201, response.text
@@ -144,10 +144,10 @@ async def test_docx_upload_is_binary_and_parsed_in_pipeline(ingestion_api):
 @pytest.mark.asyncio
 async def test_hierarchical_ingestion_vectors_only_children(ingestion_api):
     client, sessions, base_id, embed = ingestion_api
-    assert (await client.put(f"/api/knowledge/bases/{base_id}", headers=USER, json={
+    assert (await client.put(f"/api/knowledge/bases/{base_id}", headers=ADMIN, json={
         "chunk_structure": "hierarchical", "child_chunk_size_tokens": 50, "child_chunk_overlap_tokens": 0,
     })).status_code == 200
-    response = await client.post(f"/api/knowledge/bases/{base_id}/documents", headers=USER, json={
+    response = await client.post(f"/api/knowledge/bases/{base_id}/documents", headers=ADMIN, json={
         "title": "父子分块", "content": CONTENT,
     })
     assert response.status_code == 201
@@ -196,7 +196,7 @@ async def test_embedding_failure_preserves_prior_chunks_and_can_retry(ingestion_
 async def test_batch_failure_does_not_expire_following_documents(ingestion_api):
     client, sessions, base_id, embed = ingestion_api
     embed.side_effect = RuntimeError("offline")
-    response = await client.post(f"/api/knowledge/bases/{base_id}/documents/batch", headers=USER, json={
+    response = await client.post(f"/api/knowledge/bases/{base_id}/documents/batch", headers=ADMIN, json={
         "documents": [{"title": "a", "content": CONTENT}, {"title": "b", "content": CONTENT}],
     })
     assert response.status_code == 200, response.text
@@ -299,7 +299,7 @@ async def test_scan_pdf_and_invalid_doc_fail_without_chunks(ingestion_api):
         ("blank.pdf", output.getvalue(), "application/pdf"),
         ("legacy.doc", b"binary legacy doc", "application/msword"),
     ]:
-        response = await client.post(f"/api/knowledge/bases/{base_id}/documents/upload", headers=USER,
+        response = await client.post(f"/api/knowledge/bases/{base_id}/documents/upload", headers=ADMIN,
                                      files={"file": (filename, content, mime)})
         assert response.status_code == 201
         assert response.json()["status"] == "failed"
@@ -318,7 +318,7 @@ async def test_image_ocr_reuses_existing_provider(ingestion_api, monkeypatch):
     image = Image.new("RGB", (8, 8), "white")
     output = io.BytesIO()
     image.save(output, format="PNG")
-    response = await client.post(f"/api/knowledge/bases/{base_id}/documents/upload", headers=USER,
+    response = await client.post(f"/api/knowledge/bases/{base_id}/documents/upload", headers=ADMIN,
                                  files={"file": ("ocr.png", output.getvalue(), "image/png")})
     assert response.status_code == 201, response.text
     assert response.json()["status"] == "completed"
@@ -330,11 +330,11 @@ async def test_image_ocr_reuses_existing_provider(ingestion_api, monkeypatch):
 async def test_upload_validation_and_path_traversal(ingestion_api):
     client, _, base_id, embed = ingestion_api
     url = f"/api/knowledge/bases/{base_id}/documents/upload"
-    assert (await client.post(url, headers=USER)).status_code == 400
-    assert (await client.post(url, headers=USER, files={"file": ("x.exe", b"binary", "application/octet-stream")})).status_code == 400
-    assert (await client.post(url, headers=USER, files={"file": ("x.txt", b"   ", "text/plain")})).status_code == 400
+    assert (await client.post(url, headers=ADMIN)).status_code == 400
+    assert (await client.post(url, headers=ADMIN, files={"file": ("x.exe", b"binary", "application/octet-stream")})).status_code == 400
+    assert (await client.post(url, headers=ADMIN, files={"file": ("x.txt", b"   ", "text/plain")})).status_code == 400
     assert (await client.post(url, files={"file": ("x.txt", CONTENT.encode(), "text/plain")})).status_code == 401
-    response = await client.post(url + "?process=false", headers=USER,
+    response = await client.post(url + "?process=false", headers=ADMIN,
                                  files={"file": ("../../guide.txt", CONTENT.encode(), "text/plain")})
     assert response.status_code == 201
     assert response.json()["originalFilename"] == "guide.txt"
@@ -352,7 +352,7 @@ async def test_queue_dispatch_is_deduplicated_and_does_not_process_in_api(ingest
     create = AsyncMock(return_value=pool)
     monkeypatch.setattr(jobs, "create_pool", create)
     monkeypatch.setattr(settings, "ingestion_async_enabled", True)
-    response = await client.post(f"/api/knowledge/bases/{base_id}/documents", headers=USER, json={
+    response = await client.post(f"/api/knowledge/bases/{base_id}/documents", headers=ADMIN, json={
         "title": "queued", "content": CONTENT,
     })
     assert response.status_code == 201, response.text
@@ -371,7 +371,7 @@ async def test_queue_outage_preserves_pending_document(ingestion_api, monkeypatc
     client, sessions, base_id, embed = ingestion_api
     monkeypatch.setattr(settings, "ingestion_async_enabled", True)
     monkeypatch.setattr(jobs, "create_pool", AsyncMock(side_effect=ConnectionError("offline")))
-    response = await client.post(f"/api/knowledge/bases/{base_id}/documents", headers=USER, json={
+    response = await client.post(f"/api/knowledge/bases/{base_id}/documents", headers=ADMIN, json={
         "title": "queued", "content": CONTENT,
     })
     assert response.status_code == 503
@@ -438,7 +438,7 @@ async def test_pdf_text_extraction_and_encryption_errors(ingestion_api):
     page[NameObject("/Contents")] = writer._add_object(stream)
     output = io.BytesIO()
     writer.write(output)
-    response = await client.post(f"/api/knowledge/bases/{base_id}/documents/upload", headers=USER,
+    response = await client.post(f"/api/knowledge/bases/{base_id}/documents/upload", headers=ADMIN,
                                  files={"file": ("text.pdf", output.getvalue(), "application/pdf")})
     assert response.status_code == 201, response.text
     assert response.json()["status"] == "completed"
@@ -446,7 +446,7 @@ async def test_pdf_text_extraction_and_encryption_errors(ingestion_api):
     writer.encrypt("password")
     output = io.BytesIO()
     writer.write(output)
-    response = await client.post(f"/api/knowledge/bases/{base_id}/documents/upload", headers=USER,
+    response = await client.post(f"/api/knowledge/bases/{base_id}/documents/upload", headers=ADMIN,
                                  files={"file": ("encrypted.pdf", output.getvalue(), "application/pdf")})
     assert response.status_code == 201
     assert response.json()["status"] == "failed"
@@ -486,11 +486,11 @@ async def test_cancelled_ingestion_records_failure_for_worker_retry(ingestion_ap
 @pytest.mark.asyncio
 async def test_legacy_ingest_preserves_404_and_rejects_invalid_overrides(ingestion_api):
     client, sessions, base_id, embed = ingestion_api
-    response = await client.post("/api/knowledge/ingest", headers=USER, json={
+    response = await client.post("/api/knowledge/ingest", headers=ADMIN, json={
         "kb_id": "absent", "title": "missing", "content": CONTENT,
     })
     assert response.status_code == 404
-    response = await client.post("/api/knowledge/ingest", headers=USER, json={
+    response = await client.post("/api/knowledge/ingest", headers=ADMIN, json={
         "kb_id": base_id, "title": "invalid", "content": CONTENT, "chunk_size": 100, "chunk_overlap": 60,
     })
     assert response.status_code == 422

@@ -1,10 +1,53 @@
 import { test, expect } from "@playwright/test";
-import { loadEnv } from "vite";
 
 const admin = { id: "admin", email: "administrator-with-a-long-email@example.test", role: "admin" };
 const user = { id: "user", email: "user@example.test", role: "user" };
+// A missing process variable does not imply that Vite's local prefill is empty.
 const adminPrefill = process.env.AGENT_FLOW_PRODUCTION_PREVIEW === "1"
-  ? "" : loadEnv("development", process.cwd(), "VITE_").VITE_DEV_ADMIN_PASSWORD || "";
+  ? "" : process.env.VITE_DEV_ADMIN_PASSWORD;
+
+for (const path of [
+  "/admin",
+  "/admin/cs/knowledge",
+  "/admin/cs/knowledge/feedback",
+  "/admin/cs/knowledge/bases/private-base",
+  "/admin/cs/knowledge/bases/private-base/hit-testing",
+  "/admin/cs/knowledge/bases/private-base/documents/private-document",
+  "/admin/cs/agent-flows",
+  "/admin/cs/agent-flows/private-flow",
+  "/admin/cs/entry-route-flows/private-flow",
+  "/admin/cs/analytics",
+]) {
+  test(`ordinary users cannot load global management data: ${path}`, async ({ page }) => {
+    const managementRequests: string[] = [];
+    await page.route("**/api/**", async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (pathname === "/api/auth/me") {
+        await route.fulfill({ json: user });
+      } else {
+        managementRequests.push(pathname);
+        await route.fulfill({ status: 403, json: { detail: "Forbidden" } });
+      }
+    });
+    await page.addInitScript(() => localStorage.setItem("accessToken", "user-token"));
+    await page.goto(path);
+    await expect(page.getByRole("alert")).toHaveText("仅管理员可以访问管理页面");
+    await expect(page.getByRole("navigation", { name: "管理模块" })).toHaveCount(0);
+    expect(managementRequests).toEqual([]);
+  });
+}
+
+test("expired management credentials return to login", async ({ page }) => {
+  await page.route("**/api/**", (route) => route.fulfill({
+    status: 401, json: { detail: "Not authenticated" },
+  }));
+  await page.goto("/login");
+  await page.evaluate(() => localStorage.setItem("accessToken", "expired-token"));
+  await page.goto("/admin/cs/knowledge");
+  await expect(page).toHaveURL(/\/login$/);
+  expect(await page.evaluate(() => localStorage.getItem("accessToken"))).toBeNull();
+  await expect(page.getByRole("navigation", { name: "管理模块" })).toHaveCount(0);
+});
 
 for (const width of [1440, 390, 320]) {
   test(`account switching and logout at ${width}px`, async ({ page }, testInfo) => {
@@ -43,7 +86,7 @@ for (const width of [1440, 390, 320]) {
     await page.goto("/admin/cs/agent-flows");
     const nav = page.getByRole("navigation", { name: "账号导航" });
     await expect(nav).toContainText("普通用户");
-    await expect(page.getByRole("alert")).toContainText("仅管理员可以管理 Agent 流程");
+    await expect(page.getByRole("alert")).toContainText("仅管理员可以访问管理页面");
     const logout = nav.getByRole("button", { name: "退出登录" });
     await expect(logout).toBeInViewport();
     const switchAdmin = nav.getByRole("button", { name: "切换至管理员登录" });
@@ -61,12 +104,16 @@ for (const width of [1440, 390, 320]) {
     ])).toEqual([null, null]);
     await expect(page.getByRole("tab", { name: "管理员", exact: true })).toHaveAttribute("aria-selected", "true");
     await expect(page.getByLabel("Email", { exact: true })).toHaveValue("admin@agentforge.local");
-    await expect(page.getByLabel("Password", { exact: true })).toHaveValue(adminPrefill);
+    if (adminPrefill !== undefined) {
+      await expect(page.getByLabel("Password", { exact: true })).toHaveValue(adminPrefill);
+    }
     await expect(page.getByLabel("Password", { exact: true })).toHaveAttribute("type", "password");
     await page.getByRole("tab", { name: "普通用户" }).click();
     await expect(page.getByLabel("Email", { exact: true })).toHaveValue("default@agentforge.local");
     await page.getByRole("tab", { name: "管理员", exact: true }).click();
-    await expect(page.getByLabel("Password", { exact: true })).toHaveValue(adminPrefill);
+    if (adminPrefill !== undefined) {
+      await expect(page.getByLabel("Password", { exact: true })).toHaveValue(adminPrefill);
+    }
     await page.reload();
     await expect(page).toHaveURL((url) => url.pathname === "/login" &&
       url.searchParams.get("mode") === "admin" && url.searchParams.get("returnTo") === "/admin/cs/agent-flows");
@@ -96,8 +143,8 @@ for (const width of [1440, 390, 320]) {
     await page.getByLabel("Password", { exact: true }).fill("test-password");
     await page.getByRole("button", { name: "Sign In" }).click();
     await expect(nav).toContainText("普通用户");
-    await page.getByRole("link", { name: "Agent 流程", exact: true }).click();
-    await expect(page.getByRole("alert")).toContainText("仅管理员可以管理 Agent 流程");
+    await page.goto("/admin/cs/agent-flows");
+    await expect(page.getByRole("alert")).toContainText("仅管理员可以访问管理页面");
     await expect(page.getByRole("link", { name: "管理员专属流程", exact: true })).toHaveCount(0);
     if (width === 1440) await expect(nav).toContainText(user.email);
   });
@@ -175,11 +222,13 @@ test("real provisioned admin login from the normal-user panel", async ({ page },
   await page.getByRole("button", { name: "Sign In" }).click();
   const nav = page.getByRole("navigation", { name: "账号导航" });
   await expect(nav).toContainText("普通用户");
-  await page.getByRole("link", { name: "Agent 流程", exact: true }).click();
-  await expect(page.getByRole("alert")).toContainText("仅管理员可以管理 Agent 流程");
+  await page.goto("/admin/cs/agent-flows");
+  await expect(page.getByRole("alert")).toContainText("仅管理员可以访问管理页面");
   await nav.getByRole("button", { name: "切换至管理员登录" }).click();
-  await expect(page.getByLabel("Password", { exact: true })).toHaveValue(adminPrefill);
-  if (!adminPrefill) await page.getByLabel("Password", { exact: true }).fill(process.env.AGENT_FLOW_ADMIN_PASSWORD!);
+  if (adminPrefill !== undefined) {
+    await expect(page.getByLabel("Password", { exact: true })).toHaveValue(adminPrefill);
+  }
+  await page.getByLabel("Password", { exact: true }).fill(process.env.AGENT_FLOW_ADMIN_PASSWORD!);
   await page.getByRole("button", { name: "管理员登录", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/cs\/agent-flows$/);
   await expect(nav).toContainText("admin@agentforge.local");

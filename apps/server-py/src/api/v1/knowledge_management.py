@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload
 
-from src.api.deps import get_current_user, get_db
+from src.api.deps import get_db, require_admin
 from src.models.knowledge import KnowledgeBase, KnowledgeChunk, KnowledgeDocument
 from src.schemas.knowledge import (
     ChunkPreview,
@@ -21,7 +21,7 @@ from src.schemas.knowledge import (
 from src.services import knowledge_management as service
 
 router = APIRouter(
-    prefix="/api/knowledge", tags=["knowledge"], dependencies=[Depends(get_current_user)],
+    prefix="/api/knowledge", tags=["knowledge"], dependencies=[Depends(require_admin)],
 )
 Db = Annotated[AsyncSession, Depends(get_db)]
 

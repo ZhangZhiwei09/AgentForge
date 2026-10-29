@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ThumbsUp, ThumbsDown, Star } from "lucide-react";
+import { client } from "@/lib/api";
 
 interface SatisfactionRatingProps {
   sessionId: string;
@@ -16,16 +17,20 @@ export function SatisfactionRating({
   const [submitted, setSubmitted] = useState(false);
   const [showStars, setShowStars] = useState(false);
   const [comment, setComment] = useState("");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const submitting = useRef(false);
 
   async function submitRating(value: string) {
-    if (submitted) return;
+    if (submitted || submitting.current) return;
+    submitting.current = true;
     setRating(value);
-    setSubmitted(true);
+    setPending(true);
+    setError("");
 
     try {
-      await fetch("/api/agent/chat/rate", {
+      await client.request<unknown>("/api/agent/chat/rate", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           session_id: sessionId,
           message_id: messageId,
@@ -33,10 +38,18 @@ export function SatisfactionRating({
           comment: comment || undefined,
         }),
       });
-      onRated?.(value);
+      setSubmitted(true);
     } catch (err) {
-      console.error("Failed to submit rating:", err);
+      const message = err instanceof Error ? err.message : "请稍后重试";
+      setError(message === "Forbidden" || message === "HTTP 403"
+        ? "您无权评价此会话。"
+        : `评价提交失败：${message}`);
+      return;
+    } finally {
+      submitting.current = false;
+      setPending(false);
     }
+    onRated?.(value);
   }
 
   if (submitted) {
@@ -49,13 +62,15 @@ export function SatisfactionRating({
   }
 
   return (
-    <div className="space-y-2 animate-fade-in">
+    <div className="space-y-2 animate-fade-in" aria-busy={pending}>
       {!showStars ? (
         <div className="flex items-center gap-1">
           <span className="text-xs text-[hsl(var(--muted-foreground))] mr-1">
             这个回答有帮助吗？
           </span>
           <button
+            type="button"
+            disabled={pending}
             onClick={() => submitRating("positive")}
             className="rounded-md p-1.5 text-[hsl(var(--muted-foreground))] hover:text-[hsl(var(--cs-success))] hover:bg-green-50 transition-colors"
             title="有帮助"
@@ -63,6 +78,8 @@ export function SatisfactionRating({
             <ThumbsUp className="h-4 w-4" />
           </button>
           <button
+            type="button"
+            disabled={pending}
             onClick={() => {
               setShowStars(true);
             }}
@@ -81,6 +98,10 @@ export function SatisfactionRating({
             {[1, 2, 3, 4, 5].map((star) => (
               <button
                 key={star}
+                type="button"
+                title={`${star} 星`}
+                aria-label={`${star} 星`}
+                disabled={pending}
                 onClick={() => submitRating(`star_${star}`)}
                 className={`rounded-md p-1 transition-colors ${
                   rating === `star_${star}`
@@ -99,6 +120,7 @@ export function SatisfactionRating({
             ))}
           </div>
           <textarea
+            disabled={pending}
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             placeholder="补充您的反馈（可选）..."
@@ -106,6 +128,8 @@ export function SatisfactionRating({
             rows={2}
           />
           <button
+            type="button"
+            disabled={pending}
             onClick={() => submitRating("negative")}
             className="rounded-lg bg-[hsl(var(--cs-primary))] px-3 py-1.5 text-xs text-white hover:bg-[hsl(var(--cs-primary-dark))] transition-colors"
           >
@@ -113,6 +137,8 @@ export function SatisfactionRating({
           </button>
         </div>
       )}
+      {pending && <p role="status" className="text-xs text-[hsl(var(--muted-foreground))]">正在提交反馈...</p>}
+      {error && <p role="alert" className="text-xs text-[hsl(var(--cs-danger))]">{error}</p>}
     </div>
   );
 }

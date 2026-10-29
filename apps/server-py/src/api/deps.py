@@ -17,6 +17,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from src.config import settings
 from src.db import async_session
 from src.models.user import User
 from src.services.auth import authenticate
@@ -73,15 +74,34 @@ async def get_current_user(
     return user
 
 
+async def require_admin(user: Annotated[User, Depends(get_current_user)]) -> User:
+    """Authorize with the current database role, including requests using API keys."""
+    if user.role != "admin":
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "仅管理员可以访问管理资源")
+    return user
+
+
+async def require_faq_access(
+    request: Request,
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    if not settings.public_faq_enabled or "authorization" in request.headers or "api_key" in request.query_params:
+        await get_current_user(request, credentials, db)
+
+
 async def get_chat_user(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> User:
-    """Public chat retains the legacy actor; invalid credentials never become anonymous."""
+    """Legacy anonymous access is allowed only when enabled by the server."""
     if "authorization" in request.headers or "api_key" in request.query_params:
         if "authorization" in request.headers and credentials is None:
             raise HTTPException(401, "Invalid authorization header")
+        return await get_current_user(request, credentials, db)
+
+    if not settings.anonymous_chat_enabled:
         return await get_current_user(request, credentials, db)
 
     user = await db.get(User, ANONYMOUS_USER_ID)

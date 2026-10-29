@@ -11,14 +11,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_current_user, get_db
+from src.api.deps import get_db, require_admin
 from src.config import settings
 from src.jobs.ingestion import dispatch_ingestion
 from src.models.knowledge import KnowledgeDocument
 from src.services import document_parser, knowledge_storage
 from src.services.knowledge_management import document_dto, get_base
 
-router = APIRouter(prefix="/api/knowledge", tags=["knowledge"], dependencies=[Depends(get_current_user)])
+router = APIRouter(prefix="/api/knowledge", tags=["knowledge"], dependencies=[Depends(require_admin)])
 Db = Annotated[AsyncSession, Depends(get_db)]
 MAX_UPLOAD = 15 * 1024 * 1024
 

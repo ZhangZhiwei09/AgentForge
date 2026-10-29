@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_chat_user, get_current_user, get_db
+from src.api.deps import get_chat_user, get_db, require_admin, require_faq_access
 from src.api.v1.conversations import _find_conversation
 from src.models.chat import Message, SatisfactionRating
 from src.models.knowledge import KnowledgeBase, KnowledgeChunk, KnowledgeDocument
@@ -45,12 +45,12 @@ async def rate(body: RatingInput, db: Db, user: Annotated[User, Depends(get_chat
     return {"status": "ok", "rating": body.rating}
 
 
-@router.get("/faq")
+@router.get("/faq", dependencies=[Depends(require_faq_access)])
 async def faq(db: Db, category: str | None = None):
     return {"documents": await service.faq_documents(db, category)}
 
 
-@router.get("/faq/categories")
+@router.get("/faq/categories", dependencies=[Depends(require_faq_access)])
 async def faq_categories(db: Db):
     documents = await service.faq_documents(db)
     return {"categories": [
@@ -58,7 +58,7 @@ async def faq_categories(db: Db):
     ]}
 
 
-@router.get("/faq/{document_id}")
+@router.get("/faq/{document_id}", dependencies=[Depends(require_faq_access)])
 async def faq_detail(document_id: str, db: Db):
     document = (await db.execute(select(
         KnowledgeDocument.id, KnowledgeDocument.title, KnowledgeDocument.chunk_count, KnowledgeDocument.status,
@@ -77,7 +77,7 @@ async def faq_detail(document_id: str, db: Db):
     }
 
 
-@router.get("/feedback", dependencies=[Depends(get_current_user)])
+@router.get("/feedback", dependencies=[Depends(require_admin)])
 async def feedback(
     db: Db, type: Literal["all", "positive", "negative"] = "all",
     page: Annotated[int, Query(ge=1)] = 1, limit: Annotated[int, Query(ge=1, le=100)] = 20,
@@ -85,6 +85,6 @@ async def feedback(
     return await service.feedback(db, type, page, limit)
 
 
-@router.get("/analytics", dependencies=[Depends(get_current_user)])
+@router.get("/analytics", dependencies=[Depends(require_admin)])
 async def analytics(db: Db):
     return await service.analytics(db)

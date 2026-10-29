@@ -9,7 +9,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_current_user, get_db
+from src.api.deps import get_db, require_admin
 from src.config import settings
 from src.observability.metrics import render_metrics
 from src.providers.registry import get_provider, resolve_model
@@ -56,6 +56,6 @@ async def readiness(db: Annotated[AsyncSession, Depends(get_db)]):
     )
 
 
-@router.get("/api/metrics", dependencies=[Depends(get_current_user)])
+@router.get("/api/metrics", dependencies=[Depends(require_admin)])
 async def metrics():
     return Response(render_metrics(), headers={"Content-Type": CONTENT_TYPE_LATEST})

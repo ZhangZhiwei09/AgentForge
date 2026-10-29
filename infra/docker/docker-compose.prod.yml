@@ -4,6 +4,11 @@ x-backend: &backend
     context: ../../
     dockerfile: infra/docker/Dockerfile.server
   environment: &backend-env
+    APP_ENV: production
+    DEBUG: "false"
+    AUTH_SIGNUP_ENABLED: "false"
+    ANONYMOUS_CHAT_ENABLED: "false"
+    PUBLIC_FAQ_ENABLED: "false"
     DATABASE_URL: ${DATABASE_URL:?Set the PostgreSQL URL using host db and port 5432}
     REDIS_URL: ${REDIS_URL:?Set the authenticated Redis URL using host redis}
     JWT_SECRET: ${JWT_SECRET:?Set a stable JWT signing secret}
@@ -29,7 +34,6 @@ x-backend: &backend
     LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
     TAVILY_API_KEY: ${TAVILY_API_KEY:-}
     PORT: "8000"
-    DEBUG: "false"
   volumes:
     - knowledge_files:/app/data/knowledge-files
 

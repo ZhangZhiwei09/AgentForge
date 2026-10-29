@@ -64,7 +64,9 @@ export default function App() {
           path="/admin"
           element={
             <AuthGuard>
-              <AdminDashboard />
+              <EntryAdminGate>
+                <AdminDashboard />
+              </EntryAdminGate>
             </AuthGuard>
           }
         >

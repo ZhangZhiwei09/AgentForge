@@ -17,7 +17,7 @@ from src.agent.entry_flows.schema import (
     structural_errors,
     text,
 )
-from src.api.deps import get_current_user, get_db
+from src.api.deps import get_current_user, get_db, require_admin
 from src.models.user import User
 from src.services.entry_flows import EntryRouteFlowService
 
@@ -51,9 +51,7 @@ DB = Annotated[AsyncSession, Depends(get_db)]
 
 
 async def admin(user: Annotated[User, Depends(get_current_user)]) -> User:
-    if user.role != "admin":
-        raise HTTPException(403, "仅管理员可以管理一级路由流程")
-    return user
+    return await require_admin(user)
 
 
 Admin = Annotated[User, Depends(admin)]

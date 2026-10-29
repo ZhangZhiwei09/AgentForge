@@ -25,6 +25,7 @@ from src.rag.types import HybridSearchParams, KnowledgeSearchResult
 from src.services import knowledge_eval_metrics as metrics
 from src.services import knowledge_index, knowledge_regression
 
+ADMIN = {"X-Test-Actor": "admin"}
 USER = {"X-Test-Actor": "user"}
 TABLES = [
     KnowledgeBase.__table__, KnowledgeDocument.__table__, KnowledgeChunk.__table__,
@@ -77,7 +78,7 @@ async def test_search_and_hit_testing_contracts_and_audit(retrieval_api):
     assert result["chunkId"] == "chunk1"
     assert result["scoreType"] == "rrf"
     assert result["parentChunk"] == {"id": "parent", "content": "完整父块上下文"}
-    response = await client.post("/api/knowledge/bases/kb1/hit-testing", headers=USER, json={
+    response = await client.post("/api/knowledge/bases/kb1/hit-testing", headers=ADMIN, json={
         "query": "超时", "search_method": "keyword",
     })
     assert response.status_code == 200, response.text
@@ -89,9 +90,9 @@ async def test_search_and_hit_testing_contracts_and_audit(retrieval_api):
         audit = await db.scalar(select(KnowledgeQueryLog))
         assert audit.results == 1 and audit.method == "keyword"
     assert (await client.post("/api/knowledge/search", json={"query": "超时"})).status_code == 401
-    assert (await client.post("/api/knowledge/bases/absent/hit-testing", headers=USER,
+    assert (await client.post("/api/knowledge/bases/absent/hit-testing", headers=ADMIN,
                               json={"query": "超时"})).status_code == 404
-    assert (await client.post("/api/knowledge/bases/kb1/hit-testing", headers=USER, json={
+    assert (await client.post("/api/knowledge/bases/kb1/hit-testing", headers=ADMIN, json={
         "query": "超时", "score_threshold": 0.5,
     })).json()["results"] == []
 
@@ -185,12 +186,12 @@ async def test_reranker_wire_contract_and_invalid_outputs(monkeypatch, payload, 
 async def test_regression_crud_run_history_and_metrics(retrieval_api):
     client, sessions = retrieval_api
     base = "/api/knowledge/bases/kb1/regression"
-    empty = (await client.get(base + "/metrics", headers=USER)).json()
+    empty = (await client.get(base + "/metrics", headers=ADMIN)).json()
     assert empty["summary"] == {"runCount": 0, "totalCases": 0, "latest": None, "average": None}
-    sets = (await client.get(base + "/test-sets", headers=USER)).json()
+    sets = (await client.get(base + "/test-sets", headers=ADMIN)).json()
     assert len(sets) == 1 and sets[0]["cases"] == []
-    assert (await client.get(base + "/test-sets", headers=USER)).json()[0]["id"] == sets[0]["id"]
-    response = await client.post(base + "/cases", headers=USER, json={
+    assert (await client.get(base + "/test-sets", headers=ADMIN)).json()[0]["id"] == sets[0]["id"]
+    response = await client.post(base + "/cases", headers=ADMIN, json={
         "name": "网络排查命中", "query": "超时", "expectedDocIds": ["DOC1"],
         "requiredText": ["网络连接"], "forbiddenText": ["禁用秘密"],
         "promptRequiredContextText": ["网络连接"], "minScore": 0.5, "expectedTopK": 5,
@@ -199,27 +200,27 @@ async def test_regression_crud_run_history_and_metrics(retrieval_api):
     assert response.status_code == 201, response.text
     case = response.json()
     assert case["retrievalConfig"]["topK"] == 10
-    assert (await client.get(base + "/test-sets", headers=USER)).json()[0]["cases"][0]["id"] == case["id"]
-    response = await client.post(base + "/runs", headers=USER, json={})
+    assert (await client.get(base + "/test-sets", headers=ADMIN)).json()[0]["cases"][0]["id"] == case["id"]
+    response = await client.post(base + "/runs", headers=ADMIN, json={})
     assert response.status_code == 201, response.text
     run = response.json()
     assert run["status"] == "completed"
     assert run["totalCases"] == 1 and run["passedCases"] == 1 and run["hitRate"] == 1
     assert run["items"][0]["matchedDocId"] == "doc1"
     assert "检索上下文" in run["items"][0]["promptSnapshot"]
-    history = (await client.get(base + "/runs", headers=USER)).json()
+    history = (await client.get(base + "/runs", headers=ADMIN)).json()
     assert history[0]["id"] == run["id"]
-    metrics_payload = (await client.get(base + "/metrics", headers=USER)).json()
+    metrics_payload = (await client.get(base + "/metrics", headers=ADMIN)).json()
     latest = metrics_payload["summary"]["latest"]
     assert latest["mrr"] == 1 and latest["recallAtK"] == 1 and latest["precisionAtK"] == 0.2
     assert metrics_payload["queries"][0]["relevantRanks"] == [1]
     changed = {**case, "requiredText": ["不存在的内容"]}
-    response = await client.put(f"/api/knowledge/regression/cases/{case['id']}", headers=USER, json=changed)
+    response = await client.put(f"/api/knowledge/regression/cases/{case['id']}", headers=ADMIN, json=changed)
     assert response.status_code == 200, response.text
-    failed = (await client.post(base + "/runs", headers=USER, json={})).json()
+    failed = (await client.post(base + "/runs", headers=ADMIN, json={})).json()
     assert failed["failedCases"] == 1
     assert "Required text missing" in failed["items"][0]["failureReason"]
-    assert (await client.delete(f"/api/knowledge/regression/cases/{case['id']}", headers=USER)).status_code == 200
+    assert (await client.delete(f"/api/knowledge/regression/cases/{case['id']}", headers=ADMIN)).status_code == 200
     async with sessions() as db:
         assert list(await db.scalars(select(KnowledgeRegressionRunItem))) == []
 
@@ -227,28 +228,28 @@ async def test_regression_crud_run_history_and_metrics(retrieval_api):
 @pytest.mark.asyncio
 async def test_foreign_sets_validation_and_empty_run(retrieval_api):
     client, _ = retrieval_api
-    foreign = (await client.post("/api/knowledge/bases/kb2/regression/test-sets", headers=USER,
+    foreign = (await client.post("/api/knowledge/bases/kb2/regression/test-sets", headers=ADMIN,
                                  json={"name": "foreign"})).json()
     base = "/api/knowledge/bases/kb1/regression"
-    assert (await client.post(base + "/cases", headers=USER, json={
+    assert (await client.post(base + "/cases", headers=ADMIN, json={
         "name": "bad", "query": "超时", "testSetId": foreign["id"],
     })).status_code == 404
-    assert (await client.post(base + "/runs", headers=USER, json={"testSetId": foreign["id"]})).status_code == 404
-    assert (await client.post(base + "/cases", headers=USER, json={
+    assert (await client.post(base + "/runs", headers=ADMIN, json={"testSetId": foreign["id"]})).status_code == 404
+    assert (await client.post(base + "/cases", headers=ADMIN, json={
         "name": "bad", "query": "超时", "expectedTopK": 0,
     })).status_code == 422
-    run = await client.post(base + "/runs", headers=USER, json={})
+    run = await client.post(base + "/runs", headers=ADMIN, json={})
     assert run.status_code == 201
     assert run.json()["totalCases"] == 0
     assert run.json()["averageRank"] is None
-    assert (await client.get(base + "/metrics?limit=101", headers=USER)).status_code == 422
+    assert (await client.get(base + "/metrics?limit=101", headers=ADMIN)).status_code == 422
 
 
 @pytest.mark.asyncio
 async def test_interrupted_regression_marks_run_failed(retrieval_api, monkeypatch):
     client, sessions = retrieval_api
     base = "/api/knowledge/bases/kb1/regression"
-    await client.post(base + "/cases", headers=USER, json={"name": "case", "query": "超时"})
+    await client.post(base + "/cases", headers=ADMIN, json={"name": "case", "query": "超时"})
     monkeypatch.setattr(knowledge_regression, "retrieval_service",
                         lambda db: SimpleNamespace(retrieve=AsyncMock(side_effect=RuntimeError("offline"))))
     async with sessions() as db:

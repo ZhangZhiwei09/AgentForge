@@ -6,7 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_current_user, get_db
+from src.api.deps import get_current_user, get_db, require_admin
 from src.schemas.knowledge_retrieval import HitTestingRequest, SearchRequest
 from src.services.knowledge_management import get_base
 from src.services.knowledge_retrieval import audit_query, result_dto, retrieval_service
@@ -21,7 +21,7 @@ async def search(body: SearchRequest, db: Db):
     return {"results": [result_dto(item) for item in results], "query": body.query, "total": len(results)}
 
 
-@router.post("/bases/{base_id}/hit-testing")
+@router.post("/bases/{base_id}/hit-testing", dependencies=[Depends(require_admin)])
 async def hit_testing(base_id: str, body: HitTestingRequest, db: Db):
     await get_base(db, base_id)
     started = time.perf_counter()

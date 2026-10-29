@@ -1,4 +1,4 @@
-"""Python database upgrade, inspection and administrator commands."""
+"""Python database upgrade, inspection and account provisioning commands."""
 
 import argparse
 import asyncio
@@ -11,7 +11,7 @@ from pathlib import Path
 
 from alembic.config import Config
 from sqlalchemy import inspect, select, text
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from alembic import command
 from src.models.base import Base
@@ -103,7 +103,9 @@ async def upgrade_database(url: str):
         await engine.dispose()
 
 
-async def create_admin(db, email: str, password: str):
+async def _create_account(
+    db: AsyncSession, email: str, password: str, *, role: str, label: str,
+) -> tuple[str, bool]:
     from src.models.user import User
     from src.schemas.user import SignInRequest
     from src.services.auth import hash_password
@@ -111,18 +113,26 @@ async def create_admin(db, email: str, password: str):
     normalized = SignInRequest(email=email, password=password).email
     existing = await db.scalar(select(User).where(User.email == normalized))
     if existing:
-        if existing.role != "admin":
-            raise ValueError("This email belongs to a non-admin user; no account was changed")
+        if existing.role != role:
+            raise ValueError(f"This email belongs to a non-{role} account; no account was changed")
         return existing.id, False
     if len(password) < 8:
-        raise ValueError("Administrator password must contain at least 8 characters")
+        raise ValueError(f"{label} password must contain at least 8 characters")
     user = User(
-        id=str(uuid.uuid4()), email=normalized, role="admin",
+        id=str(uuid.uuid4()), email=normalized, role=role,
         password_hash=await asyncio.to_thread(hash_password, password),
     )
     db.add(user)
     await db.commit()
     return user.id, True
+
+
+async def create_admin(db: AsyncSession, email: str, password: str) -> tuple[str, bool]:
+    return await _create_account(db, email, password, role="admin", label="Administrator")
+
+
+async def create_user(db: AsyncSession, email: str, password: str) -> tuple[str, bool]:
+    return await _create_account(db, email, password, role="user", label="User")
 
 
 def main():
@@ -132,9 +142,13 @@ def main():
     subparsers = parser.add_subparsers(dest="action", required=True)
     subparsers.add_parser("upgrade")
     subparsers.add_parser("check")
-    admin = subparsers.add_parser("create-admin")
-    admin.add_argument("--email", required=True)
-    admin.add_argument("--password-env", default="AGENTFORGE_ADMIN_PASSWORD")
+    for action, password_env in (
+        ("create-admin", "AGENTFORGE_ADMIN_PASSWORD"),
+        ("create-user", "AGENTFORGE_USER_PASSWORD"),
+    ):
+        account = subparsers.add_parser(action, allow_abbrev=False)
+        account.add_argument("--email", required=True)
+        account.add_argument("--password-env", default=password_env)
     args = parser.parse_args()
     configured = platform_environment(os.environ, env_files=(SERVER_ENV, ROOT_ENV, PYTHON_ENV))
     url = configured["DATABASE_URL"]
@@ -156,10 +170,12 @@ def main():
                         raise RuntimeError("Missing tables: " + ", ".join(sorted(required - present)))
                 print("Database schema is compatible")
             else:
-                password = os.environ.get(args.password_env) or getpass.getpass("Administrator password: ")
+                provision = create_admin if args.action == "create-admin" else create_user
+                label = "Administrator" if args.action == "create-admin" else "User"
+                password = os.environ.get(args.password_env) or getpass.getpass(f"{label} password: ")
                 async with async_sessionmaker(engine, expire_on_commit=False)() as db:
-                    user_id, created = await create_admin(db, args.email, password)
-                print(f"Administrator {'created' if created else 'already exists'}: {user_id}")
+                    user_id, created = await provision(db, args.email, password)
+                print(f"{label} {'created' if created else 'already exists'}: {user_id}")
         finally:
             await engine.dispose()
 

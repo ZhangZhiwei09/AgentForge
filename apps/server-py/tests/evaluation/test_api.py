@@ -10,7 +10,7 @@ from src.models.agent_evaluation import (
 )
 from src.models.base import Base
 
-USER = {"X-Test-Actor": "user"}
+ADMIN = {"X-Test-Actor": "admin"}
 TABLES = [
     AgentEvaluationSuite.__table__,
     AgentEvaluationCase.__table__,
@@ -34,7 +34,7 @@ async def test_evaluation_suite_case_crud_is_authenticated(evaluation_api):
     assert (await client.get("/api/evaluations/suites")).status_code == 401
     created = await client.post(
         "/api/evaluations/suites",
-        headers=USER,
+        headers=ADMIN,
         json={"name": "Agent smoke", "version": "2"},
     )
     assert created.status_code == 201, created.text
@@ -43,7 +43,7 @@ async def test_evaluation_suite_case_crud_is_authenticated(evaluation_api):
 
     case_response = await client.post(
         f"/api/evaluations/suites/{suite['id']}/cases",
-        headers=USER,
+        headers=ADMIN,
         json={
             "caseId": "hello",
             "question": "你好",
@@ -55,18 +55,18 @@ async def test_evaluation_suite_case_crud_is_authenticated(evaluation_api):
     assert case["expected"]["route"] == "CHAT"
     assert (await client.post(
         f"/api/evaluations/suites/{suite['id']}/cases",
-        headers=USER,
+        headers=ADMIN,
         json={"caseId": "hello", "question": "重复"},
     )).status_code == 409
 
     listed = await client.get(
         f"/api/evaluations/suites/{suite['id']}/cases",
-        headers=USER,
+        headers=ADMIN,
     )
     assert [item["caseId"] for item in listed.json()] == ["hello"]
     assert (await client.delete(
         f"/api/evaluations/cases/{case['id']}",
-        headers=USER,
+        headers=ADMIN,
     )).status_code == 200
     async with sessions() as db:
         assert await db.scalar(select(AgentEvaluationCase)) is None

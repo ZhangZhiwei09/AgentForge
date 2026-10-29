@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_current_user, get_db
+from src.api.deps import get_db, require_admin
 from src.schemas.agent_evaluation import (
     EvaluationCaseCreate,
     EvaluationRunCreate,
@@ -16,7 +16,7 @@ from src.services.agent_evaluation import AgentEvaluationService
 router = APIRouter(
     prefix="/api/evaluations",
     tags=["agent-evaluation"],
-    dependencies=[Depends(get_current_user)],
+    dependencies=[Depends(require_admin)],
 )
 Db = Annotated[AsyncSession, Depends(get_db)]
 

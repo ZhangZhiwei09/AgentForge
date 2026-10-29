@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.api.deps import get_current_user, get_db
+from src.api.deps import get_db, require_admin
 from src.schemas.knowledge_retrieval import (
     RegressionCaseInput,
     RegressionRunInput,
@@ -14,7 +14,7 @@ from src.schemas.knowledge_retrieval import (
 from src.services.knowledge_management import get_base
 from src.services.knowledge_regression import KnowledgeRegressionService
 
-router = APIRouter(prefix="/api/knowledge", tags=["knowledge"], dependencies=[Depends(get_current_user)])
+router = APIRouter(prefix="/api/knowledge", tags=["knowledge"], dependencies=[Depends(require_admin)])
 Db = Annotated[AsyncSession, Depends(get_db)]
 
 

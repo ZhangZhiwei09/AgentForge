@@ -2,10 +2,11 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.api.deps import get_current_user, get_db
+from src.config import settings
 from src.models.user import User
 from src.schemas.user import (
     ApiKeyRequest,
@@ -22,6 +23,8 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 @router.post("/signup", response_model=TokenResponse, status_code=201)
 async def signup(body: SignUpRequest, db: Annotated[AsyncSession, Depends(get_db)]):
+    if not settings.auth_signup_enabled:
+        raise HTTPException(403, "注册已关闭，请联系管理员创建账户")
     return await auth.sign_up(db, body.email, body.password)
 
 

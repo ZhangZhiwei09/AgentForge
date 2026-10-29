@@ -16,6 +16,7 @@ from src.models.knowledge import KnowledgeBase, KnowledgeChunk, KnowledgeDocumen
 from src.rag.types import KnowledgeSearchResult
 
 USER = {"X-Test-Actor": "user"}
+ADMIN = {"X-Test-Actor": "admin"}
 
 
 @pytest_asyncio.fixture
@@ -109,18 +110,20 @@ async def test_feedback_paging_filters_and_aggregate_counts(platform_api):
         assert (await client.post("/api/agent/chat/rate", headers=USER, json={
             "session_id": "own-session", "message_id": "answer", "rating": rating,
         })).status_code == 200
-    response = await client.get("/api/agent/chat/feedback?limit=2", headers=USER)
+    response = await client.get("/api/agent/chat/feedback?limit=2", headers=ADMIN)
     payload = response.json()
     assert payload["pagination"] == {"page": 1, "limit": 2, "total": 3, "totalPages": 2}
     assert payload["feedback"][0]["user_message"] == "如何退款？"
     assert payload["feedback"][0]["assistant_message"] == "参考退款指引"
-    negative = (await client.get("/api/agent/chat/feedback?type=negative", headers=USER)).json()
+    negative = (await client.get("/api/agent/chat/feedback?type=negative", headers=ADMIN)).json()
     assert negative["pagination"]["total"] == 2
-    analytics = (await client.get("/api/agent/chat/analytics", headers=USER)).json()
+    analytics = (await client.get("/api/agent/chat/analytics", headers=ADMIN)).json()
     assert analytics["total_conversations"] == 2
     assert analytics["total_messages"] == 3
     assert analytics["satisfaction_rate"] == 67 and analytics["total_ratings"] == 3
-    assert (await client.get("/api/agent/chat/feedback?page=0", headers=USER)).status_code == 422
+    assert (await client.get("/api/agent/chat/feedback?page=0", headers=ADMIN)).status_code == 422
+    assert (await client.get("/api/agent/chat/analytics", headers=USER)).status_code == 403
+    assert (await client.get("/api/agent/chat/feedback", headers=USER)).status_code == 403
     assert (await client.get("/api/agent/chat/analytics")).status_code == 401
     assert (await client.get("/api/agent/chat/feedback")).status_code == 401
 
@@ -177,7 +180,8 @@ async def test_prometheus_uses_route_templates_and_protects_metrics(platform_api
     client, _ = platform_api
     await client.get("/api/agent/chat/faq/private-doc-id")
     assert (await client.get("/api/metrics")).status_code == 401
-    response = await client.get("/api/metrics", headers=USER)
+    assert (await client.get("/api/metrics", headers=USER)).status_code == 403
+    response = await client.get("/api/metrics", headers=ADMIN)
     assert response.status_code == 200
     assert "http_requests_total" in response.text
     assert 'path="/api/agent/chat/faq/{document_id}"' in response.text

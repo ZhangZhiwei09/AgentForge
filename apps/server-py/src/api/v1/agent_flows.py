@@ -17,12 +17,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.agent.flows.diagnosis import diagnosis_events
 from src.agent.flows.schema import FlowDefinition, FlowModel, validate_definition
 from src.agent.flows.service import (
-    claim_diagnosis, create_run, execute_run, flow_dto, get_flow, require_valid, run_dto,
+    claim_diagnosis,
+    create_run,
+    execute_run,
+    flow_dto,
+    get_flow,
+    require_valid,
+    run_dto,
 )
 from src.agent.flows.templates import diagnosis_template
 from src.agent.tools.registry import tool_registry
 from src.agent.types import RouteContext
-from src.api.deps import get_current_user, get_db
+from src.api.deps import get_current_user, get_db, require_admin
 from src.api.v1.sse import _to_sse
 from src.config import settings
 from src.models.agent_flow import AgentFlow, AgentFlowRun
@@ -33,9 +39,7 @@ router = APIRouter(prefix="/api/agent-flows", tags=["agent-flows"])
 
 
 async def admin(user: User = Depends(get_current_user)) -> User:
-    if user.role != "admin":
-        raise HTTPException(403, "仅管理员可以管理 Agent 流程")
-    return user
+    return await require_admin(user)
 
 
 class CreateRequest(FlowModel):
