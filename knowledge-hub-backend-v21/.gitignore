@@ -1,0 +1,15 @@
+node_modules/
+.env
+dist/
+volumes/
+
+# Local document samples can contain personal or third-party content.
+/test-files/*
+!/test-files/*.json
+/tmp.md
+
+# Local environment overrides and generated reports.
+.env.*
+!.env.example
+/coverage/
+*.log
