@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentForge README Direction 01</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #10233f;
+        --muted: #60708a;
+        --line: #dce5f1;
+        --paper: #f7f9fc;
+        --white: #ffffff;
+        --blue: #2167e8;
+        --blue-soft: #eaf1ff;
+        --green: #1f9d72;
+        --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font: 15px/1.72 "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+      main { max-width: 1120px; margin: 0 auto; padding: 52px 54px 80px; }
+      .eyebrow {
+        color: var(--blue);
+        font: 700 12px/1.2 var(--mono);
+        letter-spacing: .08em;
+        text-transform: uppercase;
+      }
+      h1, h2, h3, p { margin-top: 0; }
+      h1 { margin: 12px 0 18px; font-size: 52px; line-height: 1.04; letter-spacing: -.04em; }
+      h2 { margin: 58px 0 16px; font-size: 25px; line-height: 1.2; letter-spacing: -.02em; }
+      h3 { margin: 0 0 8px; font-size: 16px; }
+      .lead { max-width: 700px; color: #43546f; font-size: 18px; line-height: 1.7; }
+      .meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 26px 0 38px;
+      }
+      .meta span {
+        padding: 5px 10px;
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        background: var(--white);
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .meta span:first-child { border-color: #bdd1fa; background: var(--blue-soft); color: var(--blue); }
+      .rule { height: 1px; background: var(--line); }
+      .showcase {
+        display: grid;
+        grid-template-columns: 1.25fr .75fr;
+        gap: 18px;
+        align-items: stretch;
+      }
+      figure { margin: 0; overflow: hidden; border: 1px solid var(--line); background: var(--white); }
+      figure img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+      .hero-shot { min-height: 365px; }
+      .side-shots { display: grid; gap: 18px; }
+      .side-shots figure { min-height: 173px; }
+      figcaption { padding: 10px 14px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+      .cap {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+      .status { color: var(--green); font: 700 11px var(--mono); }
+      .columns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+      .column { padding: 18px 18px 20px; border-top: 3px solid var(--blue); background: var(--white); }
+      .column p { margin-bottom: 0; color: var(--muted); }
+      .architecture { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+      .architecture > div { padding: 18px 20px; background: var(--white); border: 1px solid var(--line); }
+      code, pre { font-family: var(--mono); }
+      pre { margin: 0; padding: 18px; overflow: hidden; background: #10233f; color: #e7effd; font-size: 12px; line-height: 1.7; }
+      .steps { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 30px; }
+      .step { display: grid; grid-template-columns: 30px 1fr; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+      .step b { color: var(--blue); font-family: var(--mono); }
+      .note { padding: 16px 18px; border-left: 3px solid var(--green); background: #eef9f4; color: #315d50; }
+      .footer { margin-top: 62px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+      @media (max-width: 760px) {
+        main { padding: 30px 20px 54px; }
+        h1 { font-size: 40px; }
+        .showcase, .architecture, .columns, .steps { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">AgentForge / Evidence Desk</div>
+      <h1>面向企业故障排查的 AI 诊断工作台</h1>
+      <p class="lead">围绕问题诊断、知识证据和流程配置构建可运行的工作台。README 先让读者看见产品，再说明如何启动、验证和继续深入。</p>
+      <div class="meta">
+        <span>实验阶段</span><span>React + Vite</span><span>Python + FastAPI</span><span>知识检索 + Agent Runtime</span>
+      </div>
+      <div class="rule"></div>
+
+      <h2>预览</h2>
+      <div class="showcase">
+        <figure class="hero-shot">
+          <img src="../../apps/customer-service/design-demos/02-operator-workbench.png" alt="诊断对话与知识证据工作台" />
+          <figcaption class="cap"><span>诊断工作台：对话、证据与结论在同一条路径上</span><span class="status">● LIVE SURFACE</span></figcaption>
+        </figure>
+        <div class="side-shots">
+          <figure>
+            <img src="../../apps/customer-service/design-demos/01-focus-thread.png" alt="聚焦线程界面" />
+            <figcaption>问题上下文与快捷动作</figcaption>
+          </figure>
+          <figure>
+            <img src="../../apps/customer-service/design-demos/03-mobile-drawer.png" alt="移动端对话界面" />
+            <figcaption>窄屏诊断对话</figcaption>
+          </figure>
+        </div>
+      </div>
+
+      <h2>核心能力</h2>
+      <div class="columns">
+        <div class="column"><h3>诊断对话</h3><p>流式展示排查过程、知识引用和诊断结果，支持补充信息、工具调用与人工审批。</p></div>
+        <div class="column"><h3>知识与质量</h3><p>管理文档和分块，使用向量与关键词混合检索，并用命中测试与回归检查质量。</p></div>
+        <div class="column"><h3>Agent 流程</h3><p>统一管理路由流程与诊断流程，支持草稿、发布、激活、试运行和运行记录。</p></div>
+      </div>
+
+      <h2>运行结构</h2>
+      <div class="architecture">
+        <div>
+          <h3>工作台</h3>
+          <p><code>apps/customer-service</code> 负责诊断对话与证据展示；<code>apps/data-admin</code> 负责知识库、反馈和流程管理。</p>
+          <p><code>packages/sdk</code>、<code>packages/shared-types</code>、<code>packages/ui</code> 与 <code>packages/cui</code> 提供共享能力。</p>
+        </div>
+        <pre>apps/
+  customer-service/   # 诊断前端
+  data-admin/         # 管理端
+  server-py/          # API / Runtime / worker
+packages/
+  sdk/ shared-types/ ui/ cui/</pre>
+      </div>
+
+      <h2>快速开始</h2>
+      <div class="steps">
+        <div class="step"><b>01</b><span>安装 Node.js 20+、pnpm 9+、Python 3.12+、uv 与 Docker Desktop。</span></div>
+        <div class="step"><b>02</b><span>执行 <code>pnpm install</code>，进入 <code>apps/server-py</code> 执行 <code>uv sync --locked</code>。</span></div>
+        <div class="step"><b>03</b><span>复制 <code>.env.example</code>，配置 LLM API Key 与本地 PostgreSQL。</span></div>
+        <div class="step"><b>04</b><span>执行 <code>pnpm infra:up</code>、<code>pnpm db:migrate</code>、<code>pnpm db:check</code>。</span></div>
+      </div>
+      <pre style="margin-top: 18px;">pnpm dev
+# 诊断前端  http://localhost:5173
+# 管理端    http://localhost:5200
+# API       http://localhost:8000/docs</pre>
+
+      <div class="note" style="margin-top: 22px;">当前项目处于实验阶段，接口、数据模型和运行方式可能变化；仓库不附带真实业务数据或生产性能指标。</div>
+
+      <h2>深入文档</h2>
+      <p><code>docs/operations/development.md</code> · <code>apps/server-py/README.md</code> · <code>docs/architecture/routing.md</code> · <code>docs/operations/deployment.md</code></p>
+      <div class="footer">Direction 01 · 证据工作台 · 结构清晰、适合技术读者快速扫描</div>
+    </main>
+  </body>
+</html>

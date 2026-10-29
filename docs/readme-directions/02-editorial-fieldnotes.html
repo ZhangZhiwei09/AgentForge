@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AgentForge README Direction 02</title>
+    <style>
+      :root {
+        --ink: #171a21;
+        --muted: #68707c;
+        --paper: #f4f1eb;
+        --white: #fffdf9;
+        --blue: #2459c7;
+        --red: #d75842;
+        --line: #d7d0c5;
+        --serif: Georgia, "Songti SC", "STSong", serif;
+        --sans: "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+      * { box-sizing: border-box; }
+      body { margin: 0; background: var(--paper); color: var(--ink); font: 15px/1.8 var(--sans); }
+      main { max-width: 1160px; margin: 0 auto; padding: 38px 48px 80px; }
+      .topline { display: flex; justify-content: space-between; padding-bottom: 12px; border-bottom: 1px solid var(--ink); color: var(--muted); font-size: 12px; letter-spacing: .08em; }
+      .masthead { display: grid; grid-template-columns: 1.15fr .85fr; gap: 46px; padding: 76px 0 62px; align-items: end; }
+      h1, h2, h3, p { margin-top: 0; }
+      h1 { max-width: 730px; margin-bottom: 22px; font: 600 65px/.98 var(--serif); letter-spacing: -.045em; }
+      .deck { max-width: 620px; color: #4d535c; font-size: 20px; line-height: 1.7; }
+      .stamp { align-self: start; padding-top: 8px; color: var(--blue); font: 700 13px var(--sans); }
+      .stamp strong { display: block; margin-top: 18px; color: var(--ink); font: 600 27px/1.15 var(--serif); }
+      .blue-rule { height: 8px; background: var(--blue); }
+      .section-label { display: flex; align-items: baseline; gap: 12px; margin: 58px 0 20px; color: var(--blue); font: 700 12px var(--sans); letter-spacing: .12em; text-transform: uppercase; }
+      .section-label::after { content: ""; height: 1px; flex: 1; background: var(--line); }
+      h2 { margin-bottom: 22px; font: 600 34px/1.1 var(--serif); letter-spacing: -.025em; }
+      .gallery { display: grid; grid-template-columns: 1.45fr .75fr; gap: 24px; }
+      figure { margin: 0; background: var(--white); }
+      figure img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top left; }
+      .large { min-height: 395px; }
+      .small-stack { display: grid; gap: 24px; }
+      .small-stack figure { min-height: 185px; }
+      figcaption { padding: 12px 16px 15px; color: var(--muted); font-size: 12px; }
+      .pullquote { margin: 42px 0 0; padding: 22px 0 25px 26px; border-left: 5px solid var(--red); font: 600 25px/1.45 var(--serif); }
+      .feature-grid { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); }
+      .feature { min-height: 185px; padding: 20px 22px 26px 0; border-right: 1px solid var(--line); }
+      .feature + .feature { padding-left: 22px; }
+      .feature:last-child { border-right: 0; }
+      .feature b { display: block; margin-bottom: 20px; color: var(--red); font: 700 12px var(--sans); }
+      .feature h3 { margin-bottom: 8px; font: 600 22px/1.2 var(--serif); }
+      .feature p { margin-bottom: 0; color: var(--muted); }
+      .map { display: grid; grid-template-columns: .85fr 1.15fr; gap: 24px; align-items: stretch; }
+      .map-copy { padding: 22px; background: var(--white); }
+      .map-copy p { color: var(--muted); }
+      .tree { padding: 22px; background: #202735; color: #f8f0e7; font: 13px/1.8 "SFMono-Regular", Consolas, monospace; white-space: pre; }
+      .commands { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+      .command { padding: 20px; background: var(--white); border-top: 3px solid var(--blue); }
+      .command h3 { font: 600 21px/1.2 var(--serif); }
+      code { font-family: "SFMono-Regular", Consolas, monospace; }
+      pre { overflow: hidden; margin: 14px 0 0; padding: 15px; background: #202735; color: #f8f0e7; font: 12px/1.75 "SFMono-Regular", Consolas, monospace; }
+      .footer { display: flex; justify-content: space-between; gap: 20px; margin-top: 70px; padding-top: 16px; border-top: 1px solid var(--ink); color: var(--muted); font-size: 12px; }
+      @media (max-width: 760px) {
+        main { padding: 24px 20px 54px; }
+        .masthead, .gallery, .map, .commands, .feature-grid { grid-template-columns: 1fr; }
+        h1 { font-size: 46px; }
+        .feature, .feature + .feature { padding: 20px 0; border-right: 0; border-bottom: 1px solid var(--line); }
+        .feature:last-child { border-bottom: 0; }
+        .footer { display: block; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="topline"><span>AGENTFORGE / PROJECT NOTES</span><span>README · 2026</span></div>
+      <section class="masthead">
+        <div>
+          <h1>把故障排查变成一条可检查的证据链</h1>
+          <p class="deck">AgentForge 是一个面向企业场景的 AI 诊断工作台。它把问题、知识、工具调用和流程版本放到同一个可回放的工作面上。</p>
+        </div>
+        <div class="stamp">PROJECT NOTE 01<strong>诊断不是一句答案，而是问题如何被定位、解释和复现。</strong></div>
+      </section>
+      <div class="blue-rule"></div>
+
+      <div class="section-label">01 / See the work</div>
+      <h2>先看产品，再读架构</h2>
+      <div class="gallery">
+        <figure class="large"><img src="../../apps/customer-service/design-demos/02-operator-workbench.png" alt="运营工作台截图" /><figcaption>运营工作台：诊断对话、知识证据与人工确认处在同一上下文中。</figcaption></figure>
+        <div class="small-stack">
+          <figure><img src="../../apps/customer-service/design-demos/01-focus-thread.png" alt="聚焦线程截图" /><figcaption>聚焦线程：问题上下文与行动入口。</figcaption></figure>
+          <figure><img src="../../apps/customer-service/design-demos/03-mobile-drawer.png" alt="移动端截图" /><figcaption>移动端：窄屏下的连续诊断对话。</figcaption></figure>
+        </div>
+      </div>
+      <p class="pullquote">真正需要被展示的，是诊断结论背后的证据、检索质量和流程版本。</p>
+
+      <div class="section-label">02 / What it holds</div>
+      <h2>三个工作面</h2>
+      <div class="feature-grid">
+        <div class="feature"><b>01</b><h3>诊断对话</h3><p>流式展示排查过程、知识引用和诊断结果，支持补充信息、工具调用与人工审批。</p></div>
+        <div class="feature"><b>02</b><h3>知识与质量</h3><p>文档、分块、混合检索、命中测试与检索回归共同组成质量闭环。</p></div>
+        <div class="feature"><b>03</b><h3>Agent 流程</h3><p>从草稿到发布、激活、试运行和运行记录，流程本身也能被管理。</p></div>
+      </div>
+
+      <div class="section-label">03 / How it is arranged</div>
+      <h2>项目地图</h2>
+      <div class="map">
+        <div class="map-copy">
+          <p><code>apps/customer-service</code> 是诊断工作台，<code>apps/data-admin</code> 是管理端，<code>apps/server-py</code> 提供 API、Agent Runtime、知识库和 worker。</p>
+          <p>前端与共享组件继续使用 TypeScript；后端迁移到 Python，数据库迁移和管理脚本也由 Python 负责。</p>
+        </div>
+        <div class="tree">apps/
+  customer-service/   诊断对话
+  data-admin/         知识库与流程
+  server-py/          API / Runtime / worker
+packages/
+  sdk/ shared-types/ ui/ cui/</div>
+      </div>
+
+      <div class="section-label">04 / Start here</div>
+      <h2>从本地运行开始</h2>
+      <div class="commands">
+        <div class="command"><h3>安装与配置</h3><p>准备 Node.js 20+、pnpm 9+、Python 3.12+、uv、Docker Desktop 和一个 OpenAI 兼容 API Key。</p><pre>pnpm install
+cd apps/server-py
+uv sync --locked</pre></div>
+        <div class="command"><h3>启动工作台</h3><p>配置 <code>apps/server-py/.env</code> 后启动基础设施、数据库和三项服务。</p><pre>pnpm infra:up
+pnpm db:migrate
+pnpm db:check
+pnpm dev</pre></div>
+      </div>
+      <p style="margin-top: 20px; color: var(--muted);">诊断前端 <code>localhost:5173</code> · 管理端 <code>localhost:5200</code> · API 文档 <code>localhost:8000/docs</code></p>
+
+      <div class="section-label">05 / Read further</div>
+      <h2>深入文档</h2>
+      <p><code>docs/operations/development.md</code> · <code>apps/server-py/README.md</code> · <code>docs/architecture/routing.md</code> · <code>docs/operations/deployment.md</code></p>
+      <div class="footer"><span>当前处于实验阶段，生产使用前请补充业务认证、权限、数据隔离与监控配置。</span><span>Direction 02 · 编辑部式项目档案</span></div>
+    </main>
+  </body>
+</html>
