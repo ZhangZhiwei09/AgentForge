@@ -72,6 +72,8 @@ function createPythonDatabase() {
     };
   }
   return {
+    createAdmin: (email: string, password: string) =>
+      call<Row>("", "createAdmin", { data: { email, password } }),
     user: model<Row>("user"), conversation: model<Conversation>("conversation"), message: model<Message>("message"),
     agentFlow: model<Flow>("agentFlow"), agentFlowRun: model<Run>("agentFlowRun"),
     entryRouteFlow: model<Flow>("entryRouteFlow"), entryRouteFlowRun: model<Run>("entryRouteFlowRun"),
@@ -89,6 +91,7 @@ export function pythonDatabase() {
   let client: ReturnType<typeof createPythonDatabase> | undefined;
   const get = () => client ??= createPythonDatabase();
   return {
+    createAdmin: (email: string, password: string) => get().createAdmin(email, password),
     get user() { return get().user; },
     get conversation() { return get().conversation; },
     get message() { return get().message; },

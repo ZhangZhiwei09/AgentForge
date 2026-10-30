@@ -11,6 +11,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import ArgumentError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from src.database import create_admin
 from src.models.agent_flow import AgentFlow, AgentFlowRun
 from src.models.chat import Conversation, Message
 from src.models.entry_flow import EntryRouteFlow, EntryRouteFlowRun
@@ -81,6 +82,10 @@ async def cleanup_flow(db, flow_id):
 
 async def operation(db, request):
     action = request["action"]
+    if action == "createAdmin":
+        data = request["args"]["data"]
+        user_id, _ = await create_admin(db, data["email"], data["password"])
+        return {"id": user_id}
     if action == "cleanupFlow":
         await cleanup_flow(db, request["flowId"])
         return None

@@ -105,12 +105,14 @@ test("entry flows remain usable when the diagnosis listing fails", async ({ page
 
 test("ordinary users cannot load either flow collection or create flows", async ({ page }) => {
   const { requests } = await mockFlows(page, { role: "user" });
-  await page.goto("/admin/cs/agent-flows");
-  await expect(page.getByRole("alert")).toContainText("仅管理员");
-  await expect(page.getByLabel("流程类型", { exact: true })).toBeDisabled();
-  await expect(page.getByRole("button", { name: "新建诊断流程" })).toBeDisabled();
-  expect(requests.some((item) => item.path === "/api/agent-flows" || item.path === "/api/entry-route-flows")).toBeFalsy();
-  await page.goto("/admin/cs/entry-route-flows");
-  await expect(page.getByRole("alert")).toContainText("仅管理员");
-  await expect(page).toHaveURL(/\/admin\/cs\/entry-route-flows$/);
+  for (const path of ["/admin/cs/agent-flows", "/admin/cs/entry-route-flows"]) {
+    await page.goto(path);
+    await expect(page.getByRole("alert")).toHaveText("仅管理员可以访问管理页面");
+    await expect(page.getByRole("navigation", { name: "管理模块" })).toHaveCount(0);
+    await expect(page.getByLabel("流程类型", { exact: true })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /新建(诊断|一级)流程/ })).toHaveCount(0);
+    await expect(page).toHaveURL(new RegExp(`${path}$`));
+  }
+  expect(requests.filter((item) =>
+    item.path === "/api/agent-flows" || item.path === "/api/entry-route-flows")).toEqual([]);
 });

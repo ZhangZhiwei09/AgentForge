@@ -6,7 +6,9 @@ test("Python auth, knowledge ingestion, retrieval and persisted chat in real bro
   test.skip(process.env.AGENTFORGE_E2E_EMBEDDINGS !== "1", "Start the deterministic embedding HTTP fixture");
   const db = pythonDatabase();
   const email = `cutover-${randomUUID()}@example.test`;
+  const adminEmail = `cutover-admin-${randomUUID()}@example.test`;
   let userId: string | undefined;
+  let adminId: string | undefined;
   let baseId: string | undefined;
   let token: string | undefined;
   try {
@@ -15,16 +17,26 @@ test("Python auth, knowledge ingestion, retrieval and persisted chat in real bro
     expect(signup.status()).toBe(201);
     const registered = await signup.json();
     userId = registered.user.id;
-    await page.goto("/login");
-    await page.getByLabel("Email", { exact: true }).fill(email);
+    expect(registered.user.role).toBe("user");
+    const denied = await request.post("/api/knowledge/bases", {
+      headers: { Authorization: `Bearer ${registered.accessToken}` },
+      data: { name: "Unauthorized knowledge base" },
+    });
+    expect(denied.status()).toBe(403);
+    adminId = (await db.createAdmin(adminEmail, "cutover-password")).id;
+    await page.goto("/login?mode=admin&returnTo=/admin/cs/knowledge");
+    await page.getByLabel("Email", { exact: true }).fill(adminEmail);
     await page.getByLabel("Password", { exact: true }).fill("cutover-password");
-    await page.getByRole("button", { name: "Sign In", exact: true }).click();
-    await expect(page).toHaveURL(/\/admin/);
+    await page.getByRole("button", { name: "管理员登录", exact: true }).click();
+    await expect(page).toHaveURL((url) => url.pathname === "/admin/cs/knowledge");
     token = await page.evaluate(() => localStorage.getItem("accessToken") || undefined);
     const headers = { Authorization: `Bearer ${token}` };
-    expect((await request.get("/api/auth/me", { headers })).status()).toBe(200);
-    await page.goto("/admin/cs/knowledge");
-    await page.getByRole("button", { name: "创建知识库", exact: true }).click();
+    const identity = await request.get("/api/auth/me", { headers });
+    expect(identity.status()).toBe(200);
+    expect((await identity.json()).role).toBe("admin");
+    const createBase = page.getByRole("button", { name: "创建知识库", exact: true }).first();
+    await expect(createBase).toBeVisible();
+    await createBase.click();
     const name = `Python 验收 ${randomUUID().slice(0, 8)}`;
     await page.getByPlaceholder("输入知识库名称", { exact: true }).fill(name);
     const createdResponse = page.waitForResponse((response) =>
@@ -74,18 +86,23 @@ test("Python auth, knowledge ingestion, retrieval and persisted chat in real bro
       data: { refresh_token: registered.refreshToken },
     });
     expect(refreshed.ok()).toBeTruthy();
-    expect((await request.post("/api/auth/signout", { headers })).ok()).toBeTruthy();
+    expect((await request.post("/api/auth/signout", {
+      headers: { Authorization: `Bearer ${registered.accessToken}` },
+    })).ok()).toBeTruthy();
     expect((await request.post("/api/auth/refresh", { data: { refresh_token: (await refreshed.json()).refreshToken } })).status()).toBe(401);
   } finally {
     try {
       if (baseId && token) await request.delete(`/api/knowledge/bases/${baseId}`, { headers: { Authorization: `Bearer ${token}` } });
     } finally {
       try {
-        if (userId) {
-          const conversations = await db.conversation.findMany({ where: { userId }, select: { id: true } });
+        const userIds = [userId, adminId].filter((id): id is string => !!id);
+        if (userIds.length) {
+          const conversations = await db.conversation.findMany({
+            where: { userId: { in: userIds } }, select: { id: true },
+          });
           await db.routeClassificationLog.deleteMany({ where: { conversationId: { in: conversations.map((row) => row.id) } } });
-          await db.conversation.deleteMany({ where: { userId } });
-          await db.user.deleteMany({ where: { id: userId } });
+          await db.conversation.deleteMany({ where: { userId: { in: userIds } } });
+          await db.user.deleteMany({ where: { id: { in: userIds } } });
         }
       } finally {
         await db.$disconnect();
