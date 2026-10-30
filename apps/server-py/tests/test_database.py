@@ -8,6 +8,8 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import inspect, select, text
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -18,7 +20,9 @@ from src.models.base import Base
 from src.models.user import User
 from src.services.auth import sign_in, verify_password
 
-LATEST_HEAD = "20261013_support_tickets"
+LATEST_HEAD = ScriptDirectory.from_config(
+    Config(str(database.ROOT / "alembic.ini")),
+).get_current_head()
 
 
 @pytest.mark.asyncio
@@ -32,6 +36,7 @@ async def test_fresh_bootstrap_is_complete_and_idempotent(empty_postgres):
             schema=sync.dialect.default_schema_name,
         )))
         assert set(json.loads(BASELINE.read_text(encoding="utf-8"))["tables"]) <= names
+        assert set(Base.metadata.tables) <= names
         assert await connection.scalar(text("SELECT version_num FROM alembic_version")) == LATEST_HEAD
         assert not probe_logger.disabled
     async with async_sessionmaker(engine, expire_on_commit=False)() as db:
