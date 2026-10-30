@@ -386,7 +386,20 @@ async def _stream_diagnosis(
     context: RouteContext, actor_id: str, *, waiting: bool, cancel: asyncio.Event,
     registry=None,
 ) -> AsyncIterator:
+    from src.services.execution_policy import (
+        ToolExecutionContext,
+        build_execution_policy,
+    )
+
+    if context.execution_context is None:
+        context.execution_context = ToolExecutionContext(
+            actor_id=actor_id, conversation_id=context.conversation_id,
+            run_id=context.assistant_msg_id or str(uuid.uuid4()), policy=build_execution_policy(),
+        )
+    if context.execution_context.actor_id != actor_id:
+        raise HTTPException(403, "诊断执行身份不匹配")
     registry = registry or tool_registry
+    registry = registry.bind(context.execution_context)
     if not waiting:
         info = _check_info_sufficiency(context.user_message)
         if not info["sufficient"]:
@@ -398,6 +411,17 @@ async def _stream_diagnosis(
             yield StreamToken(message_id=context.assistant_msg_id, content=info["prompt_message"])
             yield StreamDone(message_id=context.assistant_msg_id, route="DIAGNOSIS", usage={})
             return
+    from src.services.monitoring import diagnosis_evidence_error
+    evidence_error = diagnosis_evidence_error(context.user_message)
+    if evidence_error:
+        yield StreamError(content=evidence_error)
+        yield StreamToken(message_id=context.assistant_msg_id, content=evidence_error)
+        yield StreamDone(message_id=context.assistant_msg_id, route="DIAGNOSIS", validated=False)
+        return
+    yield StreamToken(
+        message_id=context.assistant_msg_id,
+        content="当前为模拟监控演示，结论不能用于真实故障判定。\n\n",
+    )
     run, resume = await claim_diagnosis(context, actor_id, require_waiting=waiting)
     if waiting and (run is None or not resume):
         # Do not start a different run if a waiting run was cancelled concurrently.
@@ -566,15 +590,24 @@ async def _handle_chat(
                         events = _stream_safety(assistant_msg_id) if route == RouteName.SAFETY else _stream_human(assistant_msg_id, within_hours)
                     else:
                         query = decision.resolved_query or message
-                        # Insufficient diagnoses can ask for information without a provider.
-                        needs_model = route != RouteName.DIAGNOSIS or waiting or _check_info_sufficiency(query)["sufficient"]
+                        # Preflight rejection and clarification do not require a provider.
+                        needs_model = True
+                        if route == RouteName.DIAGNOSIS:
+                            from src.services.monitoring import diagnosis_evidence_error
+                            needs_model = (
+                                (waiting or _check_info_sufficiency(query)["sufficient"])
+                                and not diagnosis_evidence_error(query)
+                            )
                         if needs_model:
                             task_model = (task.runtime_state or {}).get("model") if task is not None and route == RouteName.TASK else None
                             resolved = resolve_model(task_model or model)
                             model_id, provider_name = resolved["model_id"], resolved["provider_name"]
                         prebuilt = []
                         if route in (RouteName.TASK, RouteName.CHAT):
-                            built = await ContextBuilder(db).build(actual_conv_id, query, exclude_message_id=user_message.id)
+                            from src.services.agent_tasks import TASK_PROMPT
+                            built = await ContextBuilder(
+                                db, system_prompt=TASK_PROMPT if route == RouteName.TASK else None,
+                            ).build(actual_conv_id, query, exclude_message_id=user_message.id)
                             prebuilt = built.messages
                         if decision.business_intent:
                             conv.intent = decision.business_intent
@@ -584,6 +617,14 @@ async def _handle_chat(
                             session_id=actual_session_id,
                             resolved_model=model_id, provider_name=provider_name,
                             assistant_msg_id=assistant_msg_id, intent=intent, prebuilt_messages=prebuilt,
+                        )
+                        from src.services.execution_policy import (
+                            ToolExecutionContext,
+                            build_execution_policy,
+                        )
+                        context.execution_context = ToolExecutionContext(
+                            actor_id=user.id, conversation_id=actual_conv_id,
+                            run_id=assistant_msg_id, policy=build_execution_policy(),
                         )
                         if route == RouteName.DIAGNOSIS:
                             events = _stream_diagnosis(context, user.id, waiting=waiting, cancel=cancel)
@@ -646,6 +687,8 @@ async def _handle_chat(
                                     metadata["diagnosis"]["status"] = "error"
                             elif isinstance(event, StreamDone):
                                 metadata["suggestions"] = event.suggestions or []
+                                if event.usage:
+                                    metadata["usage"] = event.usage
                                 if event.citation is not None:
                                     metadata["citation"] = event.citation
                                 if event.agent_session_id is not None:

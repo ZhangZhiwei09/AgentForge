@@ -5,7 +5,7 @@
 Python 新概念：async generator（async def + yield）
 - 用 async for 迭代 OpenAI 的流式响应
 - 用 yield 逐个产出 StreamChunk 给上层
-- finally 块确保无论流正常结束还是中断，都 yield done 片段
+- finally 关闭上游流；仅正常结束发送 done，中断继续传播给调用方
 """
 
 from collections.abc import AsyncIterator
@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from openai import APIConnectionError, AsyncOpenAI
 
 from src.schemas.chat import ChatMessage, ChatSyncResult, StreamChunk
+from src.services.usage import normalize_usage
 
 
 class OpenAIProvider:
@@ -84,11 +85,8 @@ class OpenAIProvider:
             raise RuntimeError(self._connection_message(model)) from exc
 
         return ChatSyncResult(
-            content=response.choices[0].message.content.strip() or "",
-            usage={
-                "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
-                "completion_tokens": response.usage.completion_tokens if response.usage else 0,
-            },
+            content=(response.choices[0].message.content or "").strip(),
+            usage=normalize_usage(response.usage.model_dump() if response.usage else None) or {},
         )
 
     # ---- 流式聊天 ----
@@ -109,7 +107,7 @@ class OpenAIProvider:
         3. async for 迭代 OpenAI 的 SSE 流
         4. 每个 chunk 分析 delta.content / delta.tool_calls
         5. yield token / tool_call 片段
-        6. finally 块 yield done（传递 token 用量）
+        6. 正常结束 yield done，finally 关闭底层流
 
         Python async generator 要点：
         - 函数体有 yield = 调用不执行，返回 async generator 对象
@@ -138,14 +136,21 @@ class OpenAIProvider:
         except APIConnectionError as exc:
             raise RuntimeError(self._connection_message(model)) from exc
 
-        prompt_tokens = 0
-        completion_tokens = 0
+        usage = None
+        finished = False
 
         # Tool call 累加器 —— OpenAI 的 tool_calls 是分片到达的
         tool_call_acc: dict[int, dict] = {}
 
         try:
             async for chunk in stream:
+                # The final usage frame can have an empty choices list.
+                if chunk.usage is not None:
+                    usage = normalize_usage(chunk.usage.model_dump())
+                    if not chunk.choices and usage is not None:
+                        finished = True
+                if chunk.choices and chunk.choices[0].finish_reason is not None:
+                    finished = True
                 delta = chunk.choices[0].delta if chunk.choices else None
 
                 if delta is None:
@@ -181,12 +186,9 @@ class OpenAIProvider:
                             del tool_call_acc[idx]
                     yield StreamChunk(type="token", content=delta.content)
 
-                # 部分 chunk 附带 usage 信息
-                if chunk.usage:
-                    prompt_tokens = chunk.usage.prompt_tokens or 0
-                    completion_tokens = chunk.usage.completion_tokens or 0
-
-            # Flush remaining tool calls at stream end
+            if not finished:
+                raise RuntimeError("Model stream ended without a completion marker")
+            # Flush remaining tool calls only after a complete response.
             for tc in tool_call_acc.values():
                 if tc["name"]:
                     yield StreamChunk(
@@ -198,12 +200,5 @@ class OpenAIProvider:
                         },
                     )
         finally:
-            # 无论流正常结束还是中断，都 yield done 片段
-            yield StreamChunk(
-                type="done",
-                usage={
-                    "prompt_tokens": prompt_tokens,
-                    "completion_tokens": completion_tokens,
-                    "total_tokens": prompt_tokens + completion_tokens,
-                },
-            )
+            await stream.close()
+        yield StreamChunk(type="done", usage=usage)

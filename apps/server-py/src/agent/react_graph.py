@@ -24,6 +24,7 @@ from langgraph.graph import END, StateGraph
 from src.agent.langchain_adapter import ProviderChatModel, _coerce_to_str
 from src.agent.state import AgentState
 from src.agent.tools.registry import ToolRegistry
+from src.services.usage import normalize_usage
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,7 @@ def build_react_graph(
         content_parts: list[str] = []
         tool_calls: list[dict] = []
         usage = None
+        response_metadata = {}
 
         obs = get_observability()
         gen_span = obs.create_generation(
@@ -106,18 +108,20 @@ def build_react_graph(
                     tool_calls = list(chunk.tool_calls)
                 if chunk.usage_metadata:
                     usage = chunk.usage_metadata
+                response_metadata.update(chunk.response_metadata)
 
             final_content = "".join(content_parts)
 
             gen_span.end(
                 output=final_content if not tool_calls else None,
+                usage=normalize_usage(usage, langchain=True),
                 metadata={
                     "tool_calls": [tc.get("name", "") for tc in tool_calls],
-                } if tool_calls else None,
+                    "usage_source": response_metadata.get("usage_source", "unavailable"),
+                },
             )
-        except Exception:
-            gen_span.end(output=None)
-            raise
+        finally:
+            gen_span.end()
 
         # langchain_core 1.5.1 下 AIMessage(tool_calls=None) 会触发 pydantic
         # ValidationError（tool_calls 必须是 list）。空 list 语义等价且合法。
@@ -125,6 +129,7 @@ def build_react_graph(
             content=final_content,
             tool_calls=tool_calls,
             usage_metadata=usage,
+            response_metadata=response_metadata,
         )
 
         next_state = {

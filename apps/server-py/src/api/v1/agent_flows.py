@@ -27,13 +27,15 @@ from src.agent.flows.service import (
 )
 from src.agent.flows.templates import diagnosis_template
 from src.agent.tools.registry import tool_registry
-from src.agent.types import RouteContext
+from src.agent.types import RouteContext, StreamToken
 from src.api.deps import get_current_user, get_db, require_admin
 from src.api.v1.sse import _to_sse
 from src.config import settings
 from src.models.agent_flow import AgentFlow, AgentFlowRun
 from src.models.chat import Conversation
 from src.models.user import User
+from src.services.execution_policy import ToolExecutionContext, build_execution_policy
+from src.services.monitoring import diagnosis_evidence_error
 
 router = APIRouter(prefix="/api/agent-flows", tags=["agent-flows"])
 
@@ -99,7 +101,14 @@ async def runtime_diagnose(body: DiagnoseRequest, db: AsyncSession = Depends(get
     conversation = await db.get(Conversation, body.conversation_id)
     if conversation is None:
         raise HTTPException(404, "会话不存在；请确认两套后端使用同一业务数据库")
+    actor = await db.get(User, conversation.user_id)
+    if actor is None:
+        raise HTTPException(403, "会话所属用户不可用")
     context = RouteContext(**body.model_dump(), intent="diagnosis")
+    context.execution_context = ToolExecutionContext(
+        actor_id=actor.id, conversation_id=conversation.id,
+        run_id=str(uuid.uuid4()), policy=build_execution_policy(),
+    )
     # Preserve preflight for new diagnoses, but never block a waiting run's supplement.
     waiting = await db.scalar(select(AgentFlowRun.id).where(
         AgentFlowRun.conversation_id == conversation.id,
@@ -107,7 +116,7 @@ async def runtime_diagnose(body: DiagnoseRequest, db: AsyncSession = Depends(get
     ))
     if not waiting:
         from src.agent.diagnosis.route_agent import _check_info_sufficiency
-        from src.agent.types import ClarificationNeeded, StreamDone, StreamToken
+        from src.agent.types import ClarificationNeeded, StreamDone
         info = _check_info_sufficiency(body.user_message)
         if not info["sufficient"]:
             async def clarification():
@@ -119,10 +128,20 @@ async def runtime_diagnose(body: DiagnoseRequest, db: AsyncSession = Depends(get
                 yield StreamToken(message_id=body.assistant_msg_id, content=info["prompt_message"])
                 yield StreamDone(message_id=body.assistant_msg_id, route="DIAGNOSIS", usage={})
             return StreamingResponse(_to_sse(clarification()), media_type="text/event-stream")
+    evidence_error = diagnosis_evidence_error(body.user_message)
+    if evidence_error:
+        raise HTTPException(503, evidence_error)
     run, resume = await claim_diagnosis(context, conversation.user_id)
     if run is None:
         raise HTTPException(409, "未启用诊断流程")
     async def public_events():
+        async def mock_notice():
+            yield StreamToken(
+                message_id=body.assistant_msg_id,
+                content="当前为模拟监控演示，结论不能用于真实故障判定。\n\n",
+            )
+        async for frame in _to_sse(mock_notice()):
+            yield frame
         async with aclosing(
             diagnosis_events(run, context, tool_registry, asyncio.Event(), resume=resume),
         ) as stream:
@@ -234,12 +253,21 @@ async def test_run(
 ):
     flow = await get_flow(db, flow_id, locked=True)
     check_revision(flow, body.revision)
+    evidence_error = diagnosis_evidence_error(body.message)
+    if evidence_error:
+        raise HTTPException(503, evidence_error)
     run = await create_run(db, flow, user.id, None, test=True)
     context = RouteContext(user_message=body.message, conversation_id=f"test-{run.id}", intent="diagnosis")
+    context.execution_context = ToolExecutionContext(
+        actor_id=user.id, conversation_id=context.conversation_id,
+        run_id=run.id, policy=build_execution_policy(),
+    )
 
     async def events():
         async with aclosing(execute_run(run, context, tool_registry, asyncio.Event())) as stream:
             async for event in stream:
+                if event["type"] == "flow_started":
+                    event = {**event, "evidenceSource": "mock"}
                 yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
     return StreamingResponse(events(), media_type="text/event-stream")
 

@@ -28,6 +28,7 @@ from collections.abc import AsyncIterator
 from src.agent.checkpoint import get_checkpointer
 from src.agent.langchain_adapter import ProviderChatModel, _coerce_to_str
 from src.agent.react_graph import build_react_graph
+from src.agent.state import AgentState
 from src.agent.tools.registry import ToolRegistry, tool_registry
 from src.agent.types import (
     RouteContext,
@@ -39,6 +40,7 @@ from src.agent.types import (
     StreamToken,
 )
 from src.providers.registry import get_provider, resolve_model
+from src.services.usage import add_usage, normalize_usage
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +122,7 @@ class AgentExecutor:
         """
         assistant_msg_id = context.assistant_msg_id
         resolved_model = context.resolved_model
+        usage_total = {}
 
         # ── 发送 meta ──
         yield StreamMeta(
@@ -133,6 +136,13 @@ class AgentExecutor:
         )
 
         try:
+            registry = self._registry
+            if context.execution_context is not None:
+                registry = registry.bind(context.execution_context)
+            if registry.context is None:
+                raise RuntimeError("Agent execution requires a server-owned policy context")
+            if registry.context.conversation_id != context.conversation_id:
+                raise RuntimeError("Agent execution conversation does not match its policy context")
             # ── 解析 Provider + Model ──
             resolved = resolve_model(resolved_model)
             provider = get_provider(resolved["provider_name"])
@@ -140,15 +150,15 @@ class AgentExecutor:
 
             # ── 获取工具定义 ──
             # 注册中心在此 init（幂等），确保工具就绪
-            self._registry.init()
-            tool_defs = self._to_openai_tools(self._registry.get_definitions())
+            registry.init()
+            tool_defs = self._to_openai_tools(registry.get_definitions())
 
             # ── 构建 LangChain 模型适配器 ──
             model = ProviderChatModel(
                 provider=provider,
                 model_name=model_id,
                 temperature=0.7,
-                max_tokens=4096,
+                max_tokens=min(4096, registry.context.policy.max_tokens),
             )
 
             effective_system_prompt = (
@@ -164,10 +174,10 @@ class AgentExecutor:
             graph = build_react_graph(
                 model=model,
                 tool_defs=tool_defs,
-                registry=self._registry,
+                registry=registry,
                 conversation_id=context.conversation_id,
                 checkpointer=checkpointer,
-                max_iterations=self._max_iterations,
+                max_iterations=min(self._max_iterations, registry.context.policy.max_iterations),
             )
 
             # ── 初始状态 ──
@@ -220,6 +230,10 @@ class AgentExecutor:
 
                 elif kind == "on_chat_model_end":
                     output = event["data"]["output"]
+                    usage_total = add_usage(
+                        usage_total, normalize_usage(getattr(output, "usage_metadata", None), langchain=True),
+                        getattr(output, "response_metadata", {}).get("usage_source", "reported"),
+                    )
                     if self._structured_output:
                         pending_tool_calls = bool(getattr(output, "tool_calls", None))
                         final_answer = ""
@@ -235,12 +249,7 @@ class AgentExecutor:
 
                 elif kind == "on_tool_end":
                     tool_name = event.get("name", "unknown")
-                    tool_output = event["data"].get("output", "")
-                    logger.info(
-                        "Tool executed: %s, output preview: %.100s",
-                        tool_name,
-                        str(tool_output),
-                    )
+                    logger.info("Tool executed: %s", tool_name)
                 elif self._structured_output and kind == "on_chain_end" and event.get("name") == "tools":
                     result = event["data"].get("output", {})
                     for message in result.get("messages", []) if isinstance(result, dict) else []:
@@ -263,9 +272,10 @@ class AgentExecutor:
             # ── Done ──
             yield StreamDone(
                 message_id=assistant_msg_id,
-                usage={},
+                usage=usage_total,
                 route=self.route.value,
                 fallback_used=not final_answer_collected or not bool(final_answer),
+                validated=final_answer_collected and bool(final_answer),
             )
 
         except Exception as exc:
@@ -278,9 +288,10 @@ class AgentExecutor:
                 await asyncio.sleep(0)
             yield StreamDone(
                 message_id=assistant_msg_id,
-                usage={},
+                usage=usage_total,
                 route=self.route.value,
                 fallback_used=True,
+                validated=False,
             )
 
     # ── 工具方法 ──────────────────────────────────────────

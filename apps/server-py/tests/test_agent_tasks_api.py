@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from src.agent.tools.base import RegisteredTool, RiskLevel, ToolDefinition, ToolFunction
 from src.agent.tools.registry import ToolRegistry
+from src.config import settings
 from src.models.agent_session import AgentApproval, AgentSession
 from src.models.chat import Conversation, Message
 from src.schemas.chat import StreamChunk
@@ -72,6 +73,10 @@ async def task_api(entry_api, monkeypatch):
     execute = AsyncMock(return_value={"status": "success", "output": "saved"})
     registry = ToolRegistry()
     registry._initialized = True
+    # Explicitly authorize synthetic adapters, never the production file tools.
+    monkeypatch.setattr(settings, "agent_allowed_tools", [
+        "search_knowledge_base", "write_file", "read_file",
+    ])
     for name, approve in [("write_file", True), ("read_file", False)]:
         registry.register(RegisteredTool(
             definition=ToolDefinition(function=ToolFunction(name=name, description="测试工具")),

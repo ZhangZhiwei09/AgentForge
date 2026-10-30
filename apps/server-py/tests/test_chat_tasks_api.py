@@ -14,7 +14,7 @@ from src.agent.tools.base import RegisteredTool
 from src.agent.tools.builtins.search_knowledge import search_knowledge_tool
 from src.api.v1 import chat
 from src.models.agent_session import AgentApproval, AgentSession
-from src.models.chat import Message
+from src.models.chat import ConversationMemory, Message
 from src.rag.types import KnowledgeSearchResult
 from src.services import agent_tasks, chat_tasks, citations
 from tests import test_agent_tasks_api as task_tests
@@ -62,6 +62,8 @@ async def test_chat_consultation_uses_graph_and_saves_one_guarded_answer(chat_ta
     assert cards[-1][0]["docId"] == "real-doc" and cards[-1][0]["scoreType"] == "rrf"
     assert stream[-1]["agent_session_id"]
     assert stream[-1]["task_status"] == "completed"
+    assert stream[-1]["usage"]["total_tokens"] == 120
+    assert stream[-1]["usage"]["source"] == "reported"
     assert stream[-1]["citation"]["coverageRate"] == 1
     assert [event["step"]["status"] for event in stream if event["type"] == "trace_step"] == ["running", "done"]
     async with sessions() as db:
@@ -70,6 +72,7 @@ async def test_chat_consultation_uses_graph_and_saves_one_guarded_answer(chat_ta
         saved = next(row for row in rows if row.role == "assistant")
         assert saved.id == stream[0]["message_id"]
         assert saved.msg_metadata["citations"] == cards[-1]
+        assert saved.msg_metadata["usage"] == stream[-1]["usage"]
         session = await db.get(AgentSession, stream[-1]["agent_session_id"])
         assert session.status == "completed"
         assert session.runtime_state["tokens_used"] > 0
@@ -77,6 +80,21 @@ async def test_chat_consultation_uses_graph_and_saves_one_guarded_answer(chat_ta
     assert any("[1] 网络排查" in str(message) for message in request["messages"])
     retrieval.assert_awaited_once()
     execute.assert_not_awaited()
+
+
+async def test_chat_task_preserves_history_summary(chat_task_api):
+    client, sessions, provider, _, _, _ = chat_task_api
+    async with sessions() as db:
+        db.add(ConversationMemory(
+            id="summary", conversation_id="conv", summary="SYNTHETIC_PRIOR_INCIDENT_FACT_42",
+        ))
+        await db.commit()
+    provider.responses.append(answer("继续排查"))
+    await send(client)
+    assert any(
+        "SYNTHETIC_PRIOR_INCIDENT_FACT_42" in str(message.content)
+        for message in provider.requests[0]["messages"]
+    )
 
 
 @pytest.mark.asyncio

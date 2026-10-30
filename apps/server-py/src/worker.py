@@ -12,6 +12,7 @@ if __name__ == "__main__":
     configure_environment()
 
 from src.jobs.ingestion import WorkerSettings
+from src.observability.privacy import install_log_redaction
 
 
 class IngestionWorker(Worker):
@@ -29,6 +30,7 @@ class IngestionWorker(Worker):
 
 
 if __name__ == "__main__":
+    install_log_redaction()
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     IngestionWorker(**get_kwargs(WorkerSettings), handle_signals=sys.platform != "win32").run()

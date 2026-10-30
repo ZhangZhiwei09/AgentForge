@@ -10,6 +10,7 @@ from src.agent import executor as module
 from src.agent.executor import AgentExecutor
 from src.agent.tools.registry import tool_registry
 from src.agent.types import RouteContext, StreamError, StreamToken
+from src.services.execution_policy import ToolExecutionContext, build_execution_policy
 
 
 async def execute_events(monkeypatch, events, *, structured=True):
@@ -25,7 +26,12 @@ async def execute_events(monkeypatch, events, *, structured=True):
     executor = AgentExecutor(
         registry=tool_registry.filter([]), checkpoint=False, structured_output=structured,
     )
-    return [event async for event in executor.execute(RouteContext(user_message="test"))]
+    context = RouteContext(user_message="test", conversation_id="test")
+    context.execution_context = ToolExecutionContext(
+        actor_id="test-user", conversation_id="test", run_id="test-run",
+        policy=build_execution_policy(requested_tools=[]),
+    )
+    return [event async for event in executor.execute(context)]
 
 
 def token(text):

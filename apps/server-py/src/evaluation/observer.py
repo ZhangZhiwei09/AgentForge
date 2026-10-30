@@ -22,6 +22,16 @@ class ObservedToolRegistry:
     def init(self) -> None:
         self._registry.init()
 
+    @property
+    def context(self):
+        return self._registry.context
+
+    def bind(self, context):
+        return ObservedToolRegistry(self._registry.bind(context), self._observer)
+
+    def filter(self, names: list[str]):
+        return ObservedToolRegistry(self._registry.filter(names), self._observer)
+
     def get_definitions(self, enabled_tools: list[str] | None = None):
         return self._registry.get_definitions(enabled_tools)
 

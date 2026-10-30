@@ -8,18 +8,18 @@ import pytest
 from fastapi import HTTPException
 from langgraph.checkpoint.memory import InMemorySaver
 
+from src.agent.executor import AgentExecutor
 from src.agent.flows.runtime import agent_order, parse_output, run_flow
 from src.agent.flows.schema import FlowEdge, FlowNode, ValueRef, validate_definition
 from src.agent.flows.service import redact
 from src.agent.flows.templates import diagnosis_template
-from src.agent.executor import AgentExecutor
 from src.agent.tools.registry import ToolRegistry, tool_registry
 from src.agent.types import RouteContext, StreamError, StreamToken
 from src.api.v1.agent_flows import admin, check_revision
 
 
 @pytest.fixture
-def definition():
+def definition(monitoring_demo):
     return diagnosis_template()
 
 

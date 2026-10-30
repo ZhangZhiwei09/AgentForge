@@ -11,7 +11,7 @@ from src.rag.splitter import estimate_tokens
 
 class TaskGuardConfig(BaseModel):
     max_tokens: int = Field(default=50000, ge=1000)
-    max_cost_cents: float = Field(default=200, ge=1)
+    max_cost_cents: float = Field(default=200, ge=1, allow_inf_nan=False)
     allowed_tools: list[str] = Field(default_factory=list)
     denied_tools: list[str] = Field(default_factory=list)
     pii_detection_enabled: bool = True
@@ -39,6 +39,10 @@ _PII = [
 
 def model_rates(model: str) -> tuple[float, float]:
     return next((rate for name, rate in _RATES.items() if model.startswith(name)), (0.1, 0.5))
+
+
+def model_rate_source(model: str) -> str:
+    return "configured_estimate" if any(model.startswith(name) for name in _RATES) else "fallback_estimate"
 
 
 def sanitize_response(content: str, config: TaskGuardConfig) -> tuple[str, bool]:

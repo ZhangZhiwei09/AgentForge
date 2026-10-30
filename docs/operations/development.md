@@ -64,6 +64,14 @@ For deterministic ingestion acceptance, set API `EMBEDDING_API_KEY=fixture`,
 it does not measure real embedding quality. Disable external Elasticsearch/MinIO
 for this isolated test run, and leave chat model keys empty.
 
+Set `MONITORING_MODE=mock` explicitly on this isolated acceptance API to expose
+the sample trace tool required by flow publishing tests. Keep the normal and
+production defaults disabled. Mock mode only serves known sample IDs such as
+`abc123`; unknown IDs produce no evidence. Optional live-model diagnosis tests
+also require `MONITORING_MODE=mock` in the browser-test terminal and retain their
+separate live-model flags. They validate orchestration using synthetic evidence,
+not real incident diagnosis.
+
 Set these variables in the browser-test terminal:
 `AGENTFORGE_E2E_DATABASE_URL`, `JWT_SECRET`, `AGENT_FLOW_ADMIN_URL=http://localhost:5200`,
 and `AGENTFORGE_E2E_EMBEDDINGS=1`, then run:

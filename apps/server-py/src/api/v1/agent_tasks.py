@@ -32,6 +32,7 @@ from src.services.agent_tasks import (
     session_dto,
     stream_task,
 )
+from src.services.execution_policy import build_execution_policy
 
 router = APIRouter(tags=["agent-tasks"])
 Db = Annotated[AsyncSession, Depends(get_db)]
@@ -75,6 +76,7 @@ def task_response(db: AsyncSession, session: AgentSession, state: dict) -> Strea
 @router.post("/api/agent/run")
 async def run_task(body: AgentRunRequest, actor: Actor, db: Db):
     await owned_conversation(db, body.conversation_id, actor.id)
+    policy = build_execution_policy(body.guard_config, body.tools, body.max_iterations)
     history = list(await db.scalars(select(Message).where(
         Message.conversation_id == body.conversation_id, Message.role.in_(["user", "assistant"]),
         Message.type == "text",
@@ -95,8 +97,8 @@ async def run_task(body: AgentRunRequest, actor: Actor, db: Db):
     messages.append(HumanMessage(content=body.task))
     runtime = {
         "version": 1, "messages": messages_to_dict(messages), "iteration_count": 0,
-        "max_iterations": body.max_iterations, "model": body.model, "tools": body.tools or None,
-        "guard": (body.guard_config or TaskGuardConfig()).model_dump(),
+        "max_iterations": policy.max_iterations, "model": body.model, "tools": list(policy.tools),
+        "guard": policy.guard_config().model_dump(), "execution_policy": policy.model_dump(),
         "tokens_used": 0, "cost_cents_used": 0, "pause_kind": None,
     }
     session = AgentSession(

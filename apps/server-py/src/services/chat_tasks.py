@@ -9,7 +9,6 @@ from langchain_core.messages import HumanMessage, SystemMessage, messages_to_dic
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.agent.task_guard import TaskGuardConfig
 from src.agent.types import (
     RouteContext,
     StreamCitations,
@@ -21,7 +20,9 @@ from src.agent.types import (
 from src.models.agent_session import AgentApproval, AgentSession
 from src.services.agent_tasks import TASK_PROMPT, claim_resume, stream_task
 from src.services.citations import citation_cards, source_context
+from src.services.execution_policy import build_execution_policy
 from src.services.knowledge_retrieval import result_dto, retrieval_service
+from src.services.usage import task_usage_summary
 
 
 async def paused_chat_task(db: AsyncSession, conversation_id: str) -> AgentSession | None:
@@ -64,13 +65,17 @@ async def stream_chat_task(db: AsyncSession, context: RouteContext):
     else:
         messages = list(context.prebuilt_messages) or [HumanMessage(content=context.user_message)]
         if messages and isinstance(messages[0], SystemMessage):
-            messages[0] = SystemMessage(content=TASK_PROMPT)
+            # ContextBuilder already received the task prompt; keep its history summary.
+            if not str(messages[0].content).startswith(TASK_PROMPT):
+                messages.insert(0, SystemMessage(content=TASK_PROMPT))
         else:
             messages.insert(0, SystemMessage(content=TASK_PROMPT))
+        policy = build_execution_policy()
         runtime = {
             "version": 1, "messages": messages_to_dict(messages), "iteration_count": 0,
-            "max_iterations": 10, "model": context.resolved_model, "provider": context.provider_name,
-            "tools": None, "guard": TaskGuardConfig().model_dump(),
+            "max_iterations": policy.max_iterations, "model": context.resolved_model, "provider": context.provider_name,
+            "tools": list(policy.tools), "guard": policy.guard_config().model_dump(),
+            "execution_policy": policy.model_dump(),
             "tokens_used": 0, "cost_cents_used": 0, "pause_kind": None, "chat": True,
             "verify_citations": context.intent == "consultation",
         }
@@ -131,6 +136,7 @@ async def stream_chat_task(db: AsyncSession, context: RouteContext):
                     yield StreamToken(content="任务执行失败，请稍后重试。", message_id=context.assistant_msg_id)
         yield StreamDone(
             message_id=context.assistant_msg_id, route="TASK", validated=not failed,
+            usage=task_usage_summary(session.runtime_state or {}),
             agent_session_id=session.id, task_status="paused" if paused else "failed" if failed else "completed",
             citation=(session.runtime_state or {}).get("citation_report"),
         )

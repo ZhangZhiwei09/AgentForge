@@ -30,7 +30,9 @@ from src.api.deps import get_chat_user, get_db
 from src.api.v1 import chat
 from src.models.user import User
 from src.providers.registry import resolve_model
+from src.services.execution_policy import ToolExecutionContext, build_execution_policy
 from src.services.knowledge_retrieval import result_dto, retrieval_service
+from src.services.monitoring import diagnosis_evidence_error
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["diagnosis"])
@@ -69,7 +71,19 @@ async def diagnosis_query(
             status="needs_clarification", answer=build_clarification_content(intent, missing, entities)[0],
         )
         return response
-    registry = tool_registry.filter(["query_trace_log", "search_knowledge_base"])
+    if body.sessionId:
+        await chat._find_conversation(db, body.sessionId, conv_type="agent_chat", user_id=actor.id)
+    evidence_error = diagnosis_evidence_error(body.query)
+    if evidence_error:
+        response.update(status="failed", answer=evidence_error, warnings=[evidence_error])
+        return response
+    conversation = await chat._get_or_create_conversation(db, actor.id, body.sessionId)
+    execution_context = ToolExecutionContext(
+        actor_id=actor.id, conversation_id=conversation.id, run_id=str(uuid.uuid4()),
+        policy=build_execution_policy(),
+    )
+    registry = tool_registry.bind(execution_context).filter(["query_trace_log", "search_knowledge_base"])
+    response["warnings"].append("模拟监控数据，仅用于演示，不能用于真实故障判定。")
     service = retrieval_service(db)
 
     async def search(args, run_id):
@@ -102,12 +116,12 @@ async def diagnosis_query(
     registry.register(replace(trace_tool, execute=trace))
     cancel = asyncio.Event()
     try:
-        conversation = await chat._get_or_create_conversation(db, actor.id, body.sessionId)
         resolved = resolve_model(None)
         context = RouteContext(
             conversation_id=conversation.id, session_id=conversation.session_id, user_message=body.query,
             assistant_msg_id=str(uuid.uuid4()), resolved_model=resolved["model_id"],
             provider_name=resolved["provider_name"], intent="diagnosis",
+            execution_context=execution_context,
         )
         async with asyncio.timeout(180):
             async with aclosing(chat._stream_diagnosis(

@@ -35,7 +35,7 @@ from tests.browser_db import require_test_url
 
 @pytest.mark.skipif(os.environ.get("AGENT_FLOW_INTEGRATION") != "1", reason="Requires local PostgreSQL")
 @pytest.mark.asyncio
-async def test_flow_api_publish_run_and_resume(monkeypatch):
+async def test_flow_api_publish_run_and_resume(monkeypatch, monitoring_demo):
     require_test_url(settings.database_url)
     actor_id, conversation_id = str(uuid.uuid4()), str(uuid.uuid4())
     actor = User(id=actor_id, email=f"agent-flow-test-{actor_id}@example.test", role="admin")
@@ -44,7 +44,7 @@ async def test_flow_api_publish_run_and_resume(monkeypatch):
     outputs = {
         "frontend": {
             "conclusion": "需要后端排查", "evidence": [], "need_escalation": True,
-            "context_for_backend": {"traceId": "integration-trace"}, "escalation_reason": "backend",
+            "context_for_backend": {"traceId": "abc123"}, "escalation_reason": "backend",
         },
         "backend": {"conclusion": "后端证据不足", "evidence": []},
         "leader": {
@@ -152,7 +152,7 @@ async def test_flow_api_publish_run_and_resume(monkeypatch):
 
             payload = json.dumps({
                 "conversationId": conversation_id, "assistantMsgId": "message-1",
-                "userMessage": "traceId: integration-trace H5 ACE_TIMEOUT，核身失败请排查",
+                "userMessage": "traceId: abc123 H5 ACE_TIMEOUT，核身失败请排查",
             })
             assert (await client.post("/api/agent-flows/runtime/diagnose", content=payload)).status_code == 401
             tampered = payload.replace("message-1", "message-tampered")

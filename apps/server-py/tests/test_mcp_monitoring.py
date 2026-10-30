@@ -5,14 +5,16 @@ import json
 import pytest
 from pydantic import ValidationError
 
+from src.config import settings
 from src.mcp.monitoring.repository import (
-    DEFAULT_TRACE,
     MOCK_TRACE_DATASET,
     is_known_trace,
     lookup_trace,
 )
 from src.mcp.monitoring.schemas import SCHEMA_VERSION, TraceLog
 from src.mcp.monitoring.tools import handle_query_trace_log
+
+pytestmark = pytest.mark.usefixtures("monitoring_demo")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -21,7 +23,7 @@ from src.mcp.monitoring.tools import handle_query_trace_log
 
 
 def test_dataset_covers_all_scenarios():
-    """数据集覆盖 6 个失败/正常场景 + 未命中默认值，且 abc123 为算法超时别名。"""
+    """数据集覆盖 6 个失败/正常场景，且 abc123 为算法超时别名。"""
     expected_keys = {
         "abc123",
         "trace_algo_timeout",
@@ -56,10 +58,9 @@ def test_lookup_trace_known(trace_id, error_code, stage):
     assert len(trace.spans) > 0
 
 
-def test_lookup_trace_unknown_returns_default():
+def test_lookup_trace_unknown_returns_no_evidence():
     trace = lookup_trace("does_not_exist")
-    assert trace.traceId == "does_not_exist"
-    assert trace.errorCode == "UNKNOWN_VERIFY_FAIL"
+    assert trace is None
     assert is_known_trace("does_not_exist") is False
 
 
@@ -103,10 +104,19 @@ def test_handle_query_trace_log_returns_envelope():
     assert isinstance(data["conclusion"], str)
 
 
-def test_handle_query_trace_log_default_for_unknown():
+def test_handle_query_trace_log_unknown_has_no_synthetic_evidence():
     envelope = json.loads(handle_query_trace_log("unknown_trace_xyz"))
-    assert envelope["data"]["errorCode"] == "UNKNOWN_VERIFY_FAIL"
-    assert envelope["data"]["traceId"] == "unknown_trace_xyz"
+    assert envelope["data"] is None
+    assert envelope["status"] == "not_found"
+    assert envelope["source"] == "mock"
+
+
+@pytest.mark.parametrize("mode,environment", [("disabled", "test"), ("mock", "production")])
+def test_monitoring_cannot_return_demo_evidence_when_disabled(mode, environment, monkeypatch):
+    monkeypatch.setattr(settings, "monitoring_mode", mode)
+    monkeypatch.setattr(settings, "app_env", environment)
+    envelope = json.loads(handle_query_trace_log("abc123"))
+    assert envelope["data"] is None and envelope["status"] == "unavailable"
 
 
 def test_handle_query_trace_log_rejects_empty():
@@ -114,8 +124,3 @@ def test_handle_query_trace_log_rejects_empty():
         handle_query_trace_log("")
     with pytest.raises(ValueError):
         handle_query_trace_log("   ")
-
-
-def test_default_trace_has_conclusion():
-    assert isinstance(DEFAULT_TRACE.conclusion, str)
-    assert len(DEFAULT_TRACE.conclusion) > 0

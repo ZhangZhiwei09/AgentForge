@@ -220,7 +220,10 @@ test("ordinary user has no entry tab and cannot open editor directly", async ({ 
 });
 
 test("optional live entry dispatch, diagnosis HITL and L2 continuation", async ({ request, page }, info) => {
-  test.skip(process.env.AGENT_ENTRY_FLOW_LIVE_MODEL !== "1", "Set AGENT_ENTRY_FLOW_LIVE_MODEL=1 for configured model validation");
+  test.skip(
+    process.env.AGENT_ENTRY_FLOW_LIVE_MODEL !== "1" || process.env.MONITORING_MODE !== "mock",
+    "Set AGENT_ENTRY_FLOW_LIVE_MODEL=1 and run the API and test with MONITORING_MODE=mock",
+  );
   test.setTimeout(240000);
   const created = await request.post("/api/entry-route-flows", { headers: auth(), data: { name: "一级路由模型验收" } });
   const entry: EntryRouteFlowDTO = await created.json(); flowIds.push(entry.id);
@@ -247,7 +250,7 @@ test("optional live entry dispatch, diagnosis HITL and L2 continuation", async (
     expect(response.ok()).toBeTruthy();
     return (await response.text()).split(/\r?\n/).filter((line) => line.startsWith("data: {")).map((line) => JSON.parse(line.slice(6)));
   };
-  const events = await chat("traceId: entry-live-123，H5 刷脸失败，ACE_TIMEOUT，请诊断。");
+  const events = await chat("traceId: abc123，H5 刷脸失败，ACE_TIMEOUT，请诊断。本次为模拟演示。");
   expect(events.filter((event) => event.type === "error")).toEqual([]);
   expect(events.some((event) => event.type === "diagnosis_waiting_input")).toBeTruthy();
   const meta = events.find((event) => event.type === "meta");

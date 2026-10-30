@@ -74,6 +74,7 @@ jobs:
       - name: Start Python and frontends
         env:
           EMBEDDING_API_KEY: browser-embedding-fixture
+          MONITORING_MODE: mock
         run: |
           (cd apps/server-py && uv run --locked python -m tests.embedding_stub) > /tmp/agentforge-embedding.log 2>&1 &
           pnpm server:dev > /tmp/agentforge-api.log 2>&1 &

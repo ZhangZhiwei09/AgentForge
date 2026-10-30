@@ -201,15 +201,52 @@ the old Alembic chain alone depended on externally created Prisma tables.
 All existing business and retained workflow/team tables are registered in
 SQLAlchemy. PostgreSQL bootstrap/adoption tests: `tests/test_database.py`.
 
-All twelve original operational tools are available from the shared registry:
-knowledge/trace lookup, time, calculation, web search/fetch, HTTP requests,
-workspace file read/write/search, read-only SQL and persistent support tickets.
-Set `FILE_WORKSPACE` to restrict file tools and `TAVILY_API_KEY` for web search.
-Unconfigured search reports no results rather than inventing sources.
-File writes, HTTP requests and ticket creation require the existing task
-approval lifecycle; transient diagnosis graphs cannot execute those mutations.
-Empty diagnosis tool lists grant no tools. Tools open a shared circuit after
-five failures, then allow one recovery probe after sixty seconds.
+The shared registry exposes knowledge search, time and calculation by default.
+Each execution binds a server-owned actor, conversation, run and effective
+policy. `AGENT_ALLOWED_TOOLS` can restrict available tools. Web search/fetch,
+general HTTP requests, file read/write/search, raw SQL and support-ticket
+creation remain disabled at dispatch, even if added to that setting. Setting
+`FILE_WORKSPACE` or `TAVILY_API_KEY` does not re-enable these adapters; scoped
+adapters and their authorization boundaries need separate implementation.
+
+Task limits default to `AGENT_MAX_TOKENS=50000`,
+`AGENT_MAX_COST_CENTS=200` and `AGENT_MAX_ITERATIONS=20`. Client requests can
+only tighten these limits, and resumes preserve stricter saved limits and
+usage. An explicit `tools=[]` grants no tools. PII and content filters are
+mandatory for task execution. These limits do not yet provide complete
+cumulative accounting across diagnosis agents or evaluation runs.
+
+Streaming usage includes terminal usage-only frames and preserves reported
+zero counts. Missing usage is estimated and labeled separately. CHAT and TASK
+completion events carry usage; persisted task records retain per-call reported,
+estimated or reserved totals. A model call reserves its estimated input and
+maximum output in the task runtime before dispatch. Interrupted calls retain
+that conservative amount with `uncertain=true`; they are not silently treated
+as free. Successful usage is saved before response parsing. Cost values use the
+versioned internal `legacy-estimate-v1` rate table, including a labeled fallback
+for unknown models; they are estimates, not provider invoices.
+
+Observability input/output/metadata copies are recursively redacted and bounded.
+The API and worker redact common credentials and personal identifiers in log
+messages and exception chains. Uvicorn access logs retain their formatter
+contract and omit URL query parameters. Connection logs expose only scheme/host/port;
+tool output previews are omitted. Original tool inputs and application data are
+unchanged. Langfuse uses sanitized updates and balanced context lifecycles.
+Regression tests: `tests/test_observability_privacy.py` and
+`tests/test_usage_metering.py`.
+
+`MONITORING_MODE=disabled` is the default: real monitoring is not integrated,
+so diagnosis reports unavailable evidence. Local demonstrations may explicitly
+set `MONITORING_MODE=mock`; known demo traces are marked as simulated and
+unknown traces return `not_found`, without replacement evidence. Production
+rejects mock mode. Existing flows that depend on unavailable tools fail
+validation or execution until their capabilities are supported.
+
+Mutation-risk tools require approval regardless of their optional approval
+flag; transient diagnosis graphs cannot perform those mutations. Tools open a
+shared circuit after five failures, then allow one recovery probe after sixty
+seconds. Policy regressions: `tests/test_execution_policy.py` and
+`tests/test_diagnosis_policy.py`.
 
 HTTP moving-window limits default to 60 requests per minute per peer address.
 Configure `RATE_LIMIT_MAX`, `RATE_LIMIT_ENABLED` and

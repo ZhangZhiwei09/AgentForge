@@ -17,6 +17,7 @@ from src.rag.types import KnowledgeSearchResult
 
 USER = {"X-Test-Actor": "user"}
 ADMIN = {"X-Test-Actor": "admin"}
+pytestmark = pytest.mark.usefixtures("monitoring_demo")
 
 
 @pytest_asyncio.fixture
@@ -211,8 +212,13 @@ async def test_public_diagnosis_reuses_runtime_and_scopes_knowledge(platform_api
 
     async def runtime(context, actor_id, *, waiting, cancel, registry):
         calls.append((context, actor_id))
-        await registry.execute("search_knowledge_base", {"query": "trace"}, "test")
-        await registry.execute("query_trace_log", {"traceId": "abc123"}, "test")
+        assert registry.context.actor_id == actor_id
+        denied = await registry.get("search_knowledge_base").execute({"query": "trace"}, "foreign")
+        assert denied["status"] == "failed"
+        retrieve.assert_not_awaited()
+        assert (await registry.execute("db_query", {"sql": "SELECT 1"}, context.conversation_id))["status"] == "failed"
+        await registry.execute("search_knowledge_base", {"query": "trace"}, context.conversation_id)
+        await registry.execute("query_trace_log", {"traceId": "abc123"}, context.conversation_id)
         from src.agent.types import StreamToken
         yield StreamToken(content="已定位链路异常")
 
@@ -252,4 +258,4 @@ async def test_public_diagnosis_reports_runtime_failure(platform_api, monkeypatc
     response = await client.post("/api/diagnosis/query", headers=USER, json={"query": "traceId=abc123"})
     assert response.status_code == 200
     assert response.json()["status"] == "failed"
-    assert response.json()["warnings"] == ["runtime unavailable"]
+    assert "runtime unavailable" in response.json()["warnings"]

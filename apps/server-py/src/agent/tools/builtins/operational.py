@@ -110,7 +110,9 @@ async def calculate(body: CalculationInput, run_id: str):
 
 
 def workspace_path(path: str) -> Path:
-    root = Path(settings.file_workspace or ".").resolve()
+    if not settings.file_workspace:
+        raise ValueError("An isolated file workspace must be explicitly configured")
+    root = Path(settings.file_workspace).resolve()
     candidate = Path(path)
     if candidate.is_absolute():
         raise ValueError("A relative workspace path is required")
@@ -144,7 +146,7 @@ async def file_write(body: WriteInput, run_id: str):
 
 
 async def file_search(body: FileSearchInput, run_id: str):
-    root = Path(settings.file_workspace or ".").resolve()
+    root = workspace_path(".")
     pattern = Path(body.pattern)
     if pattern.is_absolute() or ".." in pattern.parts:
         raise ValueError("Search pattern must remain inside the workspace")

@@ -120,7 +120,10 @@ test("real API, node editing, publishing and desktop/mobile layout", async ({ pa
 });
 
 test("optional live model smoke run", async ({ page, request }, testInfo) => {
-  test.skip(process.env.AGENT_FLOW_LIVE_MODEL !== "1", "Set AGENT_FLOW_LIVE_MODEL=1 to call the configured model");
+  test.skip(
+    process.env.AGENT_FLOW_LIVE_MODEL !== "1" || process.env.MONITORING_MODE !== "mock",
+    "Set AGENT_FLOW_LIVE_MODEL=1 and run the API and test with MONITORING_MODE=mock",
+  );
   test.setTimeout(240000);
   const headers = { Authorization: `Bearer ${token}` };
   const detail = await request.get(`/api/agent-flows/${flowId}`, { headers });
@@ -133,7 +136,7 @@ test("optional live model smoke run", async ({ page, request }, testInfo) => {
   await page.addInitScript((token) => localStorage.setItem("accessToken", token), token);
   await page.goto(`/admin/cs/agent-flows/${flowId}`);
   await page.getByRole("button", { name: "试运行", exact: true }).click();
-  await page.getByRole("textbox", { name: "试运行问题" }).fill("traceId: live-test-123，H5 刷脸失败返回 ACE_TIMEOUT。当前没有监控数据，请明确证据不足。");
+  await page.getByRole("textbox", { name: "试运行问题" }).fill("traceId: abc123，H5 刷脸失败返回 ACE_TIMEOUT。本次为模拟演示，未提供工具证据时请明确证据不足。");
   await page.getByRole("button", { name: "运行", exact: true }).click();
   await expect(page.locator(".af-run-controls")).toContainText("完成", { timeout: 190000 });
   await expect(page.locator('.react-flow__node[data-id="frontend"]')).toBeInViewport();
@@ -158,7 +161,7 @@ test("optional live model smoke run", async ({ page, request }, testInfo) => {
   expect(publish.ok()).toBeTruthy();
   const production = await request.post("/api/agent/chat", {
     headers: { Authorization: `Bearer ${userToken}` },
-    data: { message: "traceId: live-test-123，H5 刷脸失败返回 ACE_TIMEOUT，请定位核身失败原因。当前没有监控数据，请明确证据不足。" },
+    data: { message: "traceId: abc123，H5 刷脸失败返回 ACE_TIMEOUT，请定位核身失败原因。本次为模拟演示，未提供工具证据时请明确证据不足。" },
     timeout: 200000,
   });
   expect(production.ok()).toBeTruthy();

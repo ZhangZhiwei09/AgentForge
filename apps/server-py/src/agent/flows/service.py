@@ -23,6 +23,9 @@ from src.agent.types import RouteContext
 from src.config import settings
 from src.db import async_session
 from src.models.agent_flow import AgentFlow, AgentFlowRun
+from src.models.user import User
+from src.services.execution_policy import ToolExecutionContext, build_execution_policy
+from src.services.monitoring import diagnosis_evidence_error
 
 
 def flow_dto(flow: AgentFlow) -> dict:
@@ -132,7 +135,6 @@ async def execute_run(
     cancel: asyncio.Event, *, resume: bool = False,
 ) -> AsyncIterator[dict]:
     definition = FlowDefinition.model_validate(run.snapshot)
-    require_valid(definition, registry)
     started = time.monotonic()
     previous_duration = run.duration_ms
     records = dict(run.records)
@@ -155,6 +157,21 @@ async def execute_run(
 
     watcher = asyncio.create_task(watch_cancel())
     try:
+        async with async_session() as db:
+            actor = await db.get(User, run.actor_id)
+        if actor is None:
+            raise RuntimeError("流程执行用户不可用")
+        current_context = ToolExecutionContext(
+            actor_id=actor.id, conversation_id=context.conversation_id,
+            run_id=run.id, policy=build_execution_policy(),
+        )
+        if context.execution_context is not None:
+            registry = registry.bind(context.execution_context)
+        registry = registry.bind(current_context)
+        require_valid(definition, registry)
+        evidence_error = diagnosis_evidence_error(context.user_message)
+        if evidence_error:
+            raise RuntimeError(evidence_error)
         remaining = definition.limits.timeout_ms - previous_duration
         if remaining <= 0:
             raise TimeoutError("流程总执行预算已用完")

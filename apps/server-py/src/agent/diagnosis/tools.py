@@ -13,7 +13,7 @@ from src.agent.tools.base import (
     ToolDefinition,
     ToolFunction,
 )
-from src.mcp.monitoring.repository import is_known_trace, lookup_trace
+from src.services.monitoring import lookup_monitoring_trace
 
 
 async def _query_trace_log(args: dict, run_id: str) -> dict:
@@ -31,15 +31,16 @@ async def _query_trace_log(args: dict, run_id: str) -> dict:
             "error": "请提供 traceId 以查询链路日志。",
         }
 
-    trace = lookup_trace(trace_id.strip())
-    output = trace.model_dump()
-
-    if not is_known_trace(trace_id.strip()):
-        output["_note"] = (
-            f'未命中模拟数据（traceId="{trace_id.strip()}"），返回默认通用结果。'
-        )
-
-    return {"status": "success", "output": output}
+    evidence = lookup_monitoring_trace(trace_id)
+    if evidence["status"] != "found":
+        return {
+            "status": "failed", "evidence_status": evidence["status"],
+            "source": evidence["source"], "error": "未获得监控证据，不能据此确认故障根因。",
+        }
+    return {
+        "status": "success", "source": "mock", "evidence_status": "found",
+        "output": {**evidence["trace"], "_source": "mock", "_note": "模拟数据，仅用于演示，不能用于真实故障判定。"},
+    }
 
 
 query_trace_log_tool = RegisteredTool(

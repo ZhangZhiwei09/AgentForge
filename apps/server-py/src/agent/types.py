@@ -10,7 +10,10 @@ Python 新概念：
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from src.services.execution_policy import ToolExecutionContext
 
 
 class RouteName(StrEnum):
@@ -197,6 +200,7 @@ class RouteContext:
     assistant_msg_id: str = ""
     intent: str = ""
     injected_memories: list = field(default_factory=list)
+    execution_context: "ToolExecutionContext | None" = None
 
 
 # ═══════════════════════════════════════════════════════════

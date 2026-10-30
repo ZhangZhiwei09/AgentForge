@@ -9,6 +9,10 @@ x-backend: &backend
     AUTH_SIGNUP_ENABLED: "false"
     ANONYMOUS_CHAT_ENABLED: "false"
     PUBLIC_FAQ_ENABLED: "false"
+    MONITORING_MODE: "disabled"
+    AGENT_MAX_TOKENS: ${AGENT_MAX_TOKENS:-50000}
+    AGENT_MAX_COST_CENTS: ${AGENT_MAX_COST_CENTS:-200}
+    AGENT_MAX_ITERATIONS: ${AGENT_MAX_ITERATIONS:-20}
     DATABASE_URL: ${DATABASE_URL:?Set the PostgreSQL URL using host db and port 5432}
     REDIS_URL: ${REDIS_URL:?Set the authenticated Redis URL using host redis}
     JWT_SECRET: ${JWT_SECRET:?Set a stable JWT signing secret}

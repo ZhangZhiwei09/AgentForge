@@ -86,7 +86,7 @@ INITIALIZE_PAYLOAD = {
 
 
 @pytest.mark.asyncio
-async def test_full_protocol_flow():
+async def test_full_protocol_flow(monitoring_demo):
     server, port, task = await _start_server()
     try:
         transport = httpx.AsyncHTTPTransport()

@@ -8,11 +8,11 @@ setup() 自动创建 checkpoints 表（幂等）。
 
 import logging
 
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from psycopg_pool import AsyncConnectionPool
 
-from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
 from src.config import settings
+from src.observability.privacy import safe_connection_label
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ async def get_checkpointer(
     if _pool is None:
         # 将 asyncpg URL 转为 psycopg 格式（psycopg 不识别 +asyncpg 后缀）
         conn_string = settings.database_url.replace("+asyncpg", "")
-        logger.info("Creating checkpoint connection pool for %s", conn_string)
+        logger.info("Creating checkpoint connection pool for %s", safe_connection_label(conn_string))
         # autocommit=True：langgraph 的 saver.setup() 含 CREATE INDEX CONCURRENTLY，
         # 该语句不能在事务块内执行（psycopg3 默认隐式事务）。checkpoint 写入均为
         # 单语句（CTE），autocommit 语义安全。

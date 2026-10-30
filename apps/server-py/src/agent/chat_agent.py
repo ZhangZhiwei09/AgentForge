@@ -23,6 +23,7 @@ from src.agent.types import (
     StreamToken,
 )
 from src.providers.registry import get_provider, resolve_model
+from src.services.usage import add_usage, normalize_usage
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,7 @@ class ChatAgent:
         """
         assistant_msg_id = context.assistant_msg_id
         resolved_model = context.resolved_model
+        usage_total = {}
 
         yield StreamMeta(
             message_id=assistant_msg_id,
@@ -122,6 +124,10 @@ class ChatAgent:
             answer_collected = ""
 
             async for chunk in model.astream(messages, tools=None):
+                usage_total = add_usage(
+                    usage_total, normalize_usage(chunk.usage_metadata, langchain=True),
+                    chunk.response_metadata.get("usage_source", "reported"),
+                )
                 if chunk.content:
                     text = _coerce_to_str(chunk.content)
                     if text:
@@ -139,7 +145,7 @@ class ChatAgent:
 
             yield StreamDone(
                 message_id=assistant_msg_id,
-                usage={},
+                usage=usage_total,
                 route=self.route.value,
                 fallback_used=not bool(answer_collected),
             )
@@ -153,7 +159,8 @@ class ChatAgent:
                 await asyncio.sleep(0)
             yield StreamDone(
                 message_id=assistant_msg_id,
-                usage={},
+                usage=usage_total,
                 route=self.route.value,
                 fallback_used=True,
+                validated=False,
             )

@@ -14,9 +14,13 @@ import asyncio
 import json as _json
 import logging
 from collections.abc import AsyncIterator
+from contextlib import aclosing
 from typing import Any
 
-from langchain_core.callbacks import AsyncCallbackManagerForLLMRun, CallbackManagerForLLMRun
+from langchain_core.callbacks import (
+    AsyncCallbackManagerForLLMRun,
+    CallbackManagerForLLMRun,
+)
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
@@ -31,6 +35,7 @@ from langchain_core.messages.tool import ToolCall
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 
 from src.schemas.chat import ChatMessage
+from src.services.usage import estimate_usage, normalize_usage
 
 logger = logging.getLogger(__name__)
 
@@ -167,6 +172,7 @@ class ProviderChatModel(BaseChatModel):
         content_parts: list[str] = []
         tool_calls: list[ToolCall] = []
         usage: UsageMetadata | None = None
+        response_metadata: dict = {}
 
         for chunk in chunks:
             msg = chunk.message
@@ -179,9 +185,8 @@ class ProviderChatModel(BaseChatModel):
                 tool_calls = _rebuild_tool_calls_from_chunks(msg.tool_call_chunks)
             if msg.usage_metadata:
                 usage = msg.usage_metadata
-            # response_metadata 合并
             if msg.response_metadata:
-                pass  # 保留最后一个
+                response_metadata.update(msg.response_metadata)
 
         final_content = "".join(content_parts)
         # langchain_core 1.5.1 下 AIMessage(tool_calls=None) 触发 pydantic
@@ -190,6 +195,7 @@ class ProviderChatModel(BaseChatModel):
             content=final_content,
             tool_calls=tool_calls,
             usage_metadata=usage,
+            response_metadata=response_metadata,
         )
 
         return ChatResult(
@@ -228,33 +234,38 @@ class ProviderChatModel(BaseChatModel):
         tools = kwargs.get("tools")  # OpenAI function calling 格式，直接透传
 
         accumulated_tool_calls: list[dict] = []
-        prompt_tokens = 0
-        completion_tokens = 0
+        usage = None
+        output: list[str] = []
 
-        async for chunk in self.provider.stream_chat(
+        async with aclosing(self.provider.stream_chat(
             messages=provider_msgs,
             model=self.model_name,
             system_prompt=self.system_prompt,
             temperature=self.temperature,
             max_tokens=self.max_tokens,
             tools=tools,
-        ):
-            if chunk.type == "token" and chunk.content:
-                # 实时文本 token → 立即 yield
-                if run_manager:
-                    await run_manager.on_llm_new_token(chunk.content)
-                yield ChatGenerationChunk(
-                    message=AIMessageChunk(content=chunk.content),
-                )
+        )) as stream:
+            async for chunk in stream:
+                if chunk.type == "token" and chunk.content:
+                    output.append(chunk.content)
+                    if run_manager:
+                        await run_manager.on_llm_new_token(chunk.content)
+                    yield ChatGenerationChunk(message=AIMessageChunk(content=chunk.content))
+                elif chunk.type == "tool_call" and chunk.tool_call:
+                    accumulated_tool_calls.append(chunk.tool_call)
+                elif chunk.type == "done":
+                    usage = normalize_usage(chunk.usage)
 
-            elif chunk.type == "tool_call" and chunk.tool_call:
-                # 累积完整的 tool_call（Provider 已做跨 chunk 拼接）
-                accumulated_tool_calls.append(chunk.tool_call)
-
-            elif chunk.type == "done":
-                if chunk.usage:
-                    prompt_tokens = chunk.usage.get("prompt_tokens", 0)
-                    completion_tokens = chunk.usage.get("completion_tokens", 0)
+        usage_source = "reported" if usage is not None else "estimated"
+        if usage is None:
+            full_messages = [message.model_dump(exclude_none=True) for message in provider_msgs]
+            if self.system_prompt:
+                full_messages.insert(0, {"role": "system", "content": self.system_prompt})
+            usage = estimate_usage(full_messages, tools, "".join(output), accumulated_tool_calls)
+        lc_usage = UsageMetadata(
+            input_tokens=usage["prompt_tokens"], output_tokens=usage["completion_tokens"],
+            total_tokens=usage["total_tokens"],
+        )
 
         # ── 流结束：产出累积的 tool_calls + usage ──
         if accumulated_tool_calls:
@@ -276,23 +287,17 @@ class ProviderChatModel(BaseChatModel):
                 message=AIMessageChunk(
                     content="",
                     tool_calls=lc_tool_calls,
-                    usage_metadata=UsageMetadata(
-                        input_tokens=prompt_tokens,
-                        output_tokens=completion_tokens,
-                        total_tokens=prompt_tokens + completion_tokens,
-                    ) if prompt_tokens or completion_tokens else None,
+                    usage_metadata=lc_usage,
+                    response_metadata={"usage_source": usage_source},
                 ),
             )
-        elif prompt_tokens or completion_tokens:
+        else:
             # 无 tool_calls 但有 usage → 产出 usage-only chunk
             yield ChatGenerationChunk(
                 message=AIMessageChunk(
                     content="",
-                    usage_metadata=UsageMetadata(
-                        input_tokens=prompt_tokens,
-                        output_tokens=completion_tokens,
-                        total_tokens=prompt_tokens + completion_tokens,
-                    ),
+                    usage_metadata=lc_usage,
+                    response_metadata={"usage_source": usage_source},
                 ),
             )
 

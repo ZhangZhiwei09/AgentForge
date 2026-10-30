@@ -12,11 +12,19 @@ Phase C V1 埋点（共 4 处）:
     - Langfuse SDK 未安装 → try/except ImportError，降级到 Noop
 """
 
+# SDK failures are isolated here so telemetry cannot interrupt application work.
+# ruff: noqa: BLE001
+
 import logging
-from contextlib import contextmanager
-from typing import Any
+from typing import Any, Self
 
 from src.config import settings
+from src.observability.privacy import (
+    install_log_redaction,
+    redact_observation,
+    safe_connection_label,
+)
+from src.services.usage import normalize_usage
 
 logger = logging.getLogger(__name__)
 
@@ -57,27 +65,35 @@ class ObservabilitySpan:
         try:
             kwargs: dict[str, Any] = {}
             if output is not None:
-                kwargs["output"] = output
-            if usage:
+                kwargs["output"] = redact_observation(output)
+            normalized = normalize_usage(usage)
+            if normalized is not None:
                 kwargs["usage_details"] = {
-                    "input": usage.get("prompt_tokens", 0),
-                    "output": usage.get("completion_tokens", 0),
-                    "total": usage.get("total_tokens", 0),
+                    "input": normalized["prompt_tokens"],
+                    "output": normalized["completion_tokens"],
+                    "total": normalized["total_tokens"],
                 }
             if metadata:
-                kwargs["metadata"] = metadata
-            self._obs.end(**kwargs)
+                kwargs["metadata"] = redact_observation(metadata)
+            if kwargs:
+                self._obs.update(**kwargs)
         except Exception as exc:
-            logger.debug("Langfuse end() failed: %s", exc)
+            logger.debug("Langfuse update failed error_type=%s", type(exc).__name__)
+        finally:
+            try:
+                self._obs.end()
+            except Exception as exc:
+                logger.debug("Langfuse end failed error_type=%s", type(exc).__name__)
 
 
 class ObservabilityTrace:
     """顶层 Trace 封装（Langfuse 4.x 的 context manager observation）。"""
 
-    def __init__(self, ctx_manager: Any, observation: Any) -> None:
+    def __init__(self, ctx_manager: Any, observation: Any = None) -> None:
         self._ctx = ctx_manager
         self._obs = observation
         self._entered = False
+        self._ended = False
 
     @property
     def trace_id(self) -> str | None:
@@ -86,40 +102,56 @@ class ObservabilityTrace:
         except Exception:
             return None
 
-    def __enter__(self) -> "ObservabilityTrace":
-        self._ctx.__enter__()
-        self._entered = True
+    def __enter__(self) -> Self:
+        if not self._entered and not self._ended:
+            try:
+                self._obs = self._ctx.__enter__()
+                self._entered = True
+            except Exception as exc:
+                self._ended = True
+                logger.debug("Langfuse trace enter failed error_type=%s", type(exc).__name__)
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         if self._entered:
             try:
-                self._ctx.__exit__(*args)
+                if args and args[0] is not None:
+                    try:
+                        self._obs.update(
+                            level="ERROR", status_message="Application execution failed",
+                        )
+                    except Exception as exc:
+                        logger.debug("Langfuse error update failed error_type=%s", type(exc).__name__)
+                # The SDK otherwise captures raw exception text and its cause chain.
+                self._ctx.__exit__(None, None, None)
             except Exception as exc:
-                logger.debug("Langfuse trace exit failed: %s", exc)
+                logger.debug("Langfuse trace exit failed error_type=%s", type(exc).__name__)
             self._entered = False
+            self._ended = True
 
-    async def __aenter__(self) -> "ObservabilityTrace":
+    async def __aenter__(self) -> Self:
         self.__enter__()
         return self
 
-    async def __aexit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: object) -> None:
         self.__exit__(*args)
 
     def end(self, output: Any = None, metadata: dict[str, Any] | None = None) -> None:
-        """手动结束 Trace（如果没用 context manager）。"""
+        """更新并提前关闭已进入的 Trace；后续 context exit 保持幂等。"""
         if not self._entered:
             return
         try:
             kwargs: dict[str, Any] = {}
             if output is not None:
-                kwargs["output"] = output
+                kwargs["output"] = redact_observation(output)
             if metadata:
-                kwargs["metadata"] = metadata
-            self._obs.end(**kwargs)
+                kwargs["metadata"] = redact_observation(metadata)
+            if kwargs:
+                self._obs.update(**kwargs)
         except Exception as exc:
-            logger.debug("Langfuse trace end() failed: %s", exc)
-        self._entered = False
+            logger.debug("Langfuse trace update failed error_type=%s", type(exc).__name__)
+        finally:
+            self.__exit__(None, None, None)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -134,6 +166,7 @@ class LangfuseProvider:
     """
 
     def __init__(self) -> None:
+        install_log_redaction()
         self._client = None
         self._init_client()
 
@@ -151,22 +184,23 @@ class LangfuseProvider:
             return
 
         try:
-            from langfuse import Langfuse  # noqa: PLC0415
+            from langfuse import Langfuse
 
             self._client = Langfuse(
                 public_key=settings.langfuse_public_key,
                 secret_key=settings.langfuse_secret_key,
                 base_url=settings.langfuse_base_url,
+                mask=redact_observation,
             )
             logger.info(
-                "Langfuse initialized: %s", settings.langfuse_base_url
+                "Langfuse initialized: %s", safe_connection_label(settings.langfuse_base_url)
             )
         except ImportError:
             logger.warning(
                 "Langfuse SDK not installed. Observability disabled."
             )
         except Exception as exc:
-            logger.error("Langfuse init failed: %s", exc)
+            logger.error("Langfuse init failed error_type=%s", type(exc).__name__)
 
     @property
     def enabled(self) -> bool:
@@ -190,18 +224,17 @@ class LangfuseProvider:
             return _noop_trace()
 
         try:
-            kwargs: dict[str, Any] = {"name": name}
+            kwargs: dict[str, Any] = {"name": redact_observation(name)}
             if input is not None:
-                kwargs["input"] = input
+                kwargs["input"] = redact_observation(input)
             if metadata:
-                kwargs["metadata"] = metadata
+                kwargs["metadata"] = redact_observation(metadata)
 
             # Langfuse 4.x: start_as_current_observation 返回 context manager
             ctx = self._client.start_as_current_observation(**kwargs)
-            obs = ctx.__enter__()
-            return ObservabilityTrace(ctx, obs)
+            return ObservabilityTrace(ctx)
         except Exception as exc:
-            logger.warning("Langfuse create_trace failed: %s", exc)
+            logger.warning("Langfuse create_trace failed error_type=%s", type(exc).__name__)
             return _noop_trace()
 
     # ── Generation（LLM 调用）────────────────────────────
@@ -233,28 +266,29 @@ class LangfuseProvider:
 
         try:
             kwargs: dict[str, Any] = {
-                "name": name,
+                "name": redact_observation(name),
                 "as_type": "generation",
             }
             if model:
-                kwargs["model"] = model
+                kwargs["model"] = redact_observation(model)
             if input is not None:
-                kwargs["input"] = input
+                kwargs["input"] = redact_observation(input)
             if output is not None:
-                kwargs["output"] = output
-            if usage:
+                kwargs["output"] = redact_observation(output)
+            normalized = normalize_usage(usage)
+            if normalized is not None:
                 kwargs["usage_details"] = {
-                    "input": usage.get("prompt_tokens", 0),
-                    "output": usage.get("completion_tokens", 0),
-                    "total": usage.get("total_tokens", 0),
+                    "input": normalized["prompt_tokens"],
+                    "output": normalized["completion_tokens"],
+                    "total": normalized["total_tokens"],
                 }
             if metadata:
-                kwargs["metadata"] = metadata
+                kwargs["metadata"] = redact_observation(metadata)
 
             obs = self._client.start_observation(**kwargs)
             return ObservabilitySpan(obs)
         except Exception as exc:
-            logger.debug("Langfuse create_generation failed: %s", exc)
+            logger.debug("Langfuse create_generation failed error_type=%s", type(exc).__name__)
             return _noop_span()
 
     # ── Tool Span ─────────────────────────────────────────
@@ -279,20 +313,20 @@ class LangfuseProvider:
 
         try:
             kwargs: dict[str, Any] = {
-                "name": name,
+                "name": redact_observation(name),
                 "as_type": "tool",
             }
             if input is not None:
-                kwargs["input"] = input
+                kwargs["input"] = redact_observation(input)
             if output is not None:
-                kwargs["output"] = output
+                kwargs["output"] = redact_observation(output)
             if metadata:
-                kwargs["metadata"] = metadata
+                kwargs["metadata"] = redact_observation(metadata)
 
             obs = self._client.start_observation(**kwargs)
             return ObservabilitySpan(obs)
         except Exception as exc:
-            logger.debug("Langfuse create_tool_span failed: %s", exc)
+            logger.debug("Langfuse create_tool_span failed error_type=%s", type(exc).__name__)
             return _noop_span()
 
     # ── Lifecycle ─────────────────────────────────────────
@@ -304,7 +338,7 @@ class LangfuseProvider:
         try:
             self._client.flush()
         except Exception as exc:
-            logger.debug("Langfuse flush failed: %s", exc)
+            logger.debug("Langfuse flush failed error_type=%s", type(exc).__name__)
 
     async def shutdown(self) -> None:
         """优雅关闭，确保数据不丢失。"""
@@ -315,7 +349,7 @@ class LangfuseProvider:
             self._client.shutdown()
             logger.info("Langfuse shutdown complete")
         except Exception as exc:
-            logger.debug("Langfuse shutdown failed: %s", exc)
+            logger.debug("Langfuse shutdown failed error_type=%s", type(exc).__name__)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -331,25 +365,31 @@ class _NoopSpan:
     def end(self, **kwargs: Any) -> None:
         pass
 
+    def update(self, **kwargs: Any) -> None:
+        pass
+
 
 class _NoopTraceContext:
     """空 Trace Context Manager。"""
 
     trace_id: str | None = None
 
-    def __enter__(self) -> "_NoopTraceContext":
+    def __enter__(self) -> Self:
         return self
 
-    def __exit__(self, *args: Any) -> None:
+    def __exit__(self, *args: object) -> None:
         pass
 
-    async def __aenter__(self) -> "_NoopTraceContext":
+    async def __aenter__(self) -> Self:
         return self
 
-    async def __aexit__(self, *args: Any) -> None:
+    async def __aexit__(self, *args: object) -> None:
         pass
 
     def end(self, **kwargs: Any) -> None:
+        pass
+
+    def update(self, **kwargs: Any) -> None:
         pass
 
 
@@ -374,6 +414,7 @@ def init_observability() -> LangfuseProvider:
 
     main.py startup 时调用。
     """
+    install_log_redaction()
     global _provider
     if _provider is not None:
         return _provider

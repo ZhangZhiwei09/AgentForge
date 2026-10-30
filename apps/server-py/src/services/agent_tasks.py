@@ -32,15 +32,28 @@ from src.agent.task_guard import (
     model_rates,
     sanitize_response,
 )
+from src.agent.tools.base import RiskLevel
 from src.agent.tools.registry import ToolRegistry, tool_registry
 from src.models.agent_session import AgentApproval, AgentSession
 from src.models.chat import Conversation, Message
+from src.models.user import User
 from src.providers.registry import get_provider, resolve_model
 from src.services.citations import (
     citation_cards,
     parse_sources,
     source_context,
     verify_answer,
+)
+from src.services.execution_policy import (
+    EffectiveExecutionPolicy,
+    ToolExecutionContext,
+    build_execution_policy,
+)
+from src.services.usage import (
+    normalize_usage,
+    reserve_task_usage,
+    settle_task_usage,
+    task_usage_summary,
 )
 
 logger = logging.getLogger(__name__)
@@ -298,6 +311,7 @@ class TaskLifecycle:
             raise RuntimeError("Agent token or cost budget exhausted")
         self.model.max_tokens = min(4096, available)
         self.runtime["estimated_prompt_tokens"] = prompt_tokens
+        reserve_task_usage(self.runtime, self.model.model_name, prompt_tokens, self.model.max_tokens)
         await self.save(state)
 
     def record(self, state: AgentState, decision: dict, details: dict | None = None) -> dict:
@@ -313,14 +327,21 @@ class TaskLifecycle:
         return step
 
     async def after_model(self, state: AgentState, response: AIMessage) -> AgentState:
-        usage = response.usage_metadata or {}
-        prompt_tokens = usage.get("input_tokens") or self.runtime["estimated_prompt_tokens"]
-        output_tokens = usage.get("output_tokens") or count_tokens(str(response.content) + json.dumps(response.tool_calls))
-        prompt_rate, completion_rate = model_rates(self.model.model_name)
-        self.runtime["tokens_used"] = self.runtime.get("tokens_used", 0) + prompt_tokens + output_tokens
-        self.runtime["cost_cents_used"] = self.runtime.get("cost_cents_used", 0) + (
-            prompt_tokens * prompt_rate + output_tokens * completion_rate
-        ) / 1000
+        usage = normalize_usage(response.usage_metadata, langchain=True)
+        source = response.response_metadata.get("usage_source", "reported")
+        if usage is None:
+            usage = {
+                "prompt_tokens": self.runtime["estimated_prompt_tokens"],
+                "completion_tokens": count_tokens(str(response.content) + json.dumps(response.tool_calls)),
+            }
+            source = "estimated"
+        settle_task_usage(self.runtime, usage, source)
+        # Persist charged usage before response parsing or downstream work can fail.
+        await self.save(state)
+        if (self.runtime["tokens_used"] > self.guard.max_tokens
+                or self.runtime["cost_cents_used"] > self.guard.max_cost_cents):
+            self.emit("agent_guard_block", step=state["iteration_count"] + 1, reason="budget", detail="任务预算已耗尽")
+            raise RuntimeError("Agent token or cost budget exceeded")
         next_state = {**state, "iteration_count": state["iteration_count"] + 1}
         decisions = [call for call in response.tool_calls if call["name"] == "agent_decide"]
         details = {}
@@ -423,7 +444,7 @@ class TaskLifecycle:
             if self.runtime.get("approval_args") is not None:
                 call["args"] = self.runtime["approval_args"]
                 # The graph uses this same dict, so execution receives reviewed arguments.
-        elif tool.require_approval:
+        elif tool.require_approval or tool.risk_level in {RiskLevel.MUTATION, RiskLevel.DESTRUCTIVE}:
             approval = AgentApproval(
                 id=str(uuid.uuid4()), session_id=self.session.id,
                 conversation_id=self.session.conversation_id, step_number=state["iteration_count"],
@@ -480,6 +501,24 @@ async def stream_task(
     lifecycle = None
     try:
         runtime = copy.deepcopy(session.runtime_state or {})
+        actor_id = await db.scalar(select(User.id).join(
+            Conversation, Conversation.user_id == User.id,
+        ).where(Conversation.id == session.conversation_id))
+        if actor_id is None:
+            raise RuntimeError("Task owner is no longer available")
+        policy = build_execution_policy(
+            TaskGuardConfig.model_validate(runtime.get("guard", {})),
+            runtime.get("tools"), runtime.get("max_iterations", 10),
+        )
+        if runtime.get("execution_policy"):
+            policy = policy.intersect(EffectiveExecutionPolicy.model_validate(runtime["execution_policy"]))
+        runtime.update(
+            tools=list(policy.tools), guard=policy.guard_config().model_dump(),
+            max_iterations=policy.max_iterations, execution_policy=policy.model_dump(),
+        )
+        registry = registry.bind(ToolExecutionContext(
+            actor_id=actor_id, conversation_id=session.conversation_id, run_id=session.id, policy=policy,
+        ))
         resolved = resolve_model(runtime.get("model"))
         provider_name = runtime.get("provider") or resolved["provider_name"]
         provider = get_provider(provider_name)
@@ -497,6 +536,7 @@ async def stream_task(
             "type": "agent_meta", "session_id": session.id, "model": resolved["model_id"],
             "provider": provider_name, "max_iterations": runtime["max_iterations"],
             "tools_enabled": names,
+            "guard_config": runtime["guard"],
         }
         graph = build_react_graph(
             model, definitions, registry, session.conversation_id,
@@ -546,11 +586,15 @@ async def stream_task(
         yield {
             "type": "agent_done", "total_steps": final_state["iteration_count"],
             "final_summary": session.final_summary, "session_id": session.id,
+            "usage": task_usage_summary(lifecycle.runtime),
         }
     except (asyncio.CancelledError, GeneratorExit):
         with anyio.CancelScope(shield=True):
             await db.rollback()
             await db.refresh(session)
+            interrupted = copy.deepcopy(session.runtime_state or {})
+            if settle_task_usage(interrupted, None, "reserved", uncertain=True):
+                session.runtime_state = interrupted
             if session.status == "running":
                 session.status = "failed"
                 session.final_summary = "Interrupted by user"
@@ -561,9 +605,13 @@ async def stream_task(
         logger.exception("Task execution failed session=%s", session.id)
         await db.rollback()
         await db.refresh(session)
+        interrupted = copy.deepcopy(session.runtime_state or {})
+        if settle_task_usage(interrupted, None, "reserved", uncertain=True):
+            session.runtime_state = interrupted
         session.status = "failed"
         session.final_summary = "Agent execution failed"
         session.completed_at = datetime.now(UTC)
         await db.commit()
         yield {"type": "agent_error", "error": "Agent execution failed",
-               "step": (session.runtime_state or {}).get("iteration_count", 0)}
+               "step": (session.runtime_state or {}).get("iteration_count", 0),
+               "usage": task_usage_summary(session.runtime_state or {})}

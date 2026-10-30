@@ -15,6 +15,13 @@ class Settings(BaseSettings):
     auth_signup_enabled: bool = True
     anonymous_chat_enabled: bool = True
     public_faq_enabled: bool = True
+    agent_max_tokens: int = Field(default=50000, ge=1000)
+    agent_max_cost_cents: float = Field(default=200, ge=1, allow_inf_nan=False)
+    agent_max_iterations: int = Field(default=20, ge=1, le=20)
+    agent_allowed_tools: list[str] = Field(default_factory=lambda: [
+        "search_knowledge_base", "get_current_time", "calculator",
+    ])
+    monitoring_mode: Literal["disabled", "mock"] = "disabled"
 
     # ── 数据库 ──────────────────────────────────────────
     # 端口 5434 与 TS 项目保持一致，避免冲突
@@ -133,6 +140,8 @@ class Settings(BaseSettings):
             if name not in self.model_fields_set:
                 setattr(self, name, self.app_env != "production")
         if self.app_env == "production":
+            if self.monitoring_mode == "mock":
+                raise ValueError("Production forbids mock monitoring")
             if self.debug:
                 raise ValueError("Production requires DEBUG=false")
             if not self.jwt_secret.strip() or self.jwt_secret == "agentforge-dev-secret-change-in-production":

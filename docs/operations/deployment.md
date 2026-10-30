@@ -128,6 +128,53 @@ or exposing the API. Requests must not be allowed to forge forwarded addresses.
 
 ## Persistence And Monitoring
 
+### Execution Policy
+
+Production Compose sets `MONITORING_MODE=disabled`. Real monitoring integration
+is still pending: diagnosis endpoints report unavailable evidence instead of
+returning demo data. `MONITORING_MODE=mock` is only supported outside production
+and explicitly labels synthetic evidence; unknown trace IDs return no data.
+Production startup rejects mock mode.
+
+The default tools are `search_knowledge_base`, `get_current_time` and
+`calculator`. General network, filesystem, raw SQL and support-ticket tools
+are disabled in the execution registry, including administrator test runs.
+Adding them to `AGENT_ALLOWED_TOOLS`, configuring credentials or granting an
+approval does not re-enable them. Existing published flows retain their
+snapshots but cannot execute tools that have been disabled.
+
+Task execution uses server-owned identity and policy. `AGENT_MAX_TOKENS`,
+`AGENT_MAX_COST_CENTS` and `AGENT_MAX_ITERATIONS` default to 50000, 200 and 20;
+clients may request stricter limits. Resumes apply current permissions while
+preserving saved usage and stricter limits. Task PII/content filtering remains
+enabled regardless of client settings. Knowledge access remains shared within
+the deployment's single organization; this is not tenant-level isolation.
+Complete cumulative diagnosis/evaluation budgets and real monitoring adapters
+remain separate rollout requirements.
+
+### Usage And Observation Data
+
+Task runtime JSON retains model-call reservations and settlement records.
+`usage_totals` separates `reported`, `estimated` and `reserved` token counts;
+`model_usage` records the model, rate-table version and completion/uncertain
+status. A failed or cancelled request keeps its conservative reservation when
+final usage is unknown. Review these records before reconciliation; the
+application does not automatically refund or replay such calls. Previous
+unclassified task usage remains included in the budget.
+
+`cost_cents_used` and completion-event `estimated_cost_cents` are internal
+estimates using `legacy-estimate-v1`, including a fallback for unknown models.
+They are not billing records. Full organization/user quota reservations,
+distributed admission and cumulative diagnosis/evaluation limits remain pending.
+
+API/worker logs mask common credentials and personal identifiers, including
+exception chains; Uvicorn access logs omit URL query parameters while retaining
+the formatter's structured fields. Langfuse input, output and metadata are redacted and limited
+at the common export boundary without changing operational tool arguments.
+Database connection labels contain only scheme, host and port. These changes
+apply to new observations; existing logs and stored business data are not
+rewritten. Continue to restrict access to logs, database records and backups.
+
 `pgdata` retains PostgreSQL, `redis_data` retains AOF queue state, and
 `knowledge_files` is mounted read/write by API and worker. Redis uses `noeviction`
 so memory pressure rejects writes instead of discarding queued ingestion jobs.

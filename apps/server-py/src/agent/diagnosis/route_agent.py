@@ -17,11 +17,11 @@ import time
 from collections.abc import AsyncIterator
 from types import MappingProxyType
 
+from src.agent.diagnosis.graph import resume_langgraph_diagnosis
 from src.agent.diagnosis.mode import (
+    AgentCompleted,
     AgentRole,
     AgentStarted,
-    AgentCompleted,
-    AgentError as TeamAgentError,
     DiagnosisMode,
     TeamCompleted,
     TeamFailed,
@@ -30,7 +30,9 @@ from src.agent.diagnosis.mode import (
     TeamWaitingForInput,
     extract_json,
 )
-from src.agent.diagnosis.graph import resume_langgraph_diagnosis
+from src.agent.diagnosis.mode import (
+    AgentError as TeamAgentError,
+)
 from src.agent.diagnosis.nodes import (
     build_clarification_content,
     classify_intent_from_query,
@@ -50,10 +52,11 @@ from src.agent.types import (
     RouteName,
     RouteStreamEvent,
     StreamDone,
+    StreamError,
     StreamMeta,
     StreamToken,
-    StreamError,
 )
+from src.services.monitoring import diagnosis_evidence_error
 
 logger = logging.getLogger(__name__)
 
@@ -422,6 +425,18 @@ class DiagnosisRouteAgent:
             memory_count=len(context.injected_memories),
         )
 
+        if context.execution_context is not None:
+            tools_registry = tools_registry.bind(context.execution_context)
+        if tools_registry.context is None or tools_registry.context.conversation_id != context.conversation_id:
+            yield StreamError(content="诊断执行缺少有效的身份和会话策略。")
+            yield StreamDone(message_id=message_id, route=self.route.value, validated=False)
+            return
+        evidence_error = diagnosis_evidence_error(context.user_message)
+        if evidence_error:
+            yield StreamError(content=evidence_error)
+            yield StreamDone(message_id=message_id, route=self.route.value, validated=False)
+            return
+
         # Phase 3b HITL：命中"等待用户补充"的会话 → 同 thread 续跑诊断。
         # 需在信息预检之前 —— 用户补充的消息大概率仍会被判为信息不足。
         team_run_id = _active_hitl.get(context.conversation_id)
@@ -432,6 +447,7 @@ class DiagnosisRouteAgent:
                 context.conversation_id, team_run_id,
             )
             still_waiting = False
+            resumed_completed = False
             async for team_event in resume_langgraph_diagnosis(
                 roles=IDENTITY_DIAGNOSIS_ROLES,
                 conversation_id=context.conversation_id,
@@ -448,6 +464,10 @@ class DiagnosisRouteAgent:
                     )
                 chat_event = _translate_team_event(team_event, message_id)
                 if chat_event:
+                    if isinstance(chat_event, DiagnosisCompleted):
+                        resumed_completed = True
+                    elif isinstance(chat_event, StreamError):
+                        resumed_completed = False
                     yield chat_event
             if not still_waiting:
                 _active_hitl.pop(context.conversation_id, None)
@@ -455,6 +475,7 @@ class DiagnosisRouteAgent:
                 message_id=message_id,
                 usage={},
                 route=self.route.value,
+                validated=resumed_completed,
             )
             return
 
@@ -541,6 +562,8 @@ class DiagnosisRouteAgent:
                         streamed_output = _extract_conclusion_text(
                             chat_event.output
                         )
+                    elif isinstance(chat_event, StreamError):
+                        status = "error"
                     yield chat_event
 
         except Exception as exc:
@@ -568,4 +591,5 @@ class DiagnosisRouteAgent:
             message_id=message_id,
             usage={},
             route=self.route.value,
+            validated=has_completed and status == "success",
         )

@@ -30,6 +30,7 @@ from src.api.v1.platform import router as platform_router
 from src.config import settings
 from src.observability import init_observability, shutdown_observability
 from src.observability.metrics import record_http
+from src.observability.privacy import install_log_redaction
 from src.rate_limit import RateLimitMiddleware
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    install_log_redaction()
     app = FastAPI(title="AgentForge", version="0.0.1", lifespan=lifespan)
     app.add_middleware(RateLimitMiddleware)
 

@@ -30,6 +30,7 @@ from src.evaluation.judge import LLMJudge
 from src.evaluation.observer import ObservedToolRegistry
 from src.evaluation.types import EvalCase, EvalCaseReport, EvalRunReport
 from src.providers.registry import get_provider, resolve_model
+from src.services.execution_policy import ToolExecutionContext, build_execution_policy
 
 
 async def run_cases(
@@ -104,6 +105,10 @@ def build_default_executor(
                 yield event
             return
         if decision.route == RouteName.TASK:
+            context.execution_context = ToolExecutionContext(
+                actor_id="evaluation-runner", conversation_id=context.conversation_id,
+                run_id=context.assistant_msg_id, policy=build_execution_policy(),
+            )
             registry = (
                 ObservedToolRegistry(tool_registry, tool_observer)
                 if tool_observer is not None

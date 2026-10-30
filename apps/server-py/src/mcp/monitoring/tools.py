@@ -1,6 +1,6 @@
 """MCP tool 处理函数（薄层）。
 
-只做入参校验 + 转发 repository + 组装 schemaVersion 信封，不包含业务判断。
+校验入参，经监控能力服务检查模式，并组装带来源和查询状态的信封。
 MCP tool 定义（名称、描述、inputSchema）由 server.py 在注册时声明。
 """
 
@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import json
 
-from .repository import lookup_trace
+from src.services.monitoring import lookup_monitoring_trace
+
 from .schemas import SCHEMA_VERSION
 
 TOOL_NAME = "query_trace_log"
@@ -28,13 +29,17 @@ def handle_query_trace_log(traceId: str) -> str:
         traceId: 链路追踪 ID，如 abc123。
 
     Returns:
-        JSON 字符串信封：{"schemaVersion": "1.0", "data": <TraceLog>}。
+        JSON 信封含 schemaVersion、source、status、data。
+        disabled 返回 unavailable；未知模拟 trace 返回 not_found；两者 data 均为 null。
     """
     if not traceId or not traceId.strip():
         raise ValueError("请提供 traceId 以查询链路日志。")
 
-    trace = lookup_trace(traceId.strip())
+    evidence = lookup_monitoring_trace(traceId)
     return json.dumps(
-        {"schemaVersion": SCHEMA_VERSION, "data": trace.model_dump()},
+        {
+            "schemaVersion": SCHEMA_VERSION, "data": evidence["trace"],
+            "source": evidence["source"], "status": evidence["status"],
+        },
         ensure_ascii=False,
     )

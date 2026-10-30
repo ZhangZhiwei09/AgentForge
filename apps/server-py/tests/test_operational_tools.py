@@ -3,12 +3,15 @@
 import asyncio
 import json
 import os
+from dataclasses import replace
 from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 from fastapi import FastAPI
+from pydantic import ValidationError
 from sqlalchemy import select, text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from src.agent.tools.builtins import operational
@@ -17,11 +20,18 @@ from src.config import settings
 from src.database import upgrade_connection
 from src.models.support_ticket import SupportTicket
 from src.rate_limit import RateLimitMiddleware
+from src.services.execution_policy import ToolExecutionContext, build_execution_policy
+
+
+def bound_registry():
+    return ToolRegistry().bind(ToolExecutionContext(
+        actor_id="test", conversation_id="run", run_id="test-run", policy=build_execution_policy(),
+    ))
 
 
 @pytest.mark.asyncio
 async def test_math_time_validation_and_unsupported_expressions():
-    registry = ToolRegistry()
+    registry = bound_registry()
     for expression, expected in (("sqrt(144) + 2 ** 3", "20"), ("pow(2, 10)", "1024"), ("PI * 2", "6.28318530718")):
         response = await registry.execute("calculator", {"expression": expression}, "run")
         assert response["status"] == "success" and response["output"] == expected
@@ -41,14 +51,16 @@ async def test_workspace_file_operations_and_escape_rejection(tmp_path, monkeypa
     assert registry.get("file_write").require_approval
     assert registry.get("http_request").require_approval
     assert registry.get("create_support_ticket").require_approval
-    assert (await registry.execute("file_write", {"path": "nested/file.txt", "content": "hello\nworld\nlast"}, "run"))["status"] == "success"
-    read = await registry.execute("file_read", {"path": "nested/file.txt", "max_lines": 2}, "run")
+    # Test disabled adapters directly; the execution-policy suite checks they stay inaccessible.
+    written = await operational.file_write(operational.WriteInput(path="nested/file.txt", content="hello\nworld\nlast"), "run")
+    assert written["status"] == "success"
+    read = await operational.file_read(operational.ReadInput(path="nested/file.txt", max_lines=2), "run")
     assert read["status"] == "partial" and read["output"] == "hello\nworld\n"
-    search = await registry.execute("file_search", {"pattern": "**/*.txt", "contains": "world"}, "run")
+    search = await operational.file_search(operational.FileSearchInput(pattern="**/*.txt", contains="world"), "run")
     assert json.loads(search["output"])["matches"] == ["nested/file.txt"]
     for path in ("../escape.txt", str(tmp_path / "outside.txt")):
-        response = await registry.execute("file_write", {"path": path, "content": "blocked"}, "run")
-        assert response["status"] == "failed"
+        with pytest.raises(ValueError):
+            await operational.file_write(operational.WriteInput(path=path, content="blocked"), "run")
     assert not (tmp_path / "escape.txt").exists()
     assert not (tmp_path / "outside.txt").exists()
     outside = tmp_path / "outside"
@@ -57,7 +69,8 @@ async def test_workspace_file_operations_and_escape_rejection(tmp_path, monkeypa
         (workspace / "linked").symlink_to(outside, target_is_directory=True)
     except OSError:
         return  # Windows without symlink privileges still runs the traversal cases.
-    assert (await registry.execute("file_write", {"path": "linked/escape.txt", "content": "blocked"}, "run"))["status"] == "failed"
+    with pytest.raises(ValueError):
+        await operational.file_write(operational.WriteInput(path="linked/escape.txt", content="blocked"), "run")
     assert not (outside / "escape.txt").exists()
 
 
@@ -73,25 +86,24 @@ async def test_network_tools_validate_inputs_bound_response_and_preserve_post(mo
     monkeypatch.setattr(operational.httpx, "AsyncClient", lambda **kwargs: factory(
         transport=httpx.MockTransport(wire), **kwargs,
     ))
-    registry = ToolRegistry()
-    response = await registry.execute("http_request", {
-        "url": "https://example.test/api", "method": "post", "body": '{"hello":1}', "headers": {"X-Test": "yes"},
-    }, "run")
+    response = await operational.http_request(operational.RequestInput(
+        url="https://example.test/api", method="post", body='{"hello":1}', headers={"X-Test": "yes"},
+    ), "run")
     assert response["status"] == "partial"
     assert len(json.loads(response["output"])["body"]) == 5000
     assert calls[0].method == "POST" and calls[0].content == b'{"hello":1}'
     assert calls[0].headers["x-test"] == "yes"
-    fetched = await registry.execute("web_fetch", {"url": "https://example.test", "max_chars": 20}, "run")
+    fetched = await operational.web_fetch(operational.FetchInput(url="https://example.test", max_chars=20), "run")
     assert fetched["status"] == "partial" and len(json.loads(fetched["output"])["content"]) == 20
-    assert (await registry.execute("web_fetch", {"url": "file:///etc/passwd"}, "run"))["status"] == "failed"
+    with pytest.raises(ValidationError):
+        operational.FetchInput(url="file:///etc/passwd")
     assert len(calls) == 2
 
 
 @pytest.mark.asyncio
 async def test_web_search_unconfigured_is_explicit_and_wire_dto_validated(monkeypatch):
-    registry = ToolRegistry()
     monkeypatch.setattr(settings, "tavily_api_key", "")
-    unavailable = await registry.execute("web_search", {"query": "q"}, "run")
+    unavailable = await operational.web_search(operational.SearchInput(query="q"), "run")
     assert unavailable["status"] == "partial" and json.loads(unavailable["output"])["results"] == []
     factory = httpx.AsyncClient
     monkeypatch.setattr(settings, "tavily_api_key", "test-key")
@@ -106,7 +118,7 @@ async def test_web_search_unconfigured_is_explicit_and_wire_dto_validated(monkey
     monkeypatch.setattr(operational.httpx, "AsyncClient", lambda **kwargs: factory(
         transport=httpx.MockTransport(wire), **kwargs,
     ))
-    found = await registry.execute("web_search", {"query": "q"}, "run")
+    found = await operational.web_search(operational.SearchInput(query="q"), "run")
     assert found["status"] == "success"
     assert len(json.loads(found["output"])["results"][0]["snippet"]) == 300
 
@@ -132,14 +144,13 @@ async def test_postgres_tools_enforce_readonly_limit_and_persist_ticket(empty_po
         """))
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     monkeypatch.setattr("src.db.async_session", sessions)
-    registry = ToolRegistry()
-    query = await registry.execute("db_query", {"query": "SELECT generate_series(1, 1000) AS n"}, "run")
+    query = await operational.db_query(operational.SqlInput(query="SELECT generate_series(1, 1000) AS n"), "run")
     assert query["status"] == "partial"
     rows = json.loads(query["output"])
     assert len(rows["rows"]) == 100 and rows["truncated"]
-    rejected = await registry.execute("db_query", {"query": "SELECT sneaky_write()"}, "run")
-    assert rejected["status"] == "failed"
-    ticket = await registry.execute("create_support_ticket", {"summary": "follow up", "priority": "urgent"}, "run")
+    with pytest.raises(DBAPIError):
+        await operational.db_query(operational.SqlInput(query="SELECT sneaky_write()"), "run")
+    ticket = await operational.create_ticket(operational.TicketInput(summary="follow up", priority="urgent"), "run")
     assert ticket["status"] == "success"
     async with sessions() as db:
         stored = await db.scalar(select(SupportTicket))
@@ -150,16 +161,16 @@ async def test_postgres_tools_enforce_readonly_limit_and_persist_ticket(empty_po
 
 @pytest.mark.asyncio
 async def test_registry_breaker_shared_with_filters_and_single_recovery_probe():
-    registry = ToolRegistry()
-    tool = registry.get("calculator")
-    original = tool.execute
-    tool.execute = AsyncMock(return_value={"status": "failed", "error": "provider down"})
+    registry = bound_registry()
+    execute = AsyncMock(return_value={"status": "failed", "error": "provider down"})
+    tool = replace(registry.get("calculator"), execute=execute)
+    registry.register(tool)
     try:
         filtered = registry.filter(["calculator"])
         for _ in range(5):
             await filtered.execute("calculator", {"expression": "1"}, "run")
         denied = await registry.execute("calculator", {"expression": "1"}, "run")
-        assert "circuit is open" in denied["error"] and tool.execute.await_count == 5
+        assert "circuit is open" in denied["error"] and execute.await_count == 5
         registry._circuits["calculator"].opened_at -= 61
         entered = asyncio.Event()
         release = asyncio.Event()
@@ -177,7 +188,7 @@ async def test_registry_breaker_shared_with_filters_and_single_recovery_probe():
         assert (await first)["status"] == "success"
         assert registry._circuits["calculator"].failures == 0
     finally:
-        tool.execute = original
+        tool.execute = execute
 
 
 @pytest.mark.asyncio

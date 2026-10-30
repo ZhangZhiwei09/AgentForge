@@ -8,6 +8,7 @@ from src.agent.router.pipeline import QueryRouter, quick_route_scan
 from src.agent.tools.registry import ToolRegistry
 from src.agent.types import RouteName
 from src.config import settings
+from src.services.execution_policy import ToolExecutionContext, build_execution_policy
 
 
 class TestRouter:
@@ -81,7 +82,9 @@ class TestToolRegistry:
     """ToolRegistry 测试。"""
 
     def setup_method(self):
-        self.registry = ToolRegistry()
+        self.registry = ToolRegistry().bind(ToolExecutionContext(
+            actor_id="test", conversation_id="test-run", run_id="run", policy=build_execution_policy(),
+        ))
 
     def test_init_registers_tools(self):
         """init() 应注册 search_knowledge_base。"""

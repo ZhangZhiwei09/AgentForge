@@ -3,15 +3,15 @@
 本模块是唯一一份 mock 监控数据（单一数据源），TS 侧旧 mock 与
 server-py 诊断图均以本模块为准，消除多份拷贝漂移。
 
-未来接入真实监控平台时，保持 lookup_trace 的查询契约不变，新增真实数据源
-实现（如 alibaba_repository），由 server.py / tools.py 依赖切换即可。
+运行入口必须经 services.monitoring 检查模式；本模块只提供模拟样例。
+真实数据源需独立实现身份、查询范围和证据来源契约，不能直接替换为默认回退。
 
 traceId 键约定：
 - abc123 / trace_algo_timeout: 算法超时场景（abc123 为兼容历史测试的别名）
 - trace_camera_denied / trace_sdk_init_fail / trace_network_timeout /
   trace_liveness_fail: 各失败场景
 - trace_normal_pass: 正常通过对比参考
-- 未命中返回 DEFAULT_TRACE（traceId 会被替换为查询值）
+- 未命中返回 None，不生成默认故障证据
 """
 
 from __future__ import annotations
@@ -337,34 +337,6 @@ LIVENESS_FAIL_TRACE = TraceLog(
     ),
 )
 
-DEFAULT_TRACE = TraceLog(
-    traceId="unknown",
-    orderId="unknown",
-    product="face_verify",
-    clientType="h5",
-    sdkVersion="unknown",
-    overallDurationMs=0,
-    overallStatus="failed",
-    errorCode="UNKNOWN_VERIFY_FAIL",
-    errorStage="unknown",
-    spans=_spans(
-        [
-            {
-                "spanId": "span-default",
-                "serviceName": "gateway",
-                "operationName": "request_forward",
-                "startTime": "2026-08-04T00:00:00.000Z",
-                "endTime": "2026-08-04T00:00:00.000Z",
-                "durationMs": 0,
-                "status": "error",
-                "errorMessage": "未命中模拟 trace 数据",
-                "tags": {},
-            }
-        ]
-    ),
-    conclusion="未命中模拟 trace 数据，仅能给出通用核身失败排查建议：请先确认失败阶段和错误码，再结合端类型、SDK 版本与网络状态定位。",
-)
-
 # 数据源：traceId -> TraceLog。abc123 为 trace_algo_timeout 的兼容别名。
 MOCK_TRACE_DATASET: dict[str, TraceLog] = {
     "abc123": ALGO_TIMEOUT_TRACE,
@@ -378,17 +350,13 @@ MOCK_TRACE_DATASET: dict[str, TraceLog] = {
 
 
 def is_known_trace(trace_id: str) -> bool:
-    """判断 traceId 是否命中模拟数据集（未命中时 lookup_trace 返回默认值）。"""
+    """判断 traceId 是否命中模拟数据集。"""
     return trace_id in MOCK_TRACE_DATASET
 
 
-def lookup_trace(trace_id: str) -> TraceLog:
-    """按 traceId 查询一笔链路日志。
-
-    未命中时返回 DEFAULT_TRACE（traceId 替换为查询值），保证结果结构完整，
-    由上层结合 is_known_trace 判定是否命中。
-    """
+def lookup_trace(trace_id: str) -> TraceLog | None:
+    """按 traceId 查询模拟日志；没有证据时返回 None。"""
     trace = MOCK_TRACE_DATASET.get(trace_id)
     if trace is None:
-        return DEFAULT_TRACE.model_copy(update={"traceId": trace_id})
+        return None
     return trace.model_copy(update={"traceId": trace_id})

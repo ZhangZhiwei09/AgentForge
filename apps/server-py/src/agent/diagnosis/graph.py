@@ -40,11 +40,12 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, interrupt
 
+from src.agent.checkpoint import get_checkpointer
 from src.agent.diagnosis.blackboard import Blackboard
 from src.agent.diagnosis.mode import (
-    AgentRole,
     AgentCompleted,
     AgentError,
+    AgentRole,
     AgentStarted,
     BackendOutput,
     DiagnosisMode,
@@ -63,12 +64,11 @@ from src.agent.diagnosis.mode import (
     parse_scoring_output,
     resolve_diagnosis,
 )
-from src.agent.checkpoint import get_checkpointer
 from src.agent.diagnosis.state import DiagnosisState
 from src.agent.executor import AgentExecutor
 from src.agent.tools.registry import ToolRegistry
+from src.agent.types import RouteContext, StreamError, StreamToken
 from src.config import settings
-from src.agent.types import RouteContext, StreamToken
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,10 @@ async def _run_phase_agent(
     filtered_registry = tools_registry.filter(role.tools)
     # 内层 ReAct 保持瞬态（checkpoint=False）：父图是唯一被 checkpoint 的图
     # （multi-agent-langgraph-plan.md §4.3）。即便未来激活 G1 全局门控，也不挂。
-    executor = AgentExecutor(registry=filtered_registry, checkpoint=False)
+    executor = AgentExecutor(
+        registry=filtered_registry, checkpoint=False,
+        max_iterations=role.max_iterations, structured_output=True,
+    )
 
     context = RouteContext(
         conversation_id=conversation_id,
@@ -123,6 +126,8 @@ async def _run_phase_agent(
         if cancel_event and cancel_event.is_set():
             logger.info("LangGraph diagnosis: agent %s cancelled", role.name)
             break
+        if isinstance(event, StreamError):
+            raise RuntimeError(event.content)  # noqa: TRY004 - Propagate an executor failure event.
         if isinstance(event, StreamToken):
             tokens.append(event.content)
     return "".join(tokens)

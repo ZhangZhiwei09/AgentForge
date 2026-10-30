@@ -19,6 +19,7 @@ from src.agent.types import (
     StreamToken,
 )
 from src.api.v1 import chat
+from src.config import settings
 from src.models.agent_flow import AgentFlow, AgentFlowRun
 from src.models.chat import Conversation, Message
 from src.models.entry_flow import EntryRouteFlow, EntryRouteFlowRun
@@ -29,7 +30,7 @@ USER = {"X-Test-Actor": "user"}
 
 
 @pytest.fixture
-def dependencies(monkeypatch):
+def dependencies(monkeypatch, monitoring_demo):
     monkeypatch.setattr(chat, "mirror_message", AsyncMock())
     monkeypatch.setattr(chat, "_spawn_compression", MagicMock())
     monkeypatch.setattr("src.agent.context_builder.get_memory_store", lambda: None)
@@ -249,7 +250,8 @@ async def test_owned_waiting_run_resumes_old_snapshot_without_entry_config_or_cl
 
     monkeypatch.setattr(chat, "diagnosis_events", diagnosis_events)
     events = frames(await post_chat(client, "你好", conversation_id))
-    assert events[0]["source"] == "session_state" and answer(events) == "请补充时间"
+    assert events[0]["source"] == "session_state"
+    assert answer(events).endswith("请补充时间") and "模拟监控" in answer(events)
     assert seen[0][0:3] == (run_id, 1, True)
     dependencies.classify.assert_not_called()
     assert not dependencies.executions
@@ -341,6 +343,20 @@ async def test_configured_diagnosis_requests_missing_information_without_provide
     dependencies.resolve.assert_not_called()
     dependencies.classify.assert_not_called()
     assert len(await saved_messages(sessions, events[0]["conversation_id"])) == 2
+
+
+@pytest.mark.parametrize("mode, trace_id", [("disabled", "abc123"), ("mock", "unknown123")])
+async def test_unavailable_diagnosis_stops_before_provider(entry_api, dependencies, monkeypatch, mode, trace_id):
+    client, _ = entry_api
+    await enable_flow(client)
+    monkeypatch.setattr(settings, "monitoring_mode", mode)
+    dependencies.resolve.side_effect = AssertionError("evidence failure must precede provider resolution")
+    events = frames(await post_chat(client, f"请帮我排查 traceId={trace_id} 刷脸失败"))
+    assert events[0]["route"] == "DIAGNOSIS"
+    assert events[-1]["validated"] is False
+    assert any(item["type"] == "error" for item in events)
+    assert not any(item["type"] == "diagnosis_completed" for item in events)
+    dependencies.resolve.assert_not_called()
 
 
 async def test_dispatch_failure_has_controlled_done_and_one_message(entry_api, dependencies):
