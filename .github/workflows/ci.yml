@@ -76,8 +76,9 @@ jobs:
           EMBEDDING_API_KEY: browser-embedding-fixture
           MONITORING_MODE: mock
         run: |
-          (cd apps/server-py && uv run --locked python -m tests.embedding_stub) > /tmp/agentforge-embedding.log 2>&1 &
-          pnpm server:dev > /tmp/agentforge-api.log 2>&1 &
+          # Long-lived uv run processes hold the cache lock and block setup-uv's post-job prune.
+          (cd apps/server-py && exec .venv/bin/python -m tests.embedding_stub) > /tmp/agentforge-embedding.log 2>&1 &
+          (cd apps/server-py && exec .venv/bin/python -m src.dev --no-reload) > /tmp/agentforge-api.log 2>&1 &
           pnpm admin:dev > /tmp/agentforge-admin.log 2>&1 &
           pnpm cs:dev > /tmp/agentforge-customer.log 2>&1 &
           for endpoint in http://localhost:8000/api/health http://localhost:5200 http://localhost:5173; do
